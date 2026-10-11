@@ -212,7 +212,7 @@ async function renderShort(v, file, s, hasAudio, out, onP, words, track) {
 // fertige Datei unter freiem Namen in "geschnitten" ablegen und als Video eintragen
 function publish(tmp, name, fields) {
   const target = lib.freeName('geschnitten', name);
-  fs.renameSync(tmp, path.join(lib.dirOf('geschnitten'), target));
+  lib.moveFile(tmp, path.join(lib.dirOf('geschnitten'), target));
   const st = fs.statSync(path.join(lib.dirOf('geschnitten'), target));
   const nv = lib.newVideo('geschnitten', target);
   Object.assign(nv, { size: st.size, mtime: st.mtimeMs }, fields);
@@ -376,7 +376,11 @@ async function next() {
     if (v && !v.missing) await runCut(v);
   } catch (e) {
     console.error('Schnitt', v?.file, e);
-    if (v) { v.cut = { ...v.cut, state: 'error', error: e.message, step: '' }; saveNow(); }
+    if (v) {
+      v.cut = { ...v.cut, state: 'error', error: e.message, step: '' }; saveNow();
+      // halbfertige Zwischendateien dieses Videos wegräumen (können mehrere GB groß sein)
+      try { for (const f of fs.readdirSync(TMP)) if (f.startsWith(v.id + '-')) fs.rmSync(path.join(TMP, f), { force: true }); } catch { /* egal */ }
+    }
   } finally {
     for (const f of fs.existsSync(TMP) ? fs.readdirSync(TMP) : []) if (f.startsWith(id + '-')) fs.rmSync(path.join(TMP, f), { force: true });
     running = null;

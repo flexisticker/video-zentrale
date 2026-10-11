@@ -175,18 +175,31 @@ async function makeThumb(v) {
   save();
 }
 
-// Video samt Begleitdateien verschieben (gleiches Volume -> rename).
+// Datei verschieben – auch zwischen Laufwerken (z. B. /data → /videos bei Unraid: dort scheitert rename mit EXDEV).
+// Kopiert dann erst unter verstecktem Namen und benennt am Ziel um, damit nie eine halbe Datei als Video erscheint.
+export function moveFile(src, dst) {
+  try { fs.renameSync(src, dst); return; }
+  catch (e) { if (e.code !== 'EXDEV') throw e; }
+  const part = path.join(path.dirname(dst), '.' + path.basename(dst) + '.part');
+  try {
+    fs.copyFileSync(src, part);
+    fs.renameSync(part, dst);
+  } catch (e) { fs.rmSync(part, { force: true }); throw e; }
+  fs.rmSync(src, { force: true });
+}
+
+// Video samt Begleitdateien verschieben.
 export function moveVideo(v, folder) {
   if (!FOLDERS.includes(folder) || folder === v.folder) return;
   const base = path.basename(v.file, path.extname(v.file));
   const target = freeName(folder, v.file);
   const newBase = path.basename(target, path.extname(target));
-  fs.renameSync(fileOf(v), path.join(dirOf(folder), target));
+  moveFile(fileOf(v), path.join(dirOf(folder), target));
   for (const e of [...IMAGE_EXT, '.json']) {
     const src = path.join(dirOf(v.folder), base + e);
     if (fs.existsSync(src)) {
       const dst = path.join(dirOf(folder), newBase + e);
-      if (!fs.existsSync(dst)) fs.renameSync(src, dst);
+      if (!fs.existsSync(dst)) moveFile(src, dst);
     }
   }
   v.folder = folder; v.file = target;

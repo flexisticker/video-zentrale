@@ -92,6 +92,12 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   `/data/sicherung`, `keep` Stück. Wiederherstellen: `store.replace()` (Sitzungen bleiben), vorher `create('vor-wiederherstellung')`.
   Routen `/api/backup[/config|/download|/restore]`. Getestet (Playwright): sichern, herunterladen (unzip ok), ändern, aus Liste und Datei
   wiederherstellen, angemeldet geblieben.
+- 1.8.0 (11.10.2026): **Fehler EXDEV** beim Kunden: Schnitt rendert in `/data/tmp`, `renameSync` nach `/videos` scheitert über
+  Laufwerksgrenzen → `lib.moveFile()` (rename, sonst Kopie als `.<name>.part` + rename + Quelle löschen), auch in `moveVideo`.
+  Bei Schnittfehler werden `/data/tmp/<id>-*` gelöscht. **Regel: zwischen /data und /videos nie `renameSync`, immer `moveFile`.**
+  **KI-Titelbilder nachträglich** (`thumbs.generateAiOptions`, 1–3 Stück → Varianten 5–7, Bildaufbau-Stile `STYLES`, Hochformat 9:16
+  bei Shorts, `ai.ensureFrames()` ohne Claude), Bereich unter dem Titelbild im Detail; `youtube.setThumbnail()` +
+  `POST /api/videos/:id/youtube-thumb` für schon hochgeladene Videos.
 - Einrichtung beim Kunden (11.10.2026): Zentrale läuft über `https://videos.flexisticker.de` (NPM, Access List „Nur Heimnetz“,
   lokaler UniFi-DNS-Eintrag → 192.168.1.111). Browser zeigte trotzdem 403: Chrome/Edge „Sicheres DNS“ fragte Google/Cloudflare
   (öffentliche IP) → ausschalten bzw. „aktueller Dienstanbieter“, `net-internals/#dns` leeren. Prüfung: `curl -I` am PC.

@@ -1,5 +1,11 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.8.0', date: '11.10.2026', items: [
+    'Fehler behoben: Schnitt brach bei Unraid mit „EXDEV: cross-device link not permitted“ ab (appdata und Videos auf verschiedenen Laufwerken). Einfach „Erneut versuchen“ klicken.',
+    'KI-Titelbilder jederzeit nachträglich: im Video unter dem Titelbild 1–3 Vorschläge erzeugen, eigenen Text eingeben, eins anklicken.',
+    'Funktioniert auch ohne Claude-Vorschlag und für Shorts (Hochformat-Cover 9:16).',
+    'Schon auf YouTube? „Titelbild auf YouTube aktualisieren“ tauscht es dort aus.',
+  ] },
   { version: '1.7.0', date: '11.10.2026', items: [
     'Sicherung der Einstellungen: Kanäle, Verbindungen, Schlüssel, Videodaten, Fotos und Transkripte als ZIP.',
     'Täglich automatisch (Uhrzeit und Anzahl einstellbar), jederzeit „Jetzt sichern“ oder herunterladen.',

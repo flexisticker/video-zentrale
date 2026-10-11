@@ -246,30 +246,31 @@ const toDataUri = (file) => {
   return `data:${mime};base64,${buf.toString('base64')}`;
 };
 
-export async function generateAi(v, framePathOf) {
-  if (!fal().key) throw new Error('Kein fal.ai-Schlüssel eingetragen (Einstellungen → Titelbilder).');
-  const idea = v.ai?.aiThumb || { frame: v.ai?.thumbnailFrame || 2, photo: '', text: v.ai?.thumbnailText || v.title, scene: '' };
-  const frame = framePathOf(idea.frame) || framePathOf(2) || framePathOf(1);
-  if (!frame) throw new Error('Keine Standbilder – erst „Vorschlag von Claude“ holen.');
+// Bildaufbau-Ideen für mehrere Vorschläge (Variante 1 = Claudes Szene, falls vorhanden)
+const STYLES = [
+  'Reaction layout: the person large on one side with a strong emotion, the key moment of the video on the other side.',
+  'Close-up: extreme close-up of the person\'s face with an exaggerated emotion, the scene blurred and dramatic behind, headline on the opposite side.',
+  'Focus on the moment: the most important object or action from the frame large in the center, highlighted with a glowing outline or arrow, the person smaller in a corner reacting.',
+];
+
+// Ein KI-Titelbild erzeugen → Variante k
+async function genOne(v, { k, frame, photo, text, scene, vertical }) {
   const ch = profiles.effective(v);
-  const avail = photosFor(ch?.id);
-  const photo = idea.photo === '' && v.ai?.aiThumb ? null : (avail.find((p) => p.label === idea.photo) || avail[0] || null);
-  const text = String(idea.text || '').toUpperCase().slice(0, 40);
   const color = ch?.color || '#7c5cff';
   const images = photo ? [toDataUri(photoPath(photo)), toDataUri(frame)] : [toDataUri(frame)];
   const prompt = [
-    'Create a high-impact, click-worthy YouTube thumbnail in 16:9.',
+    `Create a high-impact, click-worthy ${vertical ? 'vertical 9:16 cover for a short video (TikTok / YouTube Shorts)' : 'YouTube thumbnail in 16:9'}.`,
     photo ? 'Use the person from the FIRST image as the main subject: keep his face, identity, hairstyle and skin tone exactly the same; large, sharp and well lit, filling about 40% of the frame.' : '',
     `Use the ${photo ? 'SECOND' : 'FIRST'} image (a frame from the video) as the scene and background reference.`,
-    idea.scene ? 'Composition: ' + idea.scene : '',
-    text ? `Add the headline text "${text}" in huge bold uppercase letters with a thick dark outline, spelled exactly like that, at most two lines, highly readable on a phone.` : '',
-    `Accent color ${color}. Vivid colors, strong contrast, depth, professional YouTube style.`,
+    scene ? 'Composition: ' + scene : '',
+    text ? `Add the headline text "${text}" in huge bold uppercase letters with a thick dark outline, spelled exactly like that, at most two lines, highly readable on a phone.` : 'No text.',
+    `Accent color ${color}. Vivid colors, strong contrast, depth, professional ${vertical ? 'short-video' : 'YouTube'} style.`,
     'No other text, no watermarks, no logos, no borders.',
   ].filter(Boolean).join(' ');
   const r = await fetch(`${FAL}/${fal().genModel || 'fal-ai/nano-banana/edit'}`, {
     method: 'POST',
     headers: { Authorization: 'Key ' + fal().key, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, image_urls: images, aspect_ratio: '16:9', output_format: 'jpeg', num_images: 1 }),
+    body: JSON.stringify({ prompt, image_urls: images, aspect_ratio: vertical ? '9:16' : '16:9', output_format: 'jpeg', num_images: 1 }),
   });
   const j = await r.json().catch(() => ({}));
   if (r.status === 401 || r.status === 403) throw new Error('fal.ai-Schlüssel ungültig.');
@@ -278,15 +279,54 @@ export async function generateAi(v, framePathOf) {
   if (!r.ok || !url) throw new Error('fal.ai: ' + (j.detail?.[0]?.msg || j.detail || j.error || r.status));
   const img = await fetch(url);
   if (!img.ok) throw new Error('fal.ai: Ergebnis nicht abrufbar.');
-  fs.mkdirSync(TMP, { recursive: true });
-  const raw = path.join(TMP, `${v.id}-ai-raw`);
+  fs.mkdirSync(TMP, { recursive: true }); fs.mkdirSync(VAR_DIR, { recursive: true });
+  const raw = path.join(TMP, `${v.id}-ai-raw-${k}`);
   fs.writeFileSync(raw, Buffer.from(await img.arrayBuffer()));
-  const res = await ffmpeg(['-i', raw, '-vf', 'scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720', '-frames:v', '1', '-q:v', '3', variantPath(v, 5)]);
+  const size = vertical ? '1080:1920' : '1280:720';
+  const res = await ffmpeg(['-i', raw, '-vf', `scale=${size}:force_original_aspect_ratio=increase,crop=${size}`, '-frames:v', '1', '-q:v', '3', variantPath(v, k)]);
   fs.rmSync(raw, { force: true });
   if (res.code !== 0) throw new Error('KI-Bild nicht lesbar.');
   fal().generated = (fal().generated || 0) + 1;
-  v.thumbVariants = [{ k: 5, text, ai: true, gen: true, photo: photo?.label || '' }, ...(v.thumbVariants || []).filter((x) => x.k !== 5)];
+  return { k, text, ai: true, gen: true, photo: photo?.label || '', vertical: !!vertical };
+}
+
+// Bisheriger Einzelaufruf (automatisch nach Claudes Vorschlag): ein KI-Titelbild → Variante 5
+export async function generateAi(v, framePathOf) {
+  return generateAiOptions(v, framePathOf, { count: 1 });
+}
+
+// 1–3 KI-Titelbilder zur Auswahl → Varianten 5, 6, 7 (ersetzen frühere KI-Titelbilder).
+// Geht auch nachträglich und ohne Claude-Vorschlag (dann Titel als Text, Standbilder gleichmäßig verteilt).
+export async function generateAiOptions(v, framePathOf, { count = 1, text: customText } = {}) {
+  if (!fal().key) throw new Error('Kein fal.ai-Schlüssel eingetragen (Einstellungen → Titelbilder).');
+  const n = Math.max(1, Math.min(3, Number(count) || 1));
+  const idea = v.ai?.aiThumb || { frame: v.ai?.thumbnailFrame || 2, photo: '', text: v.ai?.thumbnailText || '', scene: '' };
+  const frames = [idea.frame, 2, 4, 3, 5, 1, 6].filter((x, i, a) => a.indexOf(x) === i).map((x) => framePathOf(x)).filter(Boolean);
+  if (!frames.length) throw new Error('Keine Standbilder vom Video.');
+  const ch = profiles.effective(v);
+  const avail = photosFor(ch?.id);
+  // Claude wollte bewusst kein Foto (z. B. 3D-Druck-Produkt im Fokus) → erste Variante ohne Foto
+  const first = idea.photo === '' && v.ai?.aiThumb ? null : (avail.find((p) => p.label === idea.photo) || avail[0] || null);
+  const others = avail.filter((p) => p !== first);
+  const shortTitle = String(v.title || '').replace(/[#|–-].*$/, '').split(/\s+/).slice(0, 4).join(' ');
+  const text = String(customText != null && String(customText).trim() ? customText : (idea.text || shortTitle)).toUpperCase().slice(0, 40);
+  const vertical = v.height > v.width;
+  const jobs = [];
+  for (let i = 0; i < n; i++) {
+    jobs.push({ k: 5 + i, frame: frames[i % frames.length], photo: i === 0 ? first : (others[i - 1] || avail[0] || null),
+      text, scene: i === 0 && idea.scene ? idea.scene : STYLES[(idea.scene ? i - 1 : i) % STYLES.length], vertical });
+  }
+  // fal erlaubt neuen Konten 2 gleichzeitige Anfragen
+  const results = [];
+  const errors = [];
+  for (let i = 0; i < jobs.length; i += 2) {
+    const part = await Promise.allSettled(jobs.slice(i, i + 2).map((j) => genOne(v, j)));
+    for (const r of part) r.status === 'fulfilled' ? results.push(r.value) : errors.push(r.reason?.message || String(r.reason));
+  }
+  if (!results.length) throw new Error(errors[0] || 'KI-Titelbild fehlgeschlagen.');
+  v.thumbVariants = [...results, ...(v.thumbVariants || []).filter((x) => !x.gen)];
   v.thumbVariantsAt = Date.now();
+  if (v.ai) v.ai.aiThumbError = errors.length ? `${errors.length} von ${n} nicht erzeugt: ${errors[0]}` : '';
   saveNow();
   return v.thumbVariants;
 }

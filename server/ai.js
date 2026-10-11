@@ -48,6 +48,13 @@ function ffmpeg(args) {
   });
 }
 
+// Standbilder sicherstellen (auch ohne Claude-Vorschlag, z. B. für KI-Titelbilder) → Nummern der vorhandenen Bilder
+export async function ensureFrames(v) {
+  const have = FRAMES.map((_, i) => i + 1).filter((n) => fs.existsSync(framePath(v, n)));
+  if (have.length >= 3) return have;
+  return (await extractFrames(v)).map((x) => x.n);
+}
+
 async function extractFrames(v) {
   fs.mkdirSync(FRAME_DIR, { recursive: true });
   const out = [];

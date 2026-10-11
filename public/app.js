@@ -395,6 +395,7 @@ function openDetail(id) {
   const ytBox = h('div', { class: 'section' });
   const ttBox = h('div', { class: 'section' });
   const moveBox = h('div', { class: 'row' });
+  const genBox = h('div', { class: 'section gen-thumbs' });
 
   const left = h('div', {}, player,
     h('div', { class: 'coverbox' }, cover, h('div', { class: 'acts' },
@@ -405,6 +406,7 @@ function openDetail(id) {
       h('span', { class: 'hint' }, 'YouTube: 1280 × 720, max. 2 MB (wird automatisch angepasst).'), imgInput)),
     h('div', { class: 'meta', style: { marginTop: '10px' } },
       v.file, ' · ', fmtSize(v.size), v.width ? ` · ${v.width} × ${v.height}` : '', v.duration ? ' · ' + fmtDur(v.duration) : ''),
+    genBox,
     h('div', { style: { marginTop: '10px' } }, moveBox), cutBox, transcriptBox);
 
   const aiBox = h('div', { class: 'section ai' });
@@ -438,7 +440,7 @@ function openDetail(id) {
     try { Object.assign(v, await api('POST', `/api/videos/${v.id}/ai-frame/${n}/cover`)); setCover(); toast('Titelbild übernommen.'); }
     catch (x) { toast(x.message, true); }
   };
-  detail = { id, cutBox, transcriptBox, v, ytBox, ttBox, moveBox, folderEl, ensureSaved, chanInfo, chan, aiBox, f, setField, setCover, setCoverFromFrame, isDirty: () => !saveBtn.disabled, markClean: () => { saveBtn.disabled = true; }, cleanup: () => document.removeEventListener('keydown', onKey) };
+  detail = { id, cutBox, transcriptBox, v, ytBox, ttBox, moveBox, folderEl, ensureSaved, chanInfo, chan, aiBox, genBox, f, setField, setCover, setCoverFromFrame, isDirty: () => !saveBtn.disabled, markClean: () => { saveBtn.disabled = true; }, cleanup: () => document.removeEventListener('keydown', onKey) };
   updateDetail();
 }
 
@@ -505,6 +507,48 @@ function platformBox(box, v, key, label, color) {
   box.replaceChildren(...[...kids, actions].filter(Boolean));
 }
 
+// KI-Titelbilder: 1–3 Vorschläge, jederzeit (auch nachträglich), Klick = als Titelbild übernehmen
+function renderGenThumbs(box, v) {
+  const fal = S.settings?.fal;
+  const gens = (v.thumbVariants || []).filter((t) => t.gen);
+  const vertical = v.height > v.width;
+  if (!fal?.configured) { box.replaceChildren(h('p', { class: 'hint' }, '✨ KI-Titelbilder: erst unter Einstellungen → Titelbilder & Fotos den fal.ai-Schlüssel eintragen.')); return; }
+  const idea = v.ai?.aiThumb?.text || v.ai?.thumbnailText || '';
+  const text = h('input', { value: box.dataset.text ?? idea, placeholder: 'Text auf dem Bild (leer = Vorschlag bzw. Titel)', maxlength: 40,
+    oninput: () => { box.dataset.text = text.value; } });
+  const count = h('select', {}, [1, 2, 3].map((n) => h('option', { value: n, selected: Number(box.dataset.count || 3) === n }, n + (n === 1 ? ' Bild' : ' Bilder'))));
+  count.addEventListener('change', () => { box.dataset.count = count.value; });
+  const go = h('button', { class: 'btn small primary', onclick: async () => {
+    const n = Number(count.value);
+    go.disabled = true; go.textContent = `✨ KI malt ${n} … (ca. ${n > 2 ? '20–40' : '10–20'} s)`;
+    try { Object.assign(v, await api('POST', `/api/videos/${v.id}/aithumbs`, { count: n, text: text.value })); await refresh(); updateDetail(true);
+      toast(n > 1 ? `${n} KI-Titelbilder fertig – eins anklicken zum Übernehmen.` : 'KI-Titelbild fertig – anklicken zum Übernehmen.'); }
+    catch (x) { toast(x.message, true); go.disabled = false; go.textContent = '✨ Erzeugen'; }
+  } }, gens.length ? '✨ Neue erzeugen' : '✨ Erzeugen');
+  const pick = async (t) => {
+    try { Object.assign(v, await api('POST', `/api/videos/${v.id}/variant/${t.k}/cover`)); detail?.setCover(); renderGenThumbs(box, v);
+      toast(v.yt?.id ? 'Titelbild übernommen – mit „Auf YouTube aktualisieren“ auch dort ändern.' : 'Titelbild übernommen.'); }
+    catch (x) { toast(x.message, true); }
+  };
+  const ytBtn = v.yt?.id ? h('button', { class: 'btn small', onclick: async (e) => {
+    e.target.disabled = true;
+    try { Object.assign(v, await api('POST', `/api/videos/${v.id}/youtube-thumb`)); toast('Titelbild auf YouTube aktualisiert.'); renderGenThumbs(box, v); return; }
+    catch (x) { toast(x.message, true); }
+    e.target.disabled = false;
+  } }, '⤒ Titelbild auf YouTube aktualisieren') : null;
+  box.replaceChildren(...[
+    h('b', {}, '✨ KI-Titelbilder ', h('span', { class: 'hint' }, `(${vertical ? 'Hochformat-Cover 9:16' : '16:9'}, ca. 4 Cent je Bild)`)),
+    h('div', { class: 'row gen-row' }, text, count, go),
+    gens.length ? h('div', { class: 'variants gen-list' + (vertical ? ' vertical' : '') }, gens.map((t) => {
+      const b = h('button', { class: 'variant', title: (t.text || 'ohne Text') + (t.photo ? ' · Foto: ' + t.photo : '') + ' – als Titelbild nehmen', onclick: () => pick(t) });
+      b.style.backgroundImage = `url("/api/videos/${v.id}/variant/${t.k}?t=${v.thumbVariantsAt || 0}")`;
+      return b;
+    })) : h('p', { class: 'hint' }, 'Aus deinem Foto, einem Standbild und dem Text malt die KI fertige Titelbilder – mehrere zur Auswahl.'),
+    v.ai?.aiThumbError ? h('div', { class: 'status err' }, v.ai.aiThumbError) : null,
+    ytBtn ? h('div', { class: 'row', style: { marginTop: '6px' } }, ytBtn, v.yt?.thumbAt ? h('span', { class: 'hint' }, '✓ zuletzt ' + fmtDate(v.yt.thumbAt)) : null) : null,
+  ].filter(Boolean));
+}
+
 function renderAi(box, v) {
   const a = v.ai || {};
   const conf = S.settings?.ai?.configured;
@@ -532,8 +576,8 @@ function renderAi(box, v) {
           if (a.channel && !d.chan.value) { d.chan.value = a.channel; d.chan.dispatchEvent(new Event('change')); }
           toast('Übernommen – noch speichern.');
         } }, 'Alles übernehmen')),
-      v.thumbVariants?.length ? h('div', {}, h('b', { class: 'meta' }, 'Titelbild-Varianten – anklicken zum Übernehmen:'),
-        h('div', { class: 'variants' }, v.thumbVariants.map((t) => {
+      v.thumbVariants?.some((t) => !t.gen) ? h('div', {}, h('b', { class: 'meta' }, 'Titelbild-Varianten – anklicken zum Übernehmen:'),
+        h('div', { class: 'variants' }, v.thumbVariants.filter((t) => !t.gen).map((t) => {
           const b = h('button', { class: 'variant', title: (t.ai ? 'KI-Aufwertung' : t.text + (t.photo ? ' · ' + t.photo : '')) + ' – als Titelbild nehmen',
             onclick: async () => { try { Object.assign(v, await api('POST', `/api/videos/${v.id}/variant/${t.k}/cover`)); d.setCover(); toast('Titelbild übernommen.'); } catch (x) { toast(x.message, true); } } });
           b.style.backgroundImage = `url("/api/videos/${v.id}/variant/${t.k}?t=${v.thumbVariantsAt || 0}")`;
@@ -546,13 +590,8 @@ function renderAi(box, v) {
           return wrap;
         })),
         h('div', { class: 'row' },
-          S.settings?.fal?.configured && v.width > v.height ? h('button', { class: 'btn small primary', onclick: async (e) => {
-            e.target.disabled = true; e.target.textContent = '✨ KI malt … (ca. 10–20 s)';
-            try { Object.assign(v, await api('POST', `/api/videos/${v.id}/aithumb`)); await refresh(); updateDetail(true); toast('KI-Titelbild fertig.'); }
-            catch (x) { toast(x.message, true); e.target.disabled = false; e.target.textContent = '✨ KI-Titelbild erzeugen'; }
-          } }, v.thumbVariants.some((t) => t.gen) ? '✨ Neues KI-Titelbild' : '✨ KI-Titelbild erzeugen') : null,
           h('button', { class: 'btn small ghost', onclick: async () => { try { Object.assign(v, await api('POST', `/api/videos/${v.id}/variants`)); await refresh(); updateDetail(true); toast('Neu erzeugt.'); } catch (x) { toast(x.message, true); } } }, '↻ Varianten neu bauen (z. B. nach neuen Fotos)')),
-        a.aiThumbError ? h('div', { class: 'status err' }, 'KI-Titelbild: ' + a.aiThumbError) : null) : null,
+        ) : null,
       a.frames?.length ? h('details', {}, h('summary', { class: 'meta' }, 'Standbilder – Claude empfiehlt Bild ' + a.thumbnailFrame + (a.thumbnailText ? ', Text: „' + a.thumbnailText + '“' : '') + ':'),
         h('div', { class: 'frames' }, a.frames.map((n) => {
           const b = h('button', { class: 'frame' + (n === a.thumbnailFrame ? ' best' : ''), title: 'Als Titelbild nehmen', onclick: () => d.setCoverFromFrame(n) });
@@ -633,6 +672,7 @@ function updateDetail(force) {
       thumbVariants: v.thumbVariants, thumbVariantsAt: v.thumbVariantsAt });
     detail.setCover(); detail.chanInfo();
     detail.aiBox.replaceChildren(); renderAi(detail.aiBox, detail.v);
+    renderGenThumbs(detail.genBox, detail.v);
   }
   // Felder nicht überschreiben, nur Status-Teile
   Object.assign(detail.v, { yt: v.yt, tt: v.tt, folder: v.folder, file: v.file, hasImage: v.hasImage, imageVersion: v.imageVersion });

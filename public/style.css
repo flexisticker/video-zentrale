@@ -200,3 +200,12 @@ input.color.small { width: 60px; height: 32px; }
 .bkrow > span:first-child { flex: 1; min-width: 160px; }
 
 a.btn { text-decoration: none; display: inline-flex; align-items: center; }
+
+/* KI-Titelbilder */
+.gen-thumbs { margin-top: 12px; }
+.gen-row { margin: 8px 0; flex-wrap: wrap; }
+.gen-row input { flex: 1; min-width: 180px; }
+.gen-row select { width: auto; flex: 0 0 auto; }
+.gen-list { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.gen-list.vertical { grid-template-columns: repeat(auto-fill, minmax(90px, 140px)); }
+.gen-list.vertical .variant { aspect-ratio: 9 / 16; }

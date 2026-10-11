@@ -206,25 +206,26 @@ export async function upload(v, p, filePath, imagePath, progress) {
   } finally { fs.closeSync(fd); }
   progress(size, size);
 
-  let thumbError = '';
-  if (imagePath && result?.id) {
-    try {
-      let img = fs.readFileSync(imagePath);
-      const type = imagePath.endsWith('.png') ? 'image/png' : 'image/jpeg';
-      if (img.length > 2 * 1024 * 1024) throw new Error('Titelbild größer als 2 MB');
-      const r = await fetch(API + '/upload/youtube/v3/thumbnails/set?videoId=' + encodeURIComponent(result.id), {
-        method: 'POST', headers: { Authorization: 'Bearer ' + await token(), 'Content-Type': type }, body: img });
-      if (!r.ok) {
-        const j = await r.json().catch(() => null);
-        thumbError = j?.error?.errors?.[0]?.reason === 'forbidden'
-          ? 'Titelbild nicht gesetzt: Kanal muss bei YouTube bestätigt sein (Telefonnummer).' : 'Titelbild nicht gesetzt: ' + apiError(j, r.status);
-      }
-    } catch (e) { thumbError = 'Titelbild nicht gesetzt: ' + e.message; }
-  }
+  const thumbError = imagePath && result?.id ? await setThumbnail(result.id, p, imagePath) : '';
   return { id: result.id, privacy: result.status?.privacyStatus || 'private', thumbError };
 }
 
 const tokenFor = token;
+
+// Titelbild eines (schon hochgeladenen) Videos setzen → '' oder Fehlertext
+export async function setThumbnail(videoId, p, imagePath) {
+  try {
+    const img = fs.readFileSync(imagePath);
+    const type = imagePath.endsWith('.png') ? 'image/png' : 'image/jpeg';
+    if (img.length > 2 * 1024 * 1024) throw new Error('Titelbild größer als 2 MB');
+    const r = await fetch(API + '/upload/youtube/v3/thumbnails/set?videoId=' + encodeURIComponent(videoId), {
+      method: 'POST', headers: { Authorization: 'Bearer ' + await token(p), 'Content-Type': type }, body: img });
+    if (r.ok) return '';
+    const j = await r.json().catch(() => null);
+    return j?.error?.errors?.[0]?.reason === 'forbidden'
+      ? 'Titelbild nicht gesetzt: Kanal muss bei YouTube bestätigt sein (Telefonnummer).' : 'Titelbild nicht gesetzt: ' + apiError(j, r.status);
+  } catch (e) { return 'Titelbild nicht gesetzt: ' + e.message; }
+}
 
 export function init() {
   for (const p of profiles.list()) if (conn(p).refreshToken && !conn(p).channel) loadChannel(p).catch(() => {});

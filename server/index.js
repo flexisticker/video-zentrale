@@ -309,11 +309,23 @@ async function api(req, res, url) {
       if (fm[2] && m === 'POST') { lib.setImage(v, fs.readFileSync(file), '.jpg'); return send(res, 200, publicVideo(v)); }
     }
     let vm;
-    if (sub === '/aithumb' && m === 'POST') {
-      await thumbs.generateAi(v, (n) => { const f = ai2.framePath(v, n); return fs.existsSync(f) ? f : null; });
+    if ((sub === '/aithumb' || sub === '/aithumbs') && m === 'POST') {
+      const b = sub === '/aithumbs' ? await readJson(req) : {};
+      await ai2.ensureFrames(v);
+      await thumbs.generateAiOptions(v, (n) => { const f = ai2.framePath(v, n); return fs.existsSync(f) ? f : null; }, { count: b.count || 1, text: b.text });
       return send(res, 200, publicVideo(v));
     }
-    if ((vm = /^\/variant\/([1-5])(\/cover|\/boost)?$/.exec(sub))) {
+    if (sub === '/youtube-thumb' && m === 'POST') {
+      if (!v.yt?.id) throw new HttpError(409, 'Video ist noch nicht auf YouTube.');
+      const prof = profiles.get(v.yt.profileId) || profiles.effective(v);
+      const img = lib.imagePath(v);
+      if (!prof || !img || !fs.existsSync(img)) throw new HttpError(409, 'Kein Titelbild bzw. Kanal unbekannt.');
+      const err = await youtube.setThumbnail(v.yt.id, prof, img);
+      if (err) throw new HttpError(502, err);
+      v.yt = { ...v.yt, thumbAt: new Date().toISOString(), thumbError: '' }; saveNow();
+      return send(res, 200, publicVideo(v));
+    }
+    if ((vm = /^\/variant\/([1-7])(\/cover|\/boost)?$/.exec(sub))) {
       const k = Number(vm[1]), file = thumbs.variantPath(v, k);
       if (!vm[2] && m === 'GET') { if (!fs.existsSync(file)) throw new HttpError(404, 'Variante fehlt.'); return sendFile(req, res, file, 'image/jpeg'); }
       if (vm[2] === '/cover' && m === 'POST') { lib.setImage(v, fs.readFileSync(file), '.jpg'); return send(res, 200, publicVideo(v)); }
