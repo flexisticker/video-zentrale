@@ -536,7 +536,13 @@ function platformBox(box, v, key, label, color) {
     if (key === 'yt') {
       kids.push(h('div', { class: 'status ok-text' }, s.manual ? '✓ Als erledigt markiert ' : `✓ Hochgeladen (${s.privacy === 'public' ? 'öffentlich' : 'privat'}) `,
         s.profileName ? 'auf „' + (s.channelTitle || s.profileName) + '“ ' : '', fmtDate(s.at)));
+      // Titelbild: eindeutig anzeigen, ob YouTube es angenommen hat
+      const vert = s.vertical ?? (v.height > v.width);
       if (s.thumbError) kids.push(h('div', { class: 'status err' }, s.thumbError));
+      else if (s.thumbAt) kids.push(h('div', { class: 'status ok-text' }, '✓ Titelbild an YouTube übermittelt (' + fmtDate(s.thumbAt) + ')'),
+        vert ? h('div', { class: 'hint' }, 'Short: YouTube zeigt bei Shorts eigene Titelbilder oft nicht an. Zuverlässig in der YouTube-App: Short öffnen → Bearbeiten → Titelbild/Cover wählen.') : null);
+      else if (s.thumbNone) kids.push(h('div', { class: 'hint' }, 'Ohne Titelbild hochgeladen – Titelbild wählen und „Titelbild auf YouTube aktualisieren“ klicken.'));
+      else if (!s.manual) kids.push(h('div', { class: 'hint' }, 'Titelbild-Status unbekannt (Upload vor Version 1.9.3) – bei Bedarf „Titelbild auf YouTube aktualisieren“ klicken.'));
       const chId = s.channelId || profileOf(s.profileId)?.youtube?.channel?.id || '';
       const chName = s.channelTitle || s.profileName || '';
       kids.push(h('div', { class: 'row' },

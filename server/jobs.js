@@ -93,6 +93,7 @@ async function next() {
       const r = await youtube.upload(v, p, file, img, progress);
       v.yt = { ...v.yt, state: 'done', progress: 100, id: r.id, url: 'https://youtu.be/' + r.id,
         studio: 'https://studio.youtube.com/video/' + r.id + '/edit', privacy: r.privacy, thumbError: r.thumbError,
+        thumbAt: r.thumbSent ? new Date().toISOString() : '', thumbNone: !img, vertical: v.height > v.width,
         error: '', at: new Date().toISOString(),
         channelTitle: p.youtube.channel?.title || '', channelId: p.youtube.channel?.id || '',
         history: [...(v.yt.history || []), { id: r.id, profileId: p.id, at: new Date().toISOString() }] };

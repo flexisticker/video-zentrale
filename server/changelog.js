@@ -1,5 +1,8 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.9.3', date: '11.10.2026', items: [
+    'YouTube: Die Zentrale zeigt jetzt eindeutig, ob das Titelbild übermittelt wurde (✓ mit Uhrzeit, Fehlertext oder „ohne Titelbild hochgeladen“), bei Shorts mit Hinweis auf die YouTube-App.',
+  ] },
   { version: '1.9.2', date: '11.10.2026', items: [
     'YouTube: zusätzlicher Knopf „Videos von <Kanal> in Studio“ und Hinweis, falls Studio „Ein Fehler ist aufgetreten“ zeigt (dann ist dort ein anderer Kanal aktiv).',
   ] },

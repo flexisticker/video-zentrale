@@ -114,6 +114,9 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
 - 1.9.2: Studio-Link `studio.youtube.com/video/<id>/edit` zeigt „Ein Fehler ist aufgetreten“, wenn im Browser ein anderer Brand-Kanal aktiv ist.
   Jetzt zusätzlich `studio.youtube.com/channel/<UC…>/videos/upload` (`v.yt.channelId`) + Hinweis „Konto wechseln“. Nicht live geprüft, ob Studio
   über die Kanal-Adresse selbst umschaltet.
+- 1.9.3: Titelbild-Status am Upload (`v.yt.thumbAt`, `thumbNone`, `vertical`). Beim Kunden: Short-Titelbild erschien in Studio nicht,
+  Telefonnummer ist bestätigt → vermutlich ignoriert YouTube API-Titelbilder bei Shorts (nicht belegt). Offen: bei bestätigtem Verhalten
+  Shorts ohne Titelbild-Versuch + Hinweis App.
 - Einrichtung beim Kunden (11.10.2026): Zentrale läuft über `https://videos.flexisticker.de` (NPM, Access List „Nur Heimnetz“,
   lokaler UniFi-DNS-Eintrag → 192.168.1.111). Browser zeigte trotzdem 403: Chrome/Edge „Sicheres DNS“ fragte Google/Cloudflare
   (öffentliche IP) → ausschalten bzw. „aktueller Dienstanbieter“, `net-internals/#dns` leeren. Prüfung: `curl -I` am PC.

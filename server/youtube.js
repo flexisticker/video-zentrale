@@ -207,7 +207,7 @@ export async function upload(v, p, filePath, imagePath, progress) {
   progress(size, size);
 
   const thumbError = imagePath && result?.id ? await setThumbnail(result.id, p, imagePath) : '';
-  return { id: result.id, privacy: result.status?.privacyStatus || 'private', thumbError };
+  return { id: result.id, privacy: result.status?.privacyStatus || 'private', thumbError, thumbSent: !!imagePath && !thumbError };
 }
 
 const tokenFor = token;
