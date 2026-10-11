@@ -7,6 +7,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { db, save, saveNow, DATA_DIR } from './store.js';
 import * as profiles from './profiles.js';
 import { fileOf, setImage } from './library.js';
+import * as whisper from './whisper.js';
 
 const MODEL = 'claude-opus-5-5';
 const FRAMES = [0.08, 0.25, 0.42, 0.58, 0.75, 0.92];
@@ -102,6 +103,7 @@ function prompt(v, frames, extra) {
     `- Länge: ${v.duration ? Math.round(v.duration) + ' Sekunden' : 'unbekannt'}, ${orient}`,
     v.tags ? `- Bisherige Tags: ${v.tags}` : '',
     v.note ? `- Notiz des Creators: ${v.note}` : '',
+    v.transcriptText ? `- Gesprochener Text (automatisch erkannt, kann Fehler enthalten): „${v.transcriptText.slice(0, 12000)}“` : '',
     v.channel ? `- Der Creator hat den Kanal "${v.channel}" gewählt – schreibe passend dazu.` : '',
     extra ? `- Hinweis für diesen Vorschlag: ${extra}` : '',
     '',
@@ -129,6 +131,10 @@ function friendly(e) {
 
 // Vorschlag erzeugen und am Video speichern.
 export async function suggest(v, extra = '') {
+  // Gesprochenes erkennen, wenn Whisper an ist und das Video noch kein Transkript hat (z. B. von Hand geschnitten)
+  if (!v.transcriptText && !v.source && db().cut?.whisper?.enabled) {
+    try { const segs = await whisper.transcribe(fileOf(v), v.id); whisper.saveTranscript(v, segs); } catch { /* ohne Ton weiter */ }
+  }
   const frames = await extractFrames(v);
   const ids = profiles.list().map((p) => p.id);
   const content = [{ type: 'text', text: prompt(v, frames, extra) }];
@@ -182,6 +188,73 @@ export async function suggest(v, extra = '') {
   }
   saveNow();
   return v.ai;
+}
+
+// Aus Kandidaten-Stellen eines Rohvideos die besten Shorts wählen.
+// cands: [{start, end, peak, scenes}] (Sekunden); segs: Whisper-Segmente oder null.
+export async function chooseHighlights(v, cands, segs, c) {
+  fs.mkdirSync(FRAME_DIR, { recursive: true });
+  const content = [{ type: 'text', text: [
+    'Du schneidest aus einer Rohaufnahme die besten Kurzvideos (Shorts/TikTok) für einen deutschen Creator.',
+    `Wähle bis zu ${c.shorts} Stellen, die allein funktionieren: klarer Moment (Sieg, Fail, Überraschung, Lacher, Erklärung mit Pointe),`,
+    'starker Anfang in den ersten 2 Sekunden, Ende nach der Pointe. Lieber weniger, wenn nichts taugt (dann leere Liste).',
+    `Länge je Short ${c.shortMin}–${c.shortMax} Sekunden. Start/Ende dürfen bis zu 15 Sekunden um den Kandidaten verschoben werden.`,
+    `Video: „${v.file}“, Länge ${whisper.fmtTime(v.duration)}. ${v.note ? 'Notiz: ' + v.note : ''}`,
+    segs?.length ? 'Gesprochenes ist je Kandidat angegeben (automatisch erkannt, kann Fehler enthalten).' : 'Kein gesprochener Text verfügbar.',
+    '',
+    'Kandidaten (aus Lautstärke und Bildwechseln vorsortiert); zu jedem folgt ein Standbild aus der Mitte:',
+  ].join('\n') }];
+  for (let i = 0; i < cands.length; i++) {
+    const k = cands[i];
+    const mid = (k.start + k.end) / 2;
+    const file = path.join(FRAME_DIR, `${v.id}-k${i + 1}.jpg`);
+    const ok = await ffmpeg(['-hide_banner', '-loglevel', 'error', '-y', '-ss', mid.toFixed(2), '-i', fileOf(v),
+      '-vf', "scale='if(gt(iw,ih),min(640,iw),-2)':'if(gt(iw,ih),-2,min(640,ih))'", '-frames:v', '1', '-q:v', '5', file]);
+    const said = segs ? whisper.textOf(segs, k.start - 5, k.end + 5).slice(0, 600) : '';
+    content.push({ type: 'text', text: `Kandidat ${i + 1}: ${whisper.fmtTime(k.start)}–${whisper.fmtTime(k.end)} (Sekunde ${k.start}–${k.end}), `
+      + `lauteste Stelle ${k.peak} LUFS, ${k.scenes} Bildwechsel${said ? `, gesagt: „${said}“` : ''}` });
+    if (ok && fs.existsSync(file)) {
+      content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: fs.readFileSync(file).toString('base64') } });
+      fs.rmSync(file, { force: true });
+    }
+  }
+  const schemaH = {
+    type: 'object', additionalProperties: false, required: ['shorts'],
+    properties: { shorts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['candidate', 'start', 'end', 'title', 'reason'],
+      properties: {
+        candidate: { type: 'integer', description: 'Nummer des Kandidaten' },
+        start: { type: 'number', description: 'Start in Sekunden ab Videoanfang' },
+        end: { type: 'number', description: 'Ende in Sekunden ab Videoanfang' },
+        title: { type: 'string', description: 'Kurzer, packender Titel für den Short (höchstens 70 Zeichen)' },
+        reason: { type: 'string', description: 'Ein Satz: warum diese Stelle' },
+      } } } },
+  };
+  let r;
+  try {
+    r = await api().beta.messages.create({
+      model: MODEL, max_tokens: 16000,
+      betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
+      output_config: { effort: 'medium', format: { type: 'json_schema', schema: schemaH } },
+      messages: [{ role: 'user', content }],
+    });
+  } catch (e) { throw new Error(friendly(e)); }
+  if (r.stop_reason === 'refusal') throw new Error('abgelehnt');
+  const out = JSON.parse(r.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
+  const cost = (r.usage?.input_tokens || 0) * PRICE.input + (r.usage?.output_tokens || 0) * PRICE.output;
+  const a = cfg(); a.spent = Math.round(((a.spent || 0) + cost) * 10000) / 10000; a.count = (a.count || 0) + 1; save();
+  const dur = v.duration;
+  const picked = [];
+  for (const s of (out.shorts || []).slice(0, c.shorts)) {
+    const k = cands[s.candidate - 1];
+    if (!k) continue;
+    let start = Math.max(0, Math.max(k.start - 15, Math.min(Number(s.start), k.end)));
+    let end = Math.min(dur, Math.min(k.end + 15, Math.max(Number(s.end), start + c.shortMin)));
+    if (end - start > c.shortMax) end = start + c.shortMax;
+    if (end - start < Math.min(c.shortMin, 10)) continue;
+    if (picked.some((p) => start < p.end && end > p.start)) continue;
+    picked.push({ start: Math.round(start * 10) / 10, end: Math.round(end * 10) / 10, title: String(s.title || '').slice(0, 100), reason: String(s.reason || '').slice(0, 300) });
+  }
+  return picked;
 }
 
 // ---- Warteschlange (eins nach dem anderen) ----

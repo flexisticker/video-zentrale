@@ -8,7 +8,7 @@ import { db, save, DATA_DIR } from './store.js';
 import * as profiles from './profiles.js';
 
 export const VIDEO_DIR = process.env.VIDEO_DIR || '/videos';
-export const FOLDERS = ['eingang', 'geschnitten', 'hochgeladen'];
+export const FOLDERS = ['eingang', 'geschnitten', 'hochgeladen', 'rohvideos'];
 export const VIDEO_EXT = ['.mp4', '.mov', '.mkv', '.webm', '.m4v'];
 const IMAGE_EXT = ['.jpg', '.jpeg', '.png', '.webp'];
 const THUMB_DIR = path.join(DATA_DIR, 'thumbs');

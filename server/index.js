@@ -12,6 +12,8 @@ import * as tiktok from './tiktok.js';
 import * as jobs from './jobs.js';
 import * as profiles from './profiles.js';
 import * as ai from './ai.js';
+import * as autocut from './autocut.js';
+import * as whisper from './whisper.js';
 
 const PORT = Number(process.env.PORT || 8090);
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -23,7 +25,9 @@ lib.ensureDirs();
 jobs.init();
 youtube.init();
 ai.init();
-const scanAll = () => lib.scan().then(() => ai.autoQueue());
+autocut.init();
+const scanAll = () => lib.scan().then(() => { ai.autoQueue(); autocut.autoQueue(); });
+autocut.onDone(() => scanAll().catch(() => {}));
 
 // ---------- Hilfen ----------
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
@@ -91,6 +95,7 @@ function checkLimit(ip) {
 function publicVideo(v) {
   const strip = (s) => s && { ...s, history: undefined, historyCount: s.history?.length || 0 };
   return { ...v, yt: strip(v.yt), tt: strip(v.tt), suggestion: profiles.suggest(v),
+    transcriptText: undefined, hasTranscript: !!v.transcriptText,
     imageVersion: v.image ? (v.imageAt || v.mtime) : v.thumbAt, hasImage: !!lib.imagePath(v) };
 }
 
@@ -139,11 +144,18 @@ async function api(req, res, url) {
 
   if (p === '/api/health') return send(res, 200, { ok: true, version: VERSION });
 
-  // TikTok leitet hierher zurück (ohne Sitzungs-Cookie, abgesichert über "state").
-  if (p === '/oauth/tiktok' && m === 'GET') {
-    try { const p = await tiktok.finishConnect(url.href); res.writeHead(302, { Location: '/?tiktok=ok&kanal=' + encodeURIComponent(p.name) + '#einstellungen' }); }
-    catch (e) { res.writeHead(302, { Location: '/?tiktok=' + encodeURIComponent(e.message) + '#einstellungen' }); }
-    return res.end();
+  // Google/TikTok leiten nach der Freigabe hierher zurück (ohne Sitzungs-Cookie, abgesichert über "state").
+  // Danach: kleine Seite, die das Popup schließt.
+  if ((p === '/oauth/tiktok' || p === '/oauth/google') && m === 'GET') {
+    const done = (q) => { res.writeHead(302, { Location: '/oauth-fertig.html?' + new URLSearchParams(q) }); res.end(); };
+    const platform = p.endsWith('google') ? 'YouTube' : 'TikTok';
+    try {
+      if (url.searchParams.get('error')) throw new Error(url.searchParams.get('error_description') || url.searchParams.get('error'));
+      const prof = p.endsWith('google')
+        ? await youtube.finishWeb(url.searchParams.get('code') || '', url.searchParams.get('state') || '')
+        : await tiktok.finishConnect(url.href);
+      return done({ ok: '1', platform, kanal: prof.name });
+    } catch (e) { return done({ ok: '0', platform, error: e.message }); }
   }
 
   if (m !== 'GET' && m !== 'HEAD' && req.headers['x-zentrale'] !== '1') throw new HttpError(403, 'Anfrage abgelehnt.');
@@ -261,9 +273,19 @@ async function api(req, res, url) {
     if (sub === '/move' && m === 'POST') {
       const { folder } = await readJson(req);
       if (isUploading(v)) throw new HttpError(409, 'Während eines Uploads nicht verschieben.');
+      if (['queued', 'running'].includes(v.cut?.state)) throw new HttpError(409, 'Wird gerade geschnitten – bitte warten.');
       if (!lib.FOLDERS.includes(folder)) throw new HttpError(400, 'Unbekannter Ordner.');
       lib.moveVideo(v, folder);
       return send(res, 200, publicVideo(v));
+    }
+    if (sub === '/cut' && m === 'POST') {
+      const b = await readJson(req);
+      autocut.enqueue(v, { force: !!b.force });
+      return send(res, 200, publicVideo(v));
+    }
+    if (sub === '/transcript' && m === 'GET') {
+      const segs = whisper.loadTranscript(v);
+      return send(res, 200, { segments: segs, text: v.transcriptText || '' });
     }
     if (sub === '/ai' && m === 'POST') {
       const b = await readJson(req);
@@ -295,7 +317,7 @@ async function api(req, res, url) {
   }
 
   if (p === '/api/settings' && m === 'GET') {
-    return send(res, 200, { settings: db().settings, youtube: youtube.status(), tiktok: tiktok.status(), ai: ai.status(),
+    return send(res, 200, { settings: db().settings, youtube: youtube.status(), tiktok: tiktok.status(), ai: ai.status(), cut: autocut.status(),
       profiles: profiles.list().map(profiles.publicProfile), version: VERSION });
   }
   if (p === '/api/settings' && m === 'PUT') {
@@ -306,6 +328,7 @@ async function api(req, res, url) {
     saveNow();
     return send(res, 200, { ok: true });
   }
+  if (p === '/api/cut/config' && m === 'POST') { autocut.configure(await readJson(req)); return send(res, 200, autocut.status()); }
   if (p === '/api/ai/config' && m === 'POST') { ai.configure(await readJson(req)); return send(res, 200, ai.status()); }
   if (p === '/api/profiles' && m === 'POST') return send(res, 200, profiles.publicProfile(profiles.create(await readJson(req))));
   if (p === '/api/youtube/config' && m === 'POST') { youtube.configure(await readJson(req)); return send(res, 200, youtube.status()); }
@@ -321,6 +344,11 @@ async function api(req, res, url) {
     if (sub === '' && m === 'PUT') return send(res, 200, profiles.publicProfile(profiles.update(prof.id, await readJson(req))));
     if (sub === '' && m === 'DELETE') { profiles.remove(prof.id); return send(res, 200, { ok: true }); }
     if (sub === '/youtube/connect' && m === 'POST') return send(res, 200, await youtube.startConnect(prof));
+    if (sub === '/youtube/auth-url' && m === 'GET') {
+      const origin = url.searchParams.get('origin') || '';
+      if (!/^https:\/\/[^/]+$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) throw new HttpError(400, 'Anmeldung per Fenster braucht eine https-Adresse.');
+      return send(res, 200, { url: youtube.webAuthUrl(prof, origin) });
+    }
     if (sub === '/youtube/disconnect' && m === 'POST') { youtube.disconnect(prof); return send(res, 200, { ok: true }); }
     if (sub === '/tiktok/auth-url' && m === 'GET') return send(res, 200, { url: tiktok.authUrl(prof) });
     if (sub === '/tiktok/disconnect' && m === 'POST') { tiktok.disconnect(prof); return send(res, 200, { ok: true }); }

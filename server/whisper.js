@@ -1,0 +1,116 @@
+// Sprache → Text mit whisper.cpp (läuft lokal im Container, kostet nichts). Modell wird beim ersten Bedarf geladen.
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { db, save, DATA_DIR } from './store.js';
+
+const BIN = process.env.WHISPER_BIN || 'whisper-cli';
+const MODEL_URL = process.env.WHISPER_MODEL_URL || 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{m}.bin';
+const DIR = path.join(DATA_DIR, 'whisper');
+const TMP = path.join(DATA_DIR, 'tmp');
+export const MODELS = { base: '≈ 140 MB, schnell, einfache Qualität', small: '≈ 470 MB, gute Qualität (empfohlen)',
+  medium: '≈ 1,5 GB, sehr gut, deutlich langsamer' };
+
+const cfg = () => db().cut.whisper;
+const modelFile = (m) => path.join(DIR, `ggml-${m}.bin`);
+let download = null; // { model, done, total, error }
+
+export function status() {
+  const c = cfg();
+  return { enabled: c.enabled, model: c.model, threads: c.threads, models: MODELS,
+    installed: Object.keys(MODELS).filter((m) => fs.existsSync(modelFile(m))),
+    download: download && { ...download } };
+}
+
+async function ensureModel(m) {
+  const file = modelFile(m);
+  if (fs.existsSync(file)) return file;
+  if (download?.model === m && !download.error) { while (download && !download.error && !fs.existsSync(file)) await new Promise((r) => setTimeout(r, 2000)); }
+  if (fs.existsSync(file)) return file;
+  fs.mkdirSync(DIR, { recursive: true });
+  download = { model: m, done: 0, total: 0, error: '' };
+  const part = file + '.part';
+  try {
+    const r = await fetch(MODEL_URL.replace('{m}', m));
+    if (!r.ok || !r.body) throw new Error('Download fehlgeschlagen (' + r.status + ')');
+    download.total = Number(r.headers.get('content-length')) || 0;
+    const out = fs.createWriteStream(part);
+    for await (const chunk of r.body) {
+      download.done += chunk.length;
+      if (!out.write(chunk)) await new Promise((res) => out.once('drain', res));
+    }
+    await new Promise((res, rej) => out.end((e) => (e ? rej(e) : res())));
+    fs.renameSync(part, file);
+    download = null;
+    return file;
+  } catch (e) {
+    fs.rmSync(part, { force: true });
+    download = { ...download, error: 'Whisper-Modell konnte nicht geladen werden: ' + e.message };
+    throw new Error(download.error);
+  }
+}
+
+function run(cmd, args, onLine) {
+  return new Promise((resolve) => {
+    let err = '';
+    const p = spawn('nice', ['-n', '15', cmd, ...args], { stdio: ['ignore', 'ignore', 'pipe'] });
+    p.stderr.on('data', (d) => { const s = d.toString(); err = (err + s).slice(-4000); if (onLine) for (const l of s.split(/\r?\n/)) onLine(l); });
+    p.on('error', (e) => resolve({ code: -1, err: e.message }));
+    p.on('close', (code) => resolve({ code, err }));
+  });
+}
+
+// Nur eine Erkennung gleichzeitig (CPU).
+let chain = Promise.resolve();
+
+// → [{ s, e, t }] (Sekunden, Text)
+export function transcribe(videoFile, key, onProgress = () => {}) {
+  const job = chain.then(() => doTranscribe(videoFile, key, onProgress));
+  chain = job.catch(() => {});
+  return job;
+}
+
+async function doTranscribe(videoFile, key, onProgress) {
+  const c = cfg();
+  const model = await ensureModel(c.model || 'small');
+  fs.mkdirSync(TMP, { recursive: true });
+  const wav = path.join(TMP, key + '.wav'), base = path.join(TMP, key);
+  try {
+    const a = await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', videoFile, '-map', '0:a:0', '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav]);
+    if (a.code !== 0 || !fs.existsSync(wav)) return []; // keine Tonspur
+    const r = await run(BIN, ['-m', model, '-f', wav, '-l', 'de', '-t', String(c.threads || 4), '-oj', '-of', base, '-pp'], (l) => {
+      const m = /progress\s*=\s*(\d+)%/.exec(l);
+      if (m) onProgress(Number(m[1]));
+    });
+    if (r.code !== 0) throw new Error('Whisper-Fehler: ' + (r.err.trim().split('\n').pop() || r.code));
+    const j = JSON.parse(fs.readFileSync(base + '.json', 'utf8'));
+    return (j.transcription || []).map((x) => ({ s: (x.offsets?.from || 0) / 1000, e: (x.offsets?.to || 0) / 1000, t: String(x.text || '').trim() }))
+      .filter((x) => x.t && !/^\[.*\]$|^\(.*\)$/.test(x.t)); // [Musik], (Lachen) o. Ä. weglassen
+  } finally {
+    fs.rmSync(wav, { force: true });
+    fs.rmSync(base + '.json', { force: true });
+  }
+}
+
+// Text eines Zeitraums (für Shorts) bzw. alles.
+export const textOf = (segs, from = 0, to = Infinity) =>
+  segs.filter((x) => x.e > from && x.s < to).map((x) => x.t).join(' ').replace(/\s+/g, ' ').trim();
+
+export const fmtTime = (s) => {
+  s = Math.max(0, Math.round(s));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
+  return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0');
+};
+
+// Transkripte liegen als Datei, nicht im Speicher (können lang werden).
+const TDIR = path.join(DATA_DIR, 'transkripte');
+export function saveTranscript(v, segs) {
+  fs.mkdirSync(TDIR, { recursive: true });
+  fs.writeFileSync(path.join(TDIR, v.id + '.json'), JSON.stringify(segs));
+  v.transcriptAt = new Date().toISOString();
+  v.transcriptText = textOf(segs).slice(0, 20000);
+  save();
+}
+export function loadTranscript(v) {
+  try { return JSON.parse(fs.readFileSync(path.join(TDIR, v.id + '.json'), 'utf8')); } catch { return null; }
+}

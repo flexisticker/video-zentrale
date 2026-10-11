@@ -36,6 +36,8 @@ const empty = () => ({
   youtube: { clientId: '', clientSecret: '' },                   // Google-App (für alle Kanäle gleich)
   tiktok: { clientKey: '', clientSecret: '', redirectUri: '' },  // TikTok-App (für alle Konten gleich)
   ai: { apiKey: '', auto: true, hints: '', spent: 0, count: 0 },  // Claude (Anthropic-API)
+  cut: { auto: true, longVersion: true, cutPauses: true, silenceDb: -45, minPause: 20, shorts: 3, shortMin: 30, shortMax: 45,
+    moveRaw: true, whisper: { enabled: true, model: 'small', threads: 4 } },          // automatischer Schnitt
 });
 
 let state = empty();
@@ -62,6 +64,7 @@ export function load() {
   state.youtube = { clientId: raw.youtube?.clientId || '', clientSecret: raw.youtube?.clientSecret || '' };
   state.tiktok = { clientKey: raw.tiktok?.clientKey || '', clientSecret: raw.tiktok?.clientSecret || '', redirectUri: raw.tiktok?.redirectUri || '' };
   state.ai = { ...base.ai, ...raw.ai };
+  state.cut = { ...base.cut, ...raw.cut, whisper: { ...base.cut.whisper, ...raw.cut?.whisper } };
   for (const k of ['category', 'tags', 'footer']) delete state.settings[k];
   const defaults = Object.fromEntries(defaultProfiles().map((p) => [p.id, p]));
   for (const p of state.profiles) {

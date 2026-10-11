@@ -28,7 +28,7 @@ export function configure({ clientKey, clientSecret, redirectUri }) {
   if (typeof clientSecret === 'string' && clientSecret.trim()) c.clientSecret = clientSecret.trim();
   if (typeof redirectUri === 'string') {
     const u = redirectUri.trim();
-    if (u && !/^https:\/\//i.test(u)) throw new Error('TikTok verlangt eine https-Adresse als Redirect URI.');
+    if (u && !/^https:\/\//i.test(u) && !/^http:\/\/(localhost|127\.0\.0\.1)[:/]/.test(u)) throw new Error('TikTok verlangt eine https-Adresse als Redirect URI.');
     c.redirectUri = u;
   }
   saveNow();

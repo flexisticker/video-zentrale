@@ -142,3 +142,12 @@ input.color { padding: 2px; height: 38px; }
 .frame.best { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(124, 92, 255, .4); }
 .frame:hover { border-color: var(--text); }
 @media (max-width: 560px) { .frames { grid-template-columns: repeat(3, 1fr); } }
+
+/* Schnitt & Transkript */
+details.transcript summary { cursor: pointer; font-weight: 600; }
+.tlines { max-height: 320px; overflow-y: auto; margin: 8px 0; font-size: 14px; display: grid; gap: 4px; }
+.tlines .time { background: none; border: 0; color: #b7a8ff; padding: 0; font: inherit; font-variant-numeric: tabular-nums; }
+input[type=number] { width: 100%; }
+
+code { background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; font-size: 12px; word-break: break-all; }
+details summary.hint { cursor: pointer; }

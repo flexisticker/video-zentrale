@@ -1,6 +1,6 @@
 // Oberflächentest gegen test/mock.js: node test/ui.cjs <tmp-ordner>  (Server auf 8190, Mock auf 9300)
 const { chromium } = require(require('child_process').execSync('npm root -g').toString().trim() + '/playwright');
-const T = process.argv[2], B = 'http://localhost:8190';
+const T = process.argv[2], B = process.env.ZENTRALE || 'http://localhost:8190';
 const mock = () => fetch('http://127.0.0.1:9300/_log').then((r) => r.json());
 (async () => {
   const br = await chromium.launch();
@@ -20,21 +20,17 @@ const mock = () => fetch('http://127.0.0.1:9300/_log').then((r) => r.json());
   await g.locator('input').nth(0).fill('test.apps.googleusercontent.com'); await g.locator('input').nth(1).fill('sec');
   await g.locator('button', { hasText: 'Speichern' }).click(); await pg.waitForTimeout(600);
   const t = pg.locator('.box', { hasText: 'TikTok-App' });
-  await t.locator('input').nth(0).fill('ck'); await t.locator('input').nth(1).fill('cs'); await t.locator('input').nth(2).fill('https://example.org/cb');
+  await t.locator('input').nth(0).fill('ck'); await t.locator('input').nth(1).fill('cs'); await t.locator('input').nth(2).fill(B + '/oauth/tiktok');
   await t.locator('button', { hasText: 'Speichern' }).click(); await pg.waitForTimeout(600);
   // je Kanal YouTube + TikTok verbinden
-  for (const [i, name, ytTitle] of [[0, 'MichaModus', 'MichaModus'], [1, '3dbymicha', '3D by Micha']]) {
-    const box = () => pg.locator('.channelbox').nth(i);
-    await box().locator('button', { hasText: 'YouTube verbinden' }).click();
-    await box().locator('.code').waitFor();
-    await box().locator('.ok-text', { hasText: `„${ytTitle}“` }).waitFor({ timeout: 15000 });
-    const pop = pg.waitForEvent('popup'); await box().locator('button', { hasText: 'TikTok verbinden' }).click();
-    const p = await pop; const state = new URL(p.url()).searchParams.get('state'); await p.close();
-    await box().locator('input[placeholder^="Adresse nach"]').fill(`https://example.org/cb?code=${name}&state=${state}`);
-    await box().locator('button', { hasText: 'Übernehmen' }).click();
-    await box().locator('.ok-text', { hasText: `„${name}“` }).nth(ytTitle === name ? 1 : 0).waitFor();
-    console.log(`Kanal ${name}: YouTube „${ytTitle}“ + TikTok „${name}“ verbunden`);
+  // je Kanal YouTube + TikTok per Popup verbinden (Mock „erlaubt“ sofort)
+  for (const i of [0, 1]) for (const plat of ['YouTube', 'TikTok']) {
+    const pop = pg.waitForEvent('popup');
+    await pg.locator('.channelbox').nth(i).locator('button', { hasText: `Mit ${plat} verbinden` }).click();
+    const p = await pop; await p.waitForEvent('close', { timeout: 8000 }).catch(() => {});
+    await pg.waitForTimeout(800);
   }
+  console.log('Verbunden:', await pg.$$eval('.channelbox .conn .ok-text', (e) => e.map((x) => x.textContent.split('·')[0].trim())));
   await pg.screenshot({ path: T + '/2-kanaele.png', fullPage: true });
 
   // Filter

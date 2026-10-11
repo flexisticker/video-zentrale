@@ -13,6 +13,14 @@ Video-Zentrale (Browser) ── prüfen, freigeben ──▶ YouTube (privat) / 
                                                        \\PowerServer\videos\hochgeladen  (Archiv, automatisch)
 ```
 
+- **Automatischer Schnitt:** Jede neue Rohaufnahme in `eingang` wird ausgewertet (Lautstärke je Sekunde, Bildwechsel,
+  Sprache per Whisper) und geschnitten: **Langfassung** (ruhige Abschnitte – Menü, Pause, Laden – über 20 s heraus,
+  Schnitte an Keyframes ohne Neukodieren des Bildes, Ton auf −14 LUFS) und **bis zu 3 Shorts** (30–45 s, 9:16 aus der
+  Bildmitte, neu kodiert). Die Short-Stellen wählt **Claude** aus den ~12 auffälligsten Kandidaten (Standbild + Lautstärke +
+  Gesagtes), ohne API-Schlüssel die lautesten Stellen. Ergebnisse → `geschnitten` (mit Claude-Vorschlag), Original → `rohvideos`.
+  Sicherungen: ohne Tonspur oder wenn mehr als die Hälfte wegfiele, wird nichts gekürzt. Läuft nacheinander mit niedriger Priorität.
+- **Sprache → Text (Whisper):** whisper.cpp im Container, Modell (Standard „small“, ~470 MB) wird beim ersten Mal von
+  huggingface.co nach `/data/whisper` geladen. Transkript im Detail aufklappbar (Klick auf Zeit springt im Video), geht an Claude.
 - **Kanäle:** jedes Video gehört zu einem Kanal (Start: **MichaModus** = Gaming, Standard; **3dbymicha** = gewerblich).
   Je Kanal eigene YouTube- und TikTok-Verbindung sowie Vorgaben (Kategorie, Tags, Text unter der Beschreibung).
   Die Zentrale **schlägt den Kanal vor**: `"channel"` in der .json › Stichwörter des Kanals in Titel/Dateiname (zählen doppelt),
@@ -63,6 +71,15 @@ Das Paket ist privat → Unraid braucht den vorhandenen ghcr-Login (gleicher Tok
 Fertig = OBS schreibt nicht mehr an der Datei und sie ist seit 2 Minuten unverändert. Protokoll: `OBS-Sortierer.log`
 im Aufnahmeordner. Optional MKV → MP4 umpacken und Vorschaubild (braucht ffmpeg: `winget install Gyan.FFmpeg`).
 
+## https-Adresse (für Verbinden mit einem Klick)
+
+Google und TikTok erlauben das Anmelden im Fenster nur über https. Wie bei `studio.flexisticker.de`:
+1. DNS: A-Eintrag `videos` → feste IP (bzw. lokaler UniFi-DNS-Eintrag `videos` → 192.168.1.111).
+2. Nginx Proxy Manager: Proxy Host `videos.flexisticker.de` → `http://192.168.1.10:8094`, „Websockets“ egal,
+   SSL: Let's Encrypt, Force SSL; Access List „Nur Heimnetz“.
+3. Zentrale ab dann über `https://videos.flexisticker.de` öffnen – die Einstellungen zeigen die passenden Weiterleitungs-Adressen.
+Ohne https bleibt bei YouTube der Weg „per Code“ (google.com/device).
+
 ## YouTube verbinden (einmalig, ca. 10 Min.)
 
 1. <https://console.cloud.google.com> → neues Projekt „Video-Zentrale“.
@@ -71,7 +88,8 @@ im Aufnahmeordner. Optional MKV → MP4 umpacken und Vorschaubild (braucht ffmpe
    Danach **„App veröffentlichen“** (Status „In Produktion“) – sonst läuft die Anmeldung nach 7 Tagen ab.
    Eine Prüfung durch Google ist dafür nicht nötig; beim Verbinden erscheint nur „Google hat diese App nicht überprüft“
    → „Erweitert“ → „Weiter“.
-4. „Anmeldedaten“ → „Anmeldedaten erstellen“ → OAuth-Client-ID → Typ **„Fernseher und Geräte mit begrenzter Eingabe“**.
+4. „Anmeldedaten“ → „Anmeldedaten erstellen“ → OAuth-Client-ID → Typ **„Webanwendung“** mit autorisierter Weiterleitungs-URI
+   `https://videos.flexisticker.de/oauth/google` (über die IP-Adresse ohne https stattdessen Typ „Fernseher und Geräte mit begrenzter Eingabe“).
 5. Client-ID und Client-Secret in der Zentrale unter Einstellungen → „Google-App“ eintragen. Dann **je Kanal**
    „YouTube verbinden“ → Code unter google.com/device eingeben und dort das passende Konto bzw. den Kanal wählen
    (bei Brand-Konten fragt Google nach dem Kanal). Eine Google-App reicht für beide Kanäle.

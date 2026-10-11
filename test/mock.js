@@ -11,6 +11,11 @@ http.createServer(async (req, res) => {
   const p = u.pathname;
   log.push({ m: req.method, p, range: req.headers['content-range'], len: b.length });
   if (p === '/_log') return json(res, 200, { log, yt, tt });
+  // Anmeldefenster: sofort „erlaubt“ und zurück zur Zentrale
+  if (p === '/o/oauth2/v2/auth' || p === '/v2/auth/authorize/') {
+    const who = u.searchParams.get('client_id') ? 'web' + (++devN) : 'TT' + (++devN);
+    res.writeHead(302, { Location: u.searchParams.get('redirect_uri') + '?code=' + who + '&state=' + u.searchParams.get('state') }); return res.end();
+  }
   if (p === '/device/code') return json(res, 200, { device_code: 'dev' + (++devN), user_code: 'ABCD-EFGH', verification_url: 'https://www.google.com/device', interval: 1, expires_in: 600 });
   if (p === '/token') {
     const f = new URLSearchParams(b.toString());
@@ -19,6 +24,7 @@ http.createServer(async (req, res) => {
       const d = f.get('device_code');
       return json(res, 200, { access_token: 'at-' + d, refresh_token: 'rt-' + d, expires_in: 3600 });
     }
+    if (f.get('grant_type') === 'authorization_code') return json(res, 200, { access_token: 'at-' + f.get('code'), refresh_token: 'rt-' + f.get('code'), expires_in: 3600 });
     return json(res, 200, { access_token: 'at-' + f.get('refresh_token').slice(3), expires_in: 3600 });
   }
   if (p === '/youtube/v3/channels') {
@@ -60,8 +66,17 @@ http.createServer(async (req, res) => {
     res.writeHead(tt.got >= tt.size ? 201 : 206); return res.end();
   }
   if (p === '/v2/post/publish/status/fetch/') return json(res, 200, { data: { status: tt.got >= tt.size ? 'SEND_TO_USER_INBOX' : 'PROCESSING_UPLOAD' }, error: { code: 'ok' } });
+  if (p.startsWith('/whisper/')) { res.writeHead(200, { 'Content-Length': 2048 }); return res.end(Buffer.alloc(2048)); }
   if (p === '/v1/messages') {
     const j = JSON.parse(b.toString());
+    if (j.output_config?.format?.schema?.properties?.shorts) {
+      const texts = j.messages[0].content.filter((c) => c.type === 'text').map((c) => c.text);
+      log.push({ highlights: { imgs: j.messages[0].content.filter((c) => c.type === 'image').length, cands: texts.filter((t) => t.startsWith('Kandidat')) } });
+      const sec = texts.filter((t) => t.startsWith('Kandidat')).map((t) => /Sekunde (\d+)–(\d+)/.exec(t)).map((m) => [Number(m[1]), Number(m[2])]);
+      const pick = sec.slice(0, 2).map(([a, b2], i) => ({ candidate: i + 1, start: a + 1, end: b2 - 2, title: i ? 'Der Sieg 🏆' : 'Drei auf einmal?!', reason: 'lauter Moment mit Reaktion' }));
+      return json(res, 200, { id: 'msg_h', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn',
+        content: [{ type: 'text', text: JSON.stringify({ shorts: pick }) }], usage: { input_tokens: 9000, output_tokens: 400 } });
+    }
     const imgs = j.messages[0].content.filter((c) => c.type === 'image').length;
     log.push({ claude: { model: j.model, imgs, fallbacks: j.fallbacks, beta: req.headers['anthropic-beta'], key: req.headers['x-api-key'],
       effort: j.output_config?.effort, schema: Object.keys(j.output_config?.format?.schema?.properties || {}), channels: j.output_config?.format?.schema?.properties?.channel?.enum } });

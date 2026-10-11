@@ -1,10 +1,12 @@
 // YouTube Data API v3: Anmeldung per Geräte-Code (kein Weiterleitungs-URL nötig, klappt im Heimnetz ohne https),
 // Upload als "privat" in Stücken (fortsetzbar), danach Titelbild. Eine Google-App, je Kanal eine eigene Anmeldung.
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { db, saveNow } from './store.js';
 import * as profiles from './profiles.js';
 
 const OAUTH = process.env.YT_OAUTH_BASE || 'https://oauth2.googleapis.com';
+const AUTH = process.env.YT_AUTH_BASE || 'https://accounts.google.com';
 const API = process.env.YT_API_BASE || 'https://www.googleapis.com';
 const SCOPE = 'https://www.googleapis.com/auth/youtube';
 const CHUNK = Number(process.env.YT_CHUNK_KB || 32768) * 1024; // Vielfaches von 256 KB
@@ -39,6 +41,37 @@ export function configure({ clientId, clientSecret }) {
 export function disconnect(p) {
   conn(p).refreshToken = ''; conn(p).channel = null; access.delete(p.id); pending.delete(p.id);
   saveNow();
+}
+
+// ---- Anmeldung im Popup (Standardweg, braucht https-Adresse bzw. localhost) ----
+const webStates = new Map(); // state -> { profileId, redirect, until }
+
+export function webAuthUrl(p, origin) {
+  const c = cfg();
+  if (!c.clientId || !c.clientSecret) throw new Error('Erst die Google-App (Client-ID und Secret) eintragen.');
+  const redirect = String(origin || '').replace(/\/$/, '') + '/oauth/google';
+  const state = crypto.randomBytes(16).toString('hex');
+  webStates.set(state, { profileId: p.id, redirect, until: Date.now() + 15 * 60_000 });
+  const q = new URLSearchParams({ client_id: c.clientId, redirect_uri: redirect, response_type: 'code', scope: SCOPE,
+    access_type: 'offline', prompt: 'consent select_account', include_granted_scopes: 'true', state });
+  return AUTH + '/o/oauth2/v2/auth?' + q;
+}
+
+export async function finishWeb(code, state) {
+  const st = webStates.get(state);
+  if (!st || st.until < Date.now()) throw new Error('Anmeldung abgelaufen – bitte neu starten.');
+  webStates.delete(state);
+  const p = profiles.get(st.profileId);
+  if (!p) throw new Error('Kanal nicht gefunden.');
+  const c = cfg();
+  const { ok, j } = await form(OAUTH + '/token', { client_id: c.clientId, client_secret: c.clientSecret, code,
+    redirect_uri: st.redirect, grant_type: 'authorization_code' });
+  if (!ok || !j.refresh_token) throw new Error('Google lehnt ab: ' + (j.error_description || j.error || 'kein Refresh-Token'));
+  conn(p).refreshToken = j.refresh_token;
+  access.set(p.id, { token: j.access_token, until: Date.now() + (j.expires_in - 60) * 1000 });
+  saveNow();
+  await loadChannel(p).catch(() => {});
+  return p;
 }
 
 export async function startConnect(p) {
