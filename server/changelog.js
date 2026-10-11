@@ -1,5 +1,10 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.10.0', date: '11.10.2026', items: [
+    'Hintergrundmusik ruhiger: Absenkung beim Sprechen einstellbar (aus / leicht / mittel / stark), neuer Standard „leicht“ (ca. 6 dB statt 17 dB).',
+    'Musik-Lautstärke per Schieberegler, Standard etwas leiser als bisher (−30 LUFS).',
+    'Jeder Musiktitel wird einmal gemessen und fest eingestellt – keine Lautstärke-Schwankungen mehr innerhalb des Titels.',
+  ] },
   { version: '1.9.4', date: '11.10.2026', items: [
     'Titelbild herunterladen: Knopf am Titelbild, bei jedem KI-Vorschlag (⤓) und bei Shorts direkt im YouTube-Bereich – zum Setzen in der YouTube-App.',
   ] },

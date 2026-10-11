@@ -1115,10 +1115,14 @@ async function renderSettings() {
 
   // ----- Musik -----
   const mu = st.music || {};
-  const muOn = cb(mu.enabled), muShorts = cb(mu.shorts), muLong = cb(mu.long), muDuck = cb(mu.duck);
+  const muOn = cb(mu.enabled), muShorts = cb(mu.shorts), muLong = cb(mu.long);
   const muSrc = h('select', {}, [['mixed', 'Eigene Titel zuerst, sonst KI-Musik'], ['library', 'Nur eigene Titel (Ordner)'], ['ai', 'Immer KI-Musik']]
     .map(([k, n]) => h('option', { value: k, selected: mu.source === k }, n)));
-  const muLevel = h('select', {}, (mu.levels || []).map((k) => h('option', { value: k, selected: mu.level === k }, k)));
+  const lufsTxt = (x) => { const d = Number(x) + 14; return `${x} LUFS – ${-d} dB unter der Stimme` + (x <= -34 ? ' (sehr leise)' : x <= -31 ? ' (leise)' : x <= -27 ? ' (mittel)' : ' (laut)'); };
+  const muLufsOut = h('span', { class: 'hint' }, lufsTxt(mu.lufs ?? -30));
+  const muLevel = h('input', { type: 'range', min: -42, max: -18, step: 1, value: mu.lufs ?? -30, oninput: () => { muLufsOut.textContent = lufsTxt(muLevel.value); } });
+  const muDuckSel = h('select', {}, [['aus', 'aus – Musik bleibt gleich laut'], ['leicht', 'leicht – sanft, kaum hörbar (empfohlen)'], ['mittel', 'mittel'], ['stark', 'stark – Musik fast weg beim Sprechen']]
+    .map(([k, n]) => h('option', { value: k, selected: (mu.duckLevel || 'leicht') === k }, n)));
   const muLongMax = numIn(mu.longMax, { min: 30, max: 600 });
   const muModel = h('input', { value: mu.model || '' });
   const musicBox = h('div', { class: 'box' }, h('h3', {}, '🎵 Hintergrundmusik'),
@@ -1126,15 +1130,16 @@ async function renderSettings() {
     h('label', { class: 'check' }, muOn, 'Hintergrundmusik einmischen'),
     h('label', { class: 'check' }, muShorts, 'in Shorts'),
     h('label', { class: 'check' }, muLong, 'in der Langfassung (Titel wird wiederholt)'),
-    h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Quelle'), muSrc), h('div', {}, h('label', {}, 'Lautstärke'), muLevel)),
-    h('label', { class: 'check' }, muDuck, 'Musik leiser, wenn gesprochen wird (Ducking)'),
+    h('label', {}, 'Quelle'), muSrc,
+    h('label', {}, 'Musik-Lautstärke (unter der Stimme)'), muLevel, muLufsOut,
+    h('label', {}, 'Musik absenken, während du sprichst'), muDuckSel,
     h('div', { class: 'two' }, h('div', {}, h('label', {}, 'KI-Titel Langfassung max. (s)'), muLongMax), h('div', {}, h('label', {}, 'KI-Modell (fal.ai)'), muModel)),
     h('p', { class: 'hint' }, `Allgemeiner Ordner: ${mu.common ?? 0} Titel · KI-Musik bisher: ${mu.generated || 0} Titel, ca. ${(mu.spent || 0).toFixed(2).replace('.', ',')} $`
       + (mu.falConfigured ? '' : ' · ⚠ fal.ai-Schlüssel fehlt (unten bei Titelbilder)')),
     h('p', { class: 'hint' }, 'Epidemic Sound: deine Kanäle müssen in deinem Epidemic-Konto verknüpft sein, sonst meldet YouTube Urheberrechtsansprüche.'),
     h('div', { class: 'row', style: { marginTop: '12px' } },
       h('button', { class: 'btn', onclick: run(() => api('POST', '/api/music/config', { enabled: muOn.checked, shorts: muShorts.checked, long: muLong.checked,
-        duck: muDuck.checked, source: muSrc.value, level: muLevel.value, longMax: Number(muLongMax.value), model: muModel.value }), 'Gespeichert.') }, 'Speichern')));
+        duckLevel: muDuckSel.value, source: muSrc.value, lufs: Number(muLevel.value), longMax: Number(muLongMax.value), model: muModel.value }), 'Gespeichert.') }, 'Speichern')));
 
   // ----- Titelbilder & Fotos -----
   const fl = st.fal;

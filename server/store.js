@@ -50,7 +50,7 @@ const empty = () => ({
   ai: { apiKey: '', auto: true, hints: '', spent: 0, count: 0 },  // Claude (Anthropic-API)
   fal: { key: '', count: 0, model: 'fal-ai/flux-pro/kontext', boosts: 0,     // fal.ai: Freistellen + KI-Aufwertung
     genModel: 'fal-ai/nano-banana/edit', autoThumb: true, generated: 0 },     //   + KI-Titelbild aus Foto & Standbild
-  music: { enabled: true, shorts: true, long: false, source: 'mixed', level: 'mittel', duck: true, longMax: 180,  // Hintergrundmusik
+  music: { enabled: true, shorts: true, long: false, source: 'mixed', level: 'mittel', lufs: -30, duck: true, duckLevel: 'leicht', longMax: 180,  // Hintergrundmusik
     model: 'sonilo/v1.1/text-to-music', generated: 0, spent: 0, recent: [] },
   backup: { auto: true, time: '03:30', keep: 14, lastAt: '', lastFile: '', lastError: '' },        // Sicherung
   photos: [],                                                      // Fotos des Creators für Titelbilder

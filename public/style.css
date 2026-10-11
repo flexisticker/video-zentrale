@@ -214,3 +214,5 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 
 .cutplan { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
 .cutplan textarea { width: 100%; }
+
+input[type=range] { width: 100%; accent-color: #7c5cff; }

@@ -164,7 +164,7 @@ const LOUDNORM = 'loudnorm=I=-14:TP=-1.5:LRA=11';
 async function renderLong(v, file, keep, hasAudio, out, onP, track) {
   const total = keep.reduce((s, [a, b]) => s + b - a, 0);
   const mInput = track ? ['-stream_loop', '-1', '-i', track.file] : [];
-  const audio = track ? ['-filter_complex', music.mixGraph({ hasVoice: hasAudio, dur: total }), '-map', '[aout]', '-c:a', 'aac', '-b:a', '192k', '-t', total.toFixed(2)]
+  const audio = track ? ['-filter_complex', music.mixGraph({ hasVoice: hasAudio, dur: total, track }), '-map', '[aout]', '-c:a', 'aac', '-b:a', '192k', '-t', total.toFixed(2)]
     : hasAudio ? ['-map', '0:a:0', '-af', LOUDNORM, '-c:a', 'aac', '-b:a', '192k'] : [];
   let args;
   if (keep.length === 1 && keep[0][0] === 0) {
@@ -207,7 +207,7 @@ async function renderShort(v, file, s, hasAudio, out, onP, words, track, pro = f
   } else graph += ';[base]fps=30[v]';
   let audio = hasAudio ? ['-map', '0:a:0', '-af', LOUDNORM, '-c:a', 'aac', '-b:a', '160k'] : [];
   if (track) {
-    graph += ';' + music.mixGraph({ hasVoice: hasAudio, dur: s.end - s.start });
+    graph += ';' + music.mixGraph({ hasVoice: hasAudio, dur: s.end - s.start, track });
     audio = ['-map', '[aout]', '-c:a', 'aac', '-b:a', '160k'];
   }
   const mInput = track ? ['-stream_loop', '-1', '-i', track.file] : [];
@@ -254,7 +254,7 @@ async function renderSummary(v, file, reel, hasAudio, out, onP, track) {
   });
   g += reel.map((_, i) => `[v${i}]` + (hasAudio ? `[a${i}]` : '')).join('') + `concat=n=${reel.length}:v=1:a=${hasAudio ? 1 : 0}[cv]` + (hasAudio ? '[ca]' : '');
   let audio = [];
-  if (track) { g += ';' + music.mixGraph({ hasVoice: hasAudio, dur: total, voiceIn: 'ca' }); audio = ['-map', '[aout]', '-c:a', 'aac', '-b:a', '192k']; }
+  if (track) { g += ';' + music.mixGraph({ hasVoice: hasAudio, dur: total, voiceIn: 'ca', track }); audio = ['-map', '[aout]', '-c:a', 'aac', '-b:a', '192k']; }
   else if (hasAudio) { g += `;[ca]${LOUDNORM}[aout]`; audio = ['-map', '[aout]', '-c:a', 'aac', '-b:a', '192k']; }
   const mInput = track ? ['-stream_loop', '-1', '-i', track.file] : [];
   const r = await gpu.encodeWithFallback((venc) => ffmpeg(['-i', file, ...mInput, '-filter_complex', g, '-map', '[cv]', ...audio, ...venc,

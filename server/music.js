@@ -7,6 +7,7 @@
 //          musik/[<kanal-id>/]<stimmung>/ → Stimmung (episch, lustig, spannend, chillig, energisch, fröhlich, traurig)
 //          musik/ki/                 → von der KI erzeugte Titel (Nachweis, werden nicht wiederverwendet)
 import fs from 'node:fs';
+import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { db, save, saveNow } from './store.js';
 import * as lib from './library.js';
@@ -14,7 +15,14 @@ import * as lib from './library.js';
 const FAL = process.env.FAL_BASE || 'https://fal.run';
 export const MOODS = ['episch', 'lustig', 'spannend', 'chillig', 'energisch', 'fröhlich', 'traurig'];
 export const AUDIO_EXT = ['.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg'];
-export const LEVELS = { leise: -32, mittel: -28, laut: -24 }; // Lautheit der Musik (LUFS), Stimme liegt bei −14
+export const LEVELS = { leise: -32, mittel: -28, laut: -24 }; // alte Stufen (bis 1.9.4), jetzt Regler `lufs`
+// Absenkung, während gesprochen wird (sidechaincompress)
+export const DUCK = {
+  leicht: { threshold: 0.06, ratio: 2.5, attack: 150, release: 1200, knee: 6 },
+  mittel: { threshold: 0.04, ratio: 4, attack: 80, release: 800, knee: 4 },
+  stark: { threshold: 0.02, ratio: 8, attack: 20, release: 400, knee: 2.8 },
+};
+const musicLufs = () => { const c = cfg(); return Number.isFinite(c.lufs) ? c.lufs : (LEVELS[c.level] ?? -30); };
 const PRICE_PER_S = 0.0025; // sonilo/v1.1/text-to-music, $ je Sekunde (mind. 10 s), Stand 11.10.2026
 
 const cfg = () => db().music;
@@ -55,7 +63,7 @@ export function status() {
   const c = cfg();
   const counts = {};
   for (const p of db().profiles) counts[p.id] = tracksFor(p.id).length;
-  return { ...c, moods: MOODS, levels: Object.keys(LEVELS), counts, common: filesIn(musicDir()).length,
+  return { ...c, lufs: musicLufs(), duckLevel: c.duck === false ? 'aus' : (c.duckLevel || 'leicht'), moods: MOODS, levels: Object.keys(LEVELS), counts, common: filesIn(musicDir()).length,
     falConfigured: !!fal().key, folder: '\\\\PowerServer\\videos\\musik', pricePerMinute: Math.round(PRICE_PER_S * 60 * 100) / 100 };
 }
 
@@ -64,6 +72,9 @@ export function configure(b) {
   for (const k of ['enabled', 'shorts', 'long', 'duck']) if (typeof b[k] === 'boolean') c[k] = b[k];
   if (['mixed', 'library', 'ai'].includes(b.source)) c.source = b.source;
   if (LEVELS[b.level] != null) c.level = b.level;
+  if (b.lufs != null && !isNaN(b.lufs)) c.lufs = Math.round(Math.min(-18, Math.max(-42, Number(b.lufs))));
+  if (b.duckLevel === 'aus') c.duck = false;
+  else if (DUCK[b.duckLevel]) { c.duck = true; c.duckLevel = b.duckLevel; }
   if (b.longMax != null && !isNaN(b.longMax)) c.longMax = Math.round(Math.min(600, Math.max(30, Number(b.longMax))));
   if (typeof b.model === 'string' && /^[a-z0-9][a-z0-9\-/.]{2,80}$/i.test(b.model.trim())) c.model = b.model.trim();
   saveNow();
@@ -127,7 +138,7 @@ export async function trackFor({ profile, kind, seconds, idea = {} }) {
   const mood = MOODS.includes(idea.mood) ? idea.mood : (profile?.musicMood || '');
   if (c.source !== 'ai') {
     const t = pickTrack(profile?.id, mood);
-    if (t) { remember(t.name); return { file: t.file, kind: 'library', name: t.name, mood: t.mood || mood }; }
+    if (t) { remember(t.name); return { file: t.file, kind: 'library', name: t.name, mood: t.mood || mood, lufs: await measure(t.file) }; }
     if (c.source === 'library') return null;
   }
   if (!fal().key) return null;
@@ -136,25 +147,48 @@ export async function trackFor({ profile, kind, seconds, idea = {} }) {
     'instrumental only, no vocals, no singing, clean mix that sits under spoken voice, consistent energy, loopable ending'].filter(Boolean).join('. ');
   const len = kind === 'long' ? Math.min(seconds, c.longMax || 180) : seconds + 1;
   const file = await generate({ prompt, seconds: len, profileId: profile?.id, label: mood || kind });
-  return { file, kind: 'ai', name: path.basename(file), mood, prompt };
+  return { file, kind: 'ai', name: path.basename(file), mood, prompt, lufs: await measure(file) };
 }
 
 const moodEnglish = { episch: 'epic, cinematic', lustig: 'funny, playful, quirky', spannend: 'tense, suspenseful', chillig: 'chill, relaxed, lo-fi',
   energisch: 'energetic, driving, hype', 'fröhlich': 'happy, upbeat, positive', traurig: 'sad, emotional' };
 
+// Lautheit eines Titels einmal messen (integriert, erste 3 Minuten) → feste Verstärkung statt fortlaufender Angleichung
+const measured = new Map();
+export function measure(file) {
+  let st; try { st = fs.statSync(file); } catch { return Promise.resolve(null); }
+  const key = file + '|' + st.mtimeMs;
+  if (measured.has(key)) return Promise.resolve(measured.get(key));
+  return new Promise((resolve) => {
+    let err = '';
+    const p = spawn('ffmpeg', ['-hide_banner', '-nostdin', '-t', '180', '-i', file, '-vn', '-af', 'ebur128', '-f', 'null', '-'], { stdio: ['ignore', 'ignore', 'pipe'] });
+    p.stderr.on('data', (d) => { err = (err + d).slice(-3000); });
+    p.on('error', () => resolve(null));
+    p.on('close', () => {
+      const m = /Integrated loudness:\s*I:\s*(-?[\d.]+)\s*LUFS/.exec(err);
+      const v = m ? Number(m[1]) : null;
+      if (v != null && v > -70) measured.set(key, v);
+      resolve(v != null && v > -70 ? v : null);
+    });
+  });
+}
+
 // ffmpeg-Filter: Eingang 0 = Video mit Stimme (oder ohne Ton), Eingang `idx` = Musik (mit -stream_loop -1).
 // Ergebnis-Label [aout]. dur = Länge des Ausgabeclips in Sekunden.
-export function mixGraph({ hasVoice, idx = 1, dur, voiceIn = '0:a:0', voiceFilter = 'loudnorm=I=-14:TP=-1.5:LRA=11' }) {
+export function mixGraph({ hasVoice, idx = 1, dur, voiceIn = '0:a:0', voiceFilter = 'loudnorm=I=-14:TP=-1.5:LRA=11', track }) {
   const c = cfg();
-  const lufs = LEVELS[c.level] ?? LEVELS.mittel;
+  const target = hasVoice ? musicLufs() : -16;
   const fadeOut = Math.max(0, dur - 2).toFixed(2);
   const fmt = 'aformat=sample_rates=48000:channel_layouts=stereo';
-  const music = `[${idx}:a]${fmt},atrim=0:${(dur + 0.5).toFixed(2)},loudnorm=I=${hasVoice ? lufs : -16}:TP=-2:LRA=11,${fmt},`
+  // gemessen → feste Verstärkung (keine Pump-Effekte); sonst wie bisher loudnorm
+  const level = Number.isFinite(track?.lufs) ? `volume=${(target - track.lufs).toFixed(1)}dB` : `loudnorm=I=${target}:TP=-2:LRA=11`;
+  const music = `[${idx}:a]${fmt},atrim=0:${(dur + 0.5).toFixed(2)},${level},${fmt},`
     + `afade=t=in:d=1,afade=t=out:st=${fadeOut}:d=2`;
   if (!hasVoice) return `${music},alimiter=limit=0.95[aout]`;
   const voice = `[${voiceIn}]${voiceFilter},${fmt}`;
   if (!c.duck) return `${voice}[v1];${music}[m];[v1][m]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95[aout]`;
-  return `${voice},asplit=2[v1][v2];${music}[m];[m][v2]sidechaincompress=threshold=0.02:ratio=8:attack=20:release=400:makeup=1[md];`
+  const d = DUCK[c.duckLevel] || DUCK.leicht;
+  return `${voice},asplit=2[v1][v2];${music}[m];[m][v2]sidechaincompress=threshold=${d.threshold}:ratio=${d.ratio}:attack=${d.attack}:release=${d.release}:knee=${d.knee}:makeup=1[md];`
     + '[v1][md]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95[aout]';
 }
 
