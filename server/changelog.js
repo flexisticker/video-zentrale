@@ -1,5 +1,8 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.9.4', date: '11.10.2026', items: [
+    'Titelbild herunterladen: Knopf am Titelbild, bei jedem KI-Vorschlag (⤓) und bei Shorts direkt im YouTube-Bereich – zum Setzen in der YouTube-App.',
+  ] },
   { version: '1.9.3', date: '11.10.2026', items: [
     'YouTube: Die Zentrale zeigt jetzt eindeutig, ob das Titelbild übermittelt wurde (✓ mit Uhrzeit, Fehlertext oder „ohne Titelbild hochgeladen“), bei Shorts mit Hinweis auf die YouTube-App.',
   ] },

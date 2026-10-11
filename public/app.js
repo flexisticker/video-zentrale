@@ -416,7 +416,7 @@ function openDetail(id) {
       h('b', {}, 'Titelbild'),
       h('button', { class: 'btn small', onclick: grabFrame }, '📷 Aktuelles Videobild nehmen'),
       h('button', { class: 'btn small', onclick: () => imgInput.click() }, '⤒ Bild hochladen'),
-      v.hasImage ? h('a', { class: 'btn small ghost', href: imgUrl(v), download: v.file.replace(/\.[^.]+$/, '') + '.jpg' }, '⤓ Herunterladen') : null,
+      v.hasImage ? h('a', { class: 'btn small ghost', href: imgUrl(v) + '&download=1', download: '' }, '⤓ Titelbild herunterladen') : null,
       h('span', { class: 'hint' }, 'YouTube: 1280 × 720, max. 2 MB (wird automatisch angepasst).'), imgInput)),
     h('div', { class: 'meta', style: { marginTop: '10px' } },
       v.file, ' · ', fmtSize(v.size), v.width ? ` · ${v.width} × ${v.height}` : '', v.duration ? ' · ' + fmtDur(v.duration) : ''),
@@ -484,7 +484,7 @@ function linkedinBox(box, v) {
   const kids = [h('h3', {}, h('span', { class: 'dot', style: { background: '#0a66c2' } }), 'LinkedIn', h('span', { class: 'meta' }, ' → als Person (Ich-Form) · Upload machst du selbst')),
     h('div', { class: 'row' },
       h('a', { class: 'btn primary', href: `/api/videos/${v.id}/file?download=1`, download: v.file }, '⤓ Video herunterladen'),
-      v.hasImage ? h('a', { class: 'btn', href: imgUrl(v), download: v.file.replace(/\.[^.]+$/, '') + '.jpg' }, '⤓ Titelbild') : null,
+      v.hasImage ? h('a', { class: 'btn', href: imgUrl(v) + '&download=1', download: '' }, '⤓ Titelbild') : null,
       h('button', { class: 'btn', onclick: async () => { await detail.ensureSaved().catch(() => {}); copy(postText()); toast('Beitrag mit Hashtags kopiert.'); } }, '⧉ Beitrag kopieren')),
     h('p', { class: 'hint' }, 'Auf linkedin.com → „Beitrag beginnen“ → Video hinzufügen → Text einfügen. Das Titelbild kannst du dort unter „Miniaturansicht“ hochladen. Untertitel sind eingebrannt (LinkedIn läuft meist ohne Ton).')];
   if (s.state === 'done') kids.push(h('div', { class: 'status ok-text' }, '✓ Auf LinkedIn gepostet ', fmtDate(s.at), s.url ? [' · ', h('a', { href: s.url, target: '_blank', rel: 'noopener' }, 'Beitrag öffnen')] : null),
@@ -540,7 +540,8 @@ function platformBox(box, v, key, label, color) {
       const vert = s.vertical ?? (v.height > v.width);
       if (s.thumbError) kids.push(h('div', { class: 'status err' }, s.thumbError));
       else if (s.thumbAt) kids.push(h('div', { class: 'status ok-text' }, '✓ Titelbild an YouTube übermittelt (' + fmtDate(s.thumbAt) + ')'),
-        vert ? h('div', { class: 'hint' }, 'Short: YouTube zeigt bei Shorts eigene Titelbilder oft nicht an. Zuverlässig in der YouTube-App: Short öffnen → Bearbeiten → Titelbild/Cover wählen.') : null);
+        vert ? h('div', { class: 'hint' }, 'Short: YouTube zeigt bei Shorts eigene Titelbilder oft nicht an. In der YouTube-App: Short öffnen → Bearbeiten → Titelbild/Cover wählen.') : null,
+        vert && v.hasImage ? h('a', { class: 'btn small', href: imgUrl(v) + '&download=1', download: '' }, '⤓ Titelbild fürs Handy herunterladen') : null);
       else if (s.thumbNone) kids.push(h('div', { class: 'hint' }, 'Ohne Titelbild hochgeladen – Titelbild wählen und „Titelbild auf YouTube aktualisieren“ klicken.'));
       else if (!s.manual) kids.push(h('div', { class: 'hint' }, 'Titelbild-Status unbekannt (Upload vor Version 1.9.3) – bei Bedarf „Titelbild auf YouTube aktualisieren“ klicken.'));
       const chId = s.channelId || profileOf(s.profileId)?.youtube?.channel?.id || '';
@@ -602,7 +603,7 @@ function renderGenThumbs(box, v) {
     gens.length ? h('div', { class: 'variants gen-list' + (vertical ? ' vertical' : '') }, gens.map((t) => {
       const b = h('button', { class: 'variant', title: (t.text || 'ohne Text') + (t.photo ? ' · Foto: ' + t.photo : '') + ' – als Titelbild nehmen', onclick: () => pick(t) });
       b.style.backgroundImage = `url("/api/videos/${v.id}/variant/${t.k}?t=${v.thumbVariantsAt || 0}")`;
-      return b;
+      return h('div', { class: 'vwrap' }, b, h('a', { class: 'btn small ghost', href: `/api/videos/${v.id}/variant/${t.k}?download=1&t=${v.thumbVariantsAt || 0}`, download: '' }, '⤓'));
     })) : h('p', { class: 'hint' }, 'Aus deinem Foto, einem Standbild und dem Text malt die KI fertige Titelbilder – mehrere zur Auswahl.'),
     v.ai?.aiThumbError ? h('div', { class: 'status err' }, v.ai.aiThumbError) : null,
     ytBtn ? h('div', { class: 'row', style: { marginTop: '6px' } }, ytBtn, v.yt?.thumbAt ? h('span', { class: 'hint' }, '✓ zuletzt ' + fmtDate(v.yt.thumbAt)) : null) : null,

@@ -283,7 +283,9 @@ async function api(req, res, url) {
     if (sub === '/image' && m === 'GET') {
       const img = lib.imagePath(v);
       if (!img) throw new HttpError(404, 'Kein Bild.');
-      return sendFile(req, res, img, TYPES[path.extname(img).toLowerCase()] || 'image/jpeg');
+      const base = path.basename(v.file, path.extname(v.file));
+      return sendFile(req, res, img, TYPES[path.extname(img).toLowerCase()] || 'image/jpeg',
+        url.searchParams.get('download') ? `${base} – Titelbild${path.extname(img).toLowerCase() || '.jpg'}` : '');
     }
     if (sub === '' && m === 'PUT') {
       const b = await readJson(req);
@@ -378,7 +380,8 @@ async function api(req, res, url) {
     }
     if ((vm = /^\/variant\/([1-7])(\/cover|\/boost)?$/.exec(sub))) {
       const k = Number(vm[1]), file = thumbs.variantPath(v, k);
-      if (!vm[2] && m === 'GET') { if (!fs.existsSync(file)) throw new HttpError(404, 'Variante fehlt.'); return sendFile(req, res, file, 'image/jpeg'); }
+      if (!vm[2] && m === 'GET') { if (!fs.existsSync(file)) throw new HttpError(404, 'Variante fehlt.');
+        return sendFile(req, res, file, 'image/jpeg', url.searchParams.get('download') ? `${path.basename(v.file, path.extname(v.file))} – Titelbild ${k}.jpg` : ''); }
       if (vm[2] === '/cover' && m === 'POST') { lib.setImage(v, fs.readFileSync(file), '.jpg'); return send(res, 200, publicVideo(v)); }
       if (vm[2] === '/boost' && m === 'POST') { await thumbs.boost(v, k); return send(res, 200, publicVideo(v)); }
     }
