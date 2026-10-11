@@ -94,7 +94,7 @@ async function next() {
       v.yt = { ...v.yt, state: 'done', progress: 100, id: r.id, url: 'https://youtu.be/' + r.id,
         studio: 'https://studio.youtube.com/video/' + r.id + '/edit', privacy: r.privacy, thumbError: r.thumbError,
         error: '', at: new Date().toISOString(),
-        channelTitle: p.youtube.channel?.title || '',
+        channelTitle: p.youtube.channel?.title || '', channelId: p.youtube.channel?.id || '',
         history: [...(v.yt.history || []), { id: r.id, profileId: p.id, at: new Date().toISOString() }] };
     } else {
       const publishId = await tiktok.upload(p, file, progress);

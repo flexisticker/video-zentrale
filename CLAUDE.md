@@ -111,6 +111,9 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   **Nicht getestet:** echte Claude-Texte für LinkedIn, Kurzfassung mit echtem langem Gameplay.
 - 1.9.1: TikTok „The chunk size is invalid“ bei 5–10-MB-Videos (chunk_size 10 MB > Videogröße). Jetzt bis 64 MB ein Stück
   (`chunk_size = video_size`), darüber 10-MiB-Stücke, Anzahl abgerundet, Rest im letzten Stück (Media Transfer Guide). Mit Mock geprüft (7 MB, 70 MB).
+- 1.9.2: Studio-Link `studio.youtube.com/video/<id>/edit` zeigt „Ein Fehler ist aufgetreten“, wenn im Browser ein anderer Brand-Kanal aktiv ist.
+  Jetzt zusätzlich `studio.youtube.com/channel/<UC…>/videos/upload` (`v.yt.channelId`) + Hinweis „Konto wechseln“. Nicht live geprüft, ob Studio
+  über die Kanal-Adresse selbst umschaltet.
 - Einrichtung beim Kunden (11.10.2026): Zentrale läuft über `https://videos.flexisticker.de` (NPM, Access List „Nur Heimnetz“,
   lokaler UniFi-DNS-Eintrag → 192.168.1.111). Browser zeigte trotzdem 403: Chrome/Edge „Sicheres DNS“ fragte Google/Cloudflare
   (öffentliche IP) → ausschalten bzw. „aktueller Dienstanbieter“, `net-internals/#dns` leeren. Prüfung: `curl -I` am PC.

@@ -537,9 +537,14 @@ function platformBox(box, v, key, label, color) {
       kids.push(h('div', { class: 'status ok-text' }, s.manual ? '✓ Als erledigt markiert ' : `✓ Hochgeladen (${s.privacy === 'public' ? 'öffentlich' : 'privat'}) `,
         s.profileName ? 'auf „' + (s.channelTitle || s.profileName) + '“ ' : '', fmtDate(s.at)));
       if (s.thumbError) kids.push(h('div', { class: 'status err' }, s.thumbError));
+      const chId = s.channelId || profileOf(s.profileId)?.youtube?.channel?.id || '';
+      const chName = s.channelTitle || s.profileName || '';
       kids.push(h('div', { class: 'row' },
         s.studio ? h('a', { class: 'btn small', href: s.studio, target: '_blank', rel: 'noopener' }, 'In YouTube Studio öffnen → veröffentlichen') : null,
-        s.url ? h('a', { class: 'btn small ghost', href: s.url, target: '_blank', rel: 'noopener' }, 'Ansehen') : null));
+        chId ? h('a', { class: 'btn small ghost', href: `https://studio.youtube.com/channel/${chId}/videos/upload`, target: '_blank', rel: 'noopener',
+          title: 'Öffnet die Videoliste des richtigen Kanals in YouTube Studio' }, 'Videos von „' + chName + '“ in Studio') : null,
+        s.url ? h('a', { class: 'btn small ghost', href: s.url, target: '_blank', rel: 'noopener' }, 'Ansehen') : null),
+        s.studio && chName ? h('div', { class: 'hint' }, `Zeigt Studio „Ein Fehler ist aufgetreten“? Dann ist dort ein anderer Kanal aktiv: oben rechts aufs Profilbild → „Konto wechseln“ → „${chName}“ wählen und den Link erneut öffnen.`) : null);
     } else {
       kids.push(h('div', { class: 'status ok-text' }, s.manual ? '✓ Als erledigt markiert ' : '✓ Im TikTok-Posteingang ', s.profileName ? 'von „' + s.profileName + '“ ' : '', fmtDate(s.at)),
         s.manual ? null : h('div', { class: 'status' }, s.note || 'Öffne die TikTok-App → Benachrichtigung „Bearbeiten“ → Text einfügen → Posten.'),

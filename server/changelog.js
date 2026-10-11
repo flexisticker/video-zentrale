@@ -1,5 +1,8 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.9.2', date: '11.10.2026', items: [
+    'YouTube: zusätzlicher Knopf „Videos von <Kanal> in Studio“ und Hinweis, falls Studio „Ein Fehler ist aufgetreten“ zeigt (dann ist dort ein anderer Kanal aktiv).',
+  ] },
   { version: '1.9.1', date: '11.10.2026', items: [
     'Fehler behoben: TikTok-Upload brach bei Videos zwischen 5 und 10 MB mit „The chunk size is invalid“ ab. Videos bis 64 MB gehen jetzt in einem Stück. Einfach „Erneut versuchen“ klicken.',
   ] },
