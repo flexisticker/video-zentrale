@@ -152,6 +152,8 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   PWA: `public/manifest.webmanifest` (start_url `/?app=1#posten`), `public/sw.js` (nur Offline-Hinweis, kein Daten-Cache), Icons `public/icons/`,
   Installieren-Knopf (`beforeinstallprompt`) bzw. iOS-Hinweis im „Mehr“-Blatt. Geprüft: 360/390/768/1024 px ohne seitliches Verrutschen,
   iPhone-13- und iPad-Ansicht. Installation über https (videos.flexisticker.de) nötig.
+- Achtung `.dockerignore`: `tools` ist ausgeschlossen, nur `!tools/rechenhelfer` erlaubt (1.14.0/1.15.0-Bau schlug deshalb fehl). Neue Ordner,
+  die ins Image sollen, dort freigeben.
 - Einrichtung beim Kunden (11.10.2026): Zentrale läuft über `https://videos.flexisticker.de` (NPM, Access List „Nur Heimnetz“,
   lokaler UniFi-DNS-Eintrag → 192.168.1.111). Browser zeigte trotzdem 403: Chrome/Edge „Sicheres DNS“ fragte Google/Cloudflare
   (öffentliche IP) → ausschalten bzw. „aktueller Dienstanbieter“, `net-internals/#dns` leeren. Prüfung: `curl -I` am PC.
