@@ -273,6 +273,19 @@ async function api(req, res, url) {
     const sub = r[2] || '';
     if (sub === '/file' && (m === 'GET' || m === 'HEAD')) return sendFile(req, res, lib.fileOf(v), TYPES[path.extname(v.file).toLowerCase()] || 'application/octet-stream',
       url.searchParams.get('download') ? v.file : '');
+    if (sub === '/tiktok-status' && m === 'POST') {
+      if (!v.tt?.publishId) throw new HttpError(409, 'Kein TikTok-Upload bekannt.');
+      const prof = profiles.get(v.tt.profileId);
+      if (!prof) throw new HttpError(409, 'Kanal unbekannt.');
+      try {
+        const st = await tiktok.checkStatus(prof, v.tt.publishId);
+        v.tt = { ...v.tt, tikStatus: st.status || 'leer', tikReason: st.reason || '', checkedAt: new Date().toISOString(), lastCheckError: '' };
+        if (['SEND_TO_USER_INBOX', 'PUBLISH_COMPLETE'].includes(st.status)) v.tt.state = 'done';
+        if (st.status === 'FAILED') v.tt = { ...v.tt, state: 'error', error: 'TikTok: ' + (st.reason || 'Verarbeitung fehlgeschlagen') };
+      } catch (e) { v.tt = { ...v.tt, lastCheckError: e.message, checkedAt: new Date().toISOString() }; }
+      saveNow();
+      return send(res, 200, publicVideo(v));
+    }
     if (sub === '/linkedin' && m === 'POST') {
       const b = await readJson(req);
       v.li = b.undo ? { state: 'none' } : { state: 'done', at: new Date().toISOString(), url: /^https:\/\//.test(String(b.url || '')) ? String(b.url) : '' };

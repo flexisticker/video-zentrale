@@ -1,5 +1,9 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.10.1', date: '11.10.2026', items: [
+    'TikTok: Die Zentrale zeigt, was TikTok zum Upload meldet (z. B. „an deinen Posteingang zugestellt“), mit Knopf „TikTok-Status abfragen“.',
+    'Ohne Bestätigung von TikTok steht jetzt „unbestätigt“ statt eines Häkchens. Das Video findest du in der TikTok-App unter Posteingang → Benachrichtigungen („Dein Video von Zentrale ist bereit“).',
+  ] },
   { version: '1.10.0', date: '11.10.2026', items: [
     'Hintergrundmusik ruhiger: Absenkung beim Sprechen einstellbar (aus / leicht / mittel / stark), neuer Standard „leicht“ (ca. 6 dB statt 17 dB).',
     'Musik-Lautstärke per Schieberegler, Standard etwas leiser als bisher (−30 LUFS).',

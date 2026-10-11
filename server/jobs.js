@@ -127,10 +127,12 @@ async function watchTikTok(id) {
         saveNow(); autoArchive(v); return;
       }
       if (s.status === 'FAILED') { v.tt = { ...v.tt, state: 'error', error: 'TikTok: ' + (s.reason || 'Verarbeitung fehlgeschlagen') }; saveNow(); return; }
+      v.tt = { ...v.tt, tikStatus: s.status || 'leer', tikReason: s.reason || '', checkedAt: new Date().toISOString() }; save();
     } catch (e) { v.tt.lastCheckError = e.message; save(); }
   }
+  // Nach ~30 Min. ohne Bestätigung: nicht als erledigt zählen, sondern ehrlich „unbestätigt“
   const v = db().videos[id];
-  if (v?.tt?.state === 'processing') { v.tt = { ...v.tt, state: 'done', tikStatus: 'unbekannt', note: 'Status nicht bestätigt – in der TikTok-App nachsehen.' }; saveNow(); }
+  if (v?.tt?.state === 'processing') { v.tt = { ...v.tt, state: 'unconfirmed', note: 'TikTok hat die Zustellung nicht bestätigt (letzter Status: ' + (v.tt.tikStatus || '–') + ').' }; saveNow(); }
 }
 
 function autoArchive(v) {

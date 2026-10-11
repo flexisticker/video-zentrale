@@ -120,6 +120,9 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
 - 1.10.0: Kunde fand Ducking zu heftig. `music.duckLevel` (`DUCK` leicht/mittel/stark, Standard leicht ≈ −6 dB; stark = alt ≈ −17 dB),
   `music.lufs` Regler −42…−18 (Standard −30 statt −28), Titel einmal per ebur128 gemessen (`measure()`, `track.lufs`) → `volume=` statt
   laufendem loudnorm (kein Pumpen). Gemessen mit Testton.
+- 1.10.1: TikTok-Inbox-Upload funktioniert in der Sandbox (Kunde: Benachrichtigung „Dein Video von Zentrale ist bereit“ im Posteingang,
+  nicht unter Entwürfe). Statuszeile `ttStatusLine()` mit `v.tt.tikStatus/tikReason/checkedAt`, `POST /api/videos/:id/tiktok-status`,
+  Zeitüberschreitung → `state: 'unconfirmed'` statt „done“.
 - Einrichtung beim Kunden (11.10.2026): Zentrale läuft über `https://videos.flexisticker.de` (NPM, Access List „Nur Heimnetz“,
   lokaler UniFi-DNS-Eintrag → 192.168.1.111). Browser zeigte trotzdem 403: Chrome/Edge „Sicheres DNS“ fragte Google/Cloudflare
   (öffentliche IP) → ausschalten bzw. „aktueller Dienstanbieter“, `net-internals/#dns` leeren. Prüfung: `curl -I` am PC.

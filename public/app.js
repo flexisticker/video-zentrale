@@ -101,6 +101,7 @@ function stateChip(label, s) {
   if (st === 'uploading') return h('span', { class: 'chip run' }, `${label}: ${String(s.progress || 0).replace('.', ',')} %`);
   if (st === 'processing') return h('span', { class: 'chip run' }, label + ': verarbeitet');
   if (st === 'error') return h('span', { class: 'chip bad', title: s.error || '' }, label + ': Fehler');
+  if (st === 'unconfirmed') return h('span', { class: 'chip bad', title: s.note || '' }, label + ': unbestätigt');
   return h('span', { class: 'chip ok' }, label + ' ✓');
 }
 
@@ -493,6 +494,21 @@ function linkedinBox(box, v) {
   box.replaceChildren(...kids.filter(Boolean));
 }
 
+// Was TikTok selbst zum Upload meldet (+ Knopf zum erneuten Abfragen)
+const TT_STATUS = { PROCESSING_UPLOAD: 'wird bei TikTok noch verarbeitet', PROCESSING_DOWNLOAD: 'wird bei TikTok noch verarbeitet',
+  SEND_TO_USER_INBOX: 'an deinen TikTok-Posteingang zugestellt', PUBLISH_COMPLETE: 'veröffentlicht', FAILED: 'fehlgeschlagen', leer: 'keine Angabe von TikTok' };
+function ttStatusLine(v, s) {
+  if (!s.publishId) return null;
+  const btn = h('button', { class: 'btn small ghost', onclick: async () => {
+    btn.disabled = true;
+    try { Object.assign(v, await api('POST', `/api/videos/${v.id}/tiktok-status`)); await refresh(); updateDetail(); }
+    catch (x) { toast(x.message, true); btn.disabled = false; }
+  } }, '↻ TikTok-Status abfragen');
+  return h('div', { class: 'hint' }, 'TikTok meldet: ', h('b', {}, s.tikStatus ? `${TT_STATUS[s.tikStatus] || s.tikStatus} (${s.tikStatus})` : 'noch nichts'),
+    s.tikReason ? ' · Grund: ' + s.tikReason : '', s.lastCheckError ? ' · Abfrage-Fehler: ' + s.lastCheckError : '',
+    s.checkedAt ? ' · ' + fmtDate(s.checkedAt) : '', ' ', btn);
+}
+
 function platformBox(box, v, key, label, color) {
   const s = v[key] || { state: 'none' };
   const platform = key === 'yt' ? 'youtube' : 'tiktok';
@@ -529,7 +545,9 @@ function platformBox(box, v, key, label, color) {
     kids.push(h('div', { class: 'status' }, `Wird hochgeladen … ${String(s.progress || 0).replace('.', ',')} %`),
       h('div', { class: 'bar-progress' }, h('i', { style: { width: (s.progress || 0) + '%' } })));
   } else if (s.state === 'processing') {
-    kids.push(h('div', { class: 'status' }, 'Hochgeladen – TikTok verarbeitet das Video …'));
+    kids.push(h('div', { class: 'status' }, 'Hochgeladen – TikTok verarbeitet das Video …'), ttStatusLine(v, s));
+  } else if (s.state === 'unconfirmed') {
+    kids.push(h('div', { class: 'status err' }, s.note || 'TikTok hat die Zustellung nicht bestätigt.'), ttStatusLine(v, s));
   } else if (s.state === 'error') {
     kids.push(h('div', { class: 'status err' }, s.error || 'Fehler'));
   } else if (s.state === 'done') {
@@ -554,7 +572,8 @@ function platformBox(box, v, key, label, color) {
         s.studio && chName ? h('div', { class: 'hint' }, `Zeigt Studio „Ein Fehler ist aufgetreten“? Dann ist dort ein anderer Kanal aktiv: oben rechts aufs Profilbild → „Konto wechseln“ → „${chName}“ wählen und den Link erneut öffnen.`) : null);
     } else {
       kids.push(h('div', { class: 'status ok-text' }, s.manual ? '✓ Als erledigt markiert ' : '✓ Im TikTok-Posteingang ', s.profileName ? 'von „' + s.profileName + '“ ' : '', fmtDate(s.at)),
-        s.manual ? null : h('div', { class: 'status' }, s.note || 'Öffne die TikTok-App → Benachrichtigung „Bearbeiten“ → Text einfügen → Posten.'),
+        s.manual ? null : h('div', { class: 'status' }, s.note || 'Öffne die TikTok-App → Posteingang → Benachrichtigungen → Meldung antippen → Text einfügen → Posten.'),
+        s.manual ? null : ttStatusLine(v, s),
         s.url ? h('a', { class: 'btn small ghost', href: s.url, target: '_blank', rel: 'noopener' }, 'Ansehen') : null);
     }
   }
