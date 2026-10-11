@@ -268,6 +268,31 @@ async function api(req, res, url) {
     return send(res, 200, { ok: true });
   }
 
+  // Was läuft gerade? Zentrale (Schnitt, Claude, Uploads) und Rechenhelfer – für die Anzeige oben.
+  if (p === '/api/activity' && m === 'GET') {
+    const name = (v) => v ? (v.title || v.file || '').slice(0, 80) : '';
+    const vids = Object.values(db().videos).filter((v) => !v.missing);
+    const server = [], queue = { cut: 0, ai: 0, upload: 0 };
+    const hp = helper.status();
+    for (const v of vids) {
+      if (v.cut?.state === 'running') {
+        const viaHelper = /Rechenhelfer/.test(v.cut.step || '');
+        server.push({ id: v.id, kind: 'cut', name: name(v), step: v.cut.step || 'schneidet', progress: v.cut.progress || 0, waiting: viaHelper });
+      } else if (v.cut?.state === 'queued') queue.cut++;
+      if (v.ai?.state === 'running') server.push({ id: v.id, kind: 'ai', name: name(v), step: 'Claude schreibt Vorschläge' });
+      else if (v.ai?.state === 'queued') queue.ai++;
+      for (const [k, label] of [['yt', 'YouTube'], ['tt', 'TikTok']]) {
+        if (v[k]?.state === 'uploading') server.push({ id: v.id, kind: 'upload', name: name(v), step: 'Upload zu ' + label, progress: v[k].progress || 0, note: v[k].note || '' });
+        else if (v[k]?.state === 'queued') queue.upload++;
+      }
+    }
+    const byId = Object.fromEntries(vids.map((v) => [v.id, v]));
+    const helperJobs = hp.open.map((j) => ({ name: name(byId[j.label]), id: j.label || '', state: j.state,
+      since: j.takenAt || j.createdAt || 0, step: j.state === 'taken' ? 'Spracherkennung' : 'wartet auf Abholung' }));
+    return send(res, 200, { server, queue, helper: { enabled: hp.enabled, online: hp.online, seen: hp.seen, paused: hp.paused,
+      name: hp.name, status: hp.status, jobs: helperJobs }, now: Date.now() });
+  }
+
   // Große Videos in Stücken hochladen (der Browser schickt je Anfrage höchstens ~32 MB). So bleibt nichts im
   // Nginx Proxy Manager hängen (Größengrenze, Zwischenspeicher auf dessen Platte), und ein Abbruch setzt an der
   // letzten Stelle fort. Ablauf: POST /api/upload/chunk?id=&folder=&name=&offset=&total= (Body = Stück) →

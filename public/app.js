@@ -277,7 +277,7 @@ function render() {
       tabs, h('div', { class: 'spacer' }),
       versionChip(),
       h('button', { class: 'btn upl-btn', onclick: () => fileInput.click(), title: 'Videos, Titelbilder oder .json hochladen' }, '⤒', h('span', { class: 'lbl' }, ' Hochladen')), fileInput),
-    mainEl, bottom);
+    activityBar(), mainEl, bottom);
   updateCounts();
   renderMain();
   document.querySelector('.modal')?.remove();
@@ -1120,6 +1120,55 @@ async function uploadChunked(file, folder, bar, label, item) {
     uploadDone(label, item, file.name);
   } catch (e) { uploadFail(label, item, file.name, e.message); }
   finally { uploadsRunning--; }
+}
+
+// ---------- Was läuft gerade (Zentrale / Rechenhelfer) ----------
+let actEl = null, actTimer = null, actData = null;
+const ACT_ICON = { cut: '✂', ai: '🤖', upload: '⤒' };
+const mmss = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+function activityBar() {
+  actEl = h('div', { class: 'activity', role: 'status', 'aria-live': 'polite' });
+  if (actData) drawActivity(); else actEl.hidden = true;
+  if (!actTimer) pollActivity();
+  return actEl;
+}
+async function pollActivity() {
+  clearTimeout(actTimer);
+  try { actData = await api('GET', '/api/activity'); drawActivity(); } catch { }
+  const busy = actData && (actData.server.length || actData.helper.jobs.length);
+  actTimer = setTimeout(pollActivity, busy ? 2500 : 10000);
+}
+function drawActivity() {
+  if (!actEl || !actData) return;
+  const a = actData, q = a.queue, hp = a.helper;
+  const open = (id) => id ? { onclick: () => go('video/' + id), class: 'act-item link', title: 'Video öffnen' } : { class: 'act-item' };
+  const pct = (x) => x.progress ? ` ${String(x.progress).replace('.', ',')} %` : '';
+  // Zentrale
+  const own = a.server.filter((x) => !x.waiting);
+  const waiting = a.server.filter((x) => x.waiting);   // Schnitt wartet auf die Spracherkennung des Helfers
+  const waits = [q.cut && `${q.cut} Schnitt`, q.ai && `${q.ai} Claude`, q.upload && `${q.upload} Upload`].filter(Boolean).join(', ');
+  const srv = h('div', { class: 'act-box' + (own.length ? ' run' : '') },
+    h('b', {}, own.length ? '⚙ Zentrale arbeitet' : '⚙ Zentrale'),
+    own.length ? own.map((x) => h('span', open(x.id), `${ACT_ICON[x.kind] || '•'} ${x.step}${pct(x)} · „${x.name}“` + (x.note ? ` ⚠ ${x.note}` : '')))
+      : h('span', { class: 'act-item muted' }, waiting.length ? 'wartet auf den Rechenhelfer' : 'frei'),
+    waits ? h('span', { class: 'act-item muted' }, 'Warteschlange: ' + waits) : null);
+  // Rechenhelfer
+  let hpBox = null;
+  if (hp.enabled) {
+    const jobs = hp.jobs.filter((j) => j.state === 'taken');
+    const label = hp.name || 'Rechenhelfer';
+    const state = jobs.length ? null
+      : hp.online ? 'bereit'
+      : hp.seen && hp.paused ? '🎮 ' + (hp.status || 'pausiert')
+      : hp.seen && hp.status ? hp.status
+      : 'offline';
+    hpBox = h('div', { class: 'act-box' + (jobs.length ? ' run' : '') + (!hp.online && !jobs.length ? ' off' : '') },
+      h('b', {}, jobs.length ? `🖥 ${label} arbeitet` : `🖥 ${label}`),
+      jobs.length ? jobs.map((j) => h('span', open(j.id), `🎙 ${j.step} · „${j.name || 'Video'}“ · seit ${mmss(a.now - j.since)}`))
+        : h('span', { class: 'act-item muted' }, state));
+  }
+  actEl.replaceChildren(srv, hpBox || '');
+  actEl.hidden = false;
 }
 
 // ---------- Einstellungen ----------

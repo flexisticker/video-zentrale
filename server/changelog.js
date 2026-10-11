@@ -1,5 +1,9 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.17.0', date: '11.10.2026', items: [
+    '👀 Neue Leiste oben: Du siehst jederzeit, was die Zentrale gerade macht (Schritt, Video, Prozent, Warteschlange) und was dein Rechenhelfer macht (Spracherkennung für welches Video, seit wann) – oder ob beide arbeiten.',
+    'Bei der Spracherkennung steht jetzt dabei, wer rechnet: Rechenhelfer, Server-Grafikkarte oder Server-Prozessor. Klick auf einen Eintrag öffnet das Video.',
+  ] },
   { version: '1.16.2', date: '11.10.2026', items: [
     'Fehler behoben: Große Videos (z. B. 4 GB) blieben beim Hineinziehen in den Eingang bei ca. 70 % hängen. Sie gehen jetzt in 32-MB-Stücken hoch – bei einem Abbruch geht es an derselben Stelle weiter, mit Prozent, MB/s und Restzeit.',
     'Uploads zu YouTube und TikTok erkennen hängende Verbindungen und setzen selbst fort; der Grund steht beim Fortschritt (⚠). TikTok meldet Videos über 4 GB gleich verständlich.',

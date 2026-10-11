@@ -166,6 +166,10 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   zurückgeschnitten, GET = Stand, alte Teile nach 2 Tagen weg `cleanUploadParts`). Client `uploadChunked` (10 Versuche, Fortsetzen, beforeunload).
   YouTube/TikTok-Upload: `chunkTimeout()` (AbortSignal, mind. 120 s bzw. 150 KB/s), asynchrones Lesen, Hinweis `v.yt/tt.note`, TikTok > 4 GB → Fehler.
   Mock: `MOCK_STALL_AT`, Test mit `UPLOAD_MIN_TIMEOUT_S=3`. **Nicht getestet:** echter Weg über NPM beim Kunden.
+- 1.17.0: Aktivitätsleiste unter der Kopfzeile (`activityBar()`/`pollActivity()` alle 2,5 s bei Arbeit, sonst 10 s) aus `GET /api/activity`
+  (server[]: Schnitt/Claude/Uploads mit Schritt+Prozent, `waiting` = Schnitt wartet auf Helfer; queue; helper.jobs mit Video aus `job.label` = Video-ID).
+  `whisper.transcribe` meldet `onProgress(p, engine)` → Schritt „Sprache erkennen – Rechenhelfer X / Zentrale, Grafikkarte / Prozessor“.
+  Achtung Test: VP8/WebM lässt sich nicht per `-c:v copy` in MP4 kopieren (Langfassung „Qavg: nan“) → Testvideos als H.264-MP4.
 - Beim Kunden (11.10.2026): Rechenhelfer auf dem PC (RTX 3070) eingerichtet und **online**. Echte CUDA-Spracherkennung noch nicht bestätigt.
 - Achtung `.dockerignore`: `tools` ist ausgeschlossen, nur `!tools/rechenhelfer` erlaubt (1.14.0/1.15.0-Bau schlug deshalb fehl). Neue Ordner,
   die ins Image sollen, dort freigeben.

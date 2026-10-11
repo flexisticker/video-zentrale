@@ -328,7 +328,7 @@ async function runCut(v) {
   if (!segs && c.whisper.enabled) {
     step('Sprache erkennen (Whisper)');
     try {
-      words = await whisper.transcribe(file, v.id, (p) => step('Sprache erkennen (Whisper)', p));
+      words = await whisper.transcribe(file, v.id, (p, eng) => step('Sprache erkennen' + (eng ? ' – ' + eng : ' (Whisper)'), p));
       whisper.saveTranscript(v, words); segs = whisper.sentences(words);
     } catch (e) { v.cut.warning = e.message; segs = null; words = null; }
   }

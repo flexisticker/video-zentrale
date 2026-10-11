@@ -16,7 +16,7 @@ export function status() {
   return { enabled: !!c.enabled, token: c.token || '', model: c.model, online: online(), lastSeen: c.lastSeen || '', name: c.name || '',
     gpu: c.gpu || '', version: c.version || '', status: c.status || '', paused: !!c.paused, pauseGaming: c.pauseGaming !== false,
     gpuLoad: c.gpuLoad || 25, games: (c.games || []).join(', '), seen: !!(c.lastSeen && Date.now() - new Date(c.lastSeen).getTime() < ONLINE_MS), done: c.done || 0, failed: c.failed || 0, lastError: c.lastError || '',
-    open: [...jobs.values()].map((j) => ({ id: j.id, state: j.state, kind: j.kind })) };
+    open: [...jobs.values()].map((j) => ({ id: j.id, state: j.state, kind: j.kind, label: j.label, createdAt: j.createdAt, takenAt: j.takenAt || 0 })) };
 }
 
 export function configure(b) {
@@ -55,10 +55,10 @@ export function hello(b = {}) {
 }
 
 // Auftrag an den Helfer geben → Promise mit dem Whisper-JSON. Bricht ab (reject), wenn der Helfer verschwindet.
-export function transcribe(wav, { timeoutMs }) {
+export function transcribe(wav, { timeoutMs, label = '' }) {
   const id = crypto.randomBytes(8).toString('hex');
   return new Promise((resolve, reject) => {
-    const job = { id, kind: 'whisper', wav, model: cfg().model || 'large-v3-turbo', state: 'open', resolve, reject };
+    const job = { id, kind: 'whisper', wav, label, createdAt: Date.now(), model: cfg().model || 'large-v3-turbo', state: 'open', resolve, reject };
     job.timer = setTimeout(() => finish(job, new Error('Rechenhelfer hat nicht rechtzeitig geantwortet.')), timeoutMs);
     // Nicht abgeholt innerhalb von 2 Minuten → Server rechnet selbst
     job.pickup = setTimeout(() => { if (job.state === 'open') finish(job, new Error('Rechenhelfer hat den Auftrag nicht abgeholt.')); }, 120_000);

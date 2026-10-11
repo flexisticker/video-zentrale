@@ -86,13 +86,14 @@ async function doTranscribe(videoFile, key, onProgress) {
     if (a.code !== 0 || !fs.existsSync(wav)) return []; // keine Tonspur
     // -ml 1 -sow: ein Segment je Wort → Zeitmarken pro Wort
     const args = ['-m', model, '-f', wav, '-l', 'de', '-ml', '1', '-sow', '-oj', '-of', base, '-pp'];
-    const prog = (l) => { const m = /progress\s*=\s*(\d+)%/.exec(l); if (m) onProgress(Number(m[1])); };
+    let eng = 'Zentrale';
+    const prog = (l) => { const m = /progress\s*=\s*(\d+)%/.exec(l); if (m) onProgress(Number(m[1]), eng); };
     // Rechenhelfer-PC online? Dann rechnet der (großes Modell, starke Grafikkarte). Klappt das nicht, rechnet der Server.
     if (helper.online()) {
       const secs = fs.statSync(wav).size / 32000;
       try {
-        onProgress(1);
-        const j = await helper.transcribe(wav, { timeoutMs: Math.max(10 * 60_000, secs * 1000) });
+        onProgress(1, 'Rechenhelfer ' + (db().helper.name || 'PC'));
+        const j = await helper.transcribe(wav, { timeoutMs: Math.max(10 * 60_000, secs * 1000), label: key });
         lastEngine = 'Rechenhelfer (' + (db().helper.name || 'PC') + ')';
         return toWords(j);
       } catch (e) { console.error('Rechenhelfer:', e.message, '– rechne selbst.'); }
@@ -100,12 +101,13 @@ async function doTranscribe(videoFile, key, onProgress) {
     let r = null;
     // Grafikkarte zuerst (wenn eingebaut, erlaubt und nicht schon gescheitert)
     if (c.gpu !== false && fs.existsSync(BIN_GPU) && !(gpuState.tried && !gpuState.ok)) {
+      eng = 'Zentrale, Grafikkarte'; onProgress(0, eng);
       r = await run(BIN_GPU, [...args, '-t', '2'], prog, { LD_LIBRARY_PATH: GPU_LIBS + (process.env.LD_LIBRARY_PATH ? ':' + process.env.LD_LIBRARY_PATH : '') });
       const failed = r.code !== 0;
       gpuState = { tried: true, ok: !failed, error: failed ? (r.err.split('\n').find((l) => /cuda|libcuda|CUDA|device|GPU/i.test(l)) || r.err.trim().split('\n').pop() || '').slice(0, 200) : '' };
       if (failed) { console.error('Whisper auf Grafikkarte gescheitert, nehme Prozessor:', gpuState.error); r = null; }
     }
-    if (!r) r = await run(BIN, [...args, '-t', String(c.threads || 4)], prog);
+    if (!r) { eng = 'Zentrale, Prozessor'; onProgress(0, eng); r = await run(BIN, [...args, '-t', String(c.threads || 4)], prog); }
     if (r.code !== 0) throw new Error('Whisper-Fehler: ' + (r.err.trim().split('\n').pop() || r.code));
     lastEngine = gpuState.ok && gpuState.tried ? 'Server-Grafikkarte' : 'Server-Prozessor';
     return toWords(JSON.parse(fs.readFileSync(base + '.json', 'utf8')));
