@@ -193,3 +193,10 @@ input.color.small { width: 60px; height: 32px; }
 .cl ul { margin: 6px 0 0; padding-left: 20px; }
 .cl li { margin: 3px 0; }
 .upd-text { color: #f2b33d; }
+
+/* Sicherung */
+.bklist { display: grid; gap: 6px; margin-top: 8px; }
+.bkrow { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.bkrow > span:first-child { flex: 1; min-width: 160px; }
+
+a.btn { text-decoration: none; display: inline-flex; align-items: center; }

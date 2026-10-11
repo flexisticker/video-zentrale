@@ -1017,6 +1017,39 @@ async function renderSettings() {
     h('div', { class: 'row', style: { marginTop: '10px' } },
       h('button', { class: 'btn', onclick: run(() => api('POST', '/api/fal/config', { key: fKey.value, model: fModel.value, genModel: fGen.value, autoThumb: fAuto.checked }), 'Gespeichert.') }, 'Speichern')));
 
+  // ----- Sicherung -----
+  const bk = await api('GET', '/api/backup').catch(() => null);
+  const fmtSize = (n) => n > 1e6 ? (n / 1e6).toFixed(1).replace('.', ',') + ' MB' : Math.max(1, Math.round(n / 1e3)) + ' KB';
+  const restoreFrom = async (label, doIt) => {
+    if (!confirm(`Einstellungen aus „${label}“ wiederherstellen?\n\nDer jetzige Stand wird vorher automatisch gesichert. Kanäle, Verbindungen, Schlüssel, Fotos und Videodaten werden ersetzt.`)) return;
+    try { const r = await doIt(); toast(`Wiederhergestellt: ${r.profiles} Kanäle, ${r.videos} Videos. Vorheriger Stand liegt in „${r.before}“.`); await loadSettings(); again(); }
+    catch (x) { toast(x.message, true); }
+  };
+  const bkInput = h('input', { type: 'file', accept: '.zip,application/zip', class: 'hidden', onchange: (e) => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (f) restoreFrom(f.name, () => api('POST', '/api/backup/restore', undefined, f));
+  } });
+  const bkAuto = cb(bk?.auto), bkTime = h('input', { type: 'time', value: bk?.time || '03:30' }), bkKeep = numIn(bk?.keep ?? 14, { min: 1, max: 90 });
+  const backupBox = h('div', { class: 'box' }, h('h3', {}, '💾 Sicherung'),
+    h('p', { class: 'hint' }, 'Sichert Kanäle, Verbindungen, Schlüssel, alle Einstellungen, Videodaten (Titel, Texte, Status), deine Fotos und Transkripte. Die Videos selbst und die Musik liegen auf dem Server-Array und sind nicht enthalten.'),
+    !bk ? h('p', { class: 'err' }, 'Sicherungen konnten nicht geladen werden.') : null,
+    bk?.lastError ? h('p', { class: 'err' }, 'Letzte Sicherung fehlgeschlagen: ' + bk.lastError) : null,
+    bk?.lastAt ? h('p', { class: 'ok-text' }, '✓ Letzte Sicherung: ' + fmtDate(bk.lastAt)) : h('p', { class: 'hint' }, 'Noch keine Sicherung.'),
+    h('div', { class: 'row' },
+      h('a', { class: 'btn primary', href: '/api/backup/download', download: '' }, '⤓ Sicherung herunterladen'),
+      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/backup'), 'Sicherung angelegt.') }, 'Jetzt sichern'),
+      h('button', { class: 'btn ghost', onclick: () => bkInput.click() }, '⤒ Aus Datei wiederherstellen'), bkInput),
+    h('label', { class: 'check', style: { marginTop: '10px' } }, bkAuto, 'Täglich automatisch sichern'),
+    h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Uhrzeit'), bkTime), h('div', {}, h('label', {}, 'Wie viele aufheben'), bkKeep)),
+    h('div', { class: 'row', style: { marginTop: '8px' } }, h('button', { class: 'btn small', onclick: run(() => api('POST', '/api/backup/config', { auto: bkAuto.checked, time: bkTime.value, keep: Number(bkKeep.value) }), 'Gespeichert.') }, 'Speichern')),
+    bk?.list?.length ? h('details', { style: { marginTop: '10px' } }, h('summary', { class: 'hint' }, `Gespeicherte Sicherungen auf dem Server (${bk.list.length}) – ${bk.dir}`),
+      h('div', { class: 'bklist' }, bk.list.map((x) => h('div', { class: 'bkrow' },
+        h('span', {}, fmtDate(x.at), h('span', { class: 'hint' }, ' · ' + fmtSize(x.size) + (x.file.includes('vor-wiederherstellung') ? ' · vor Wiederherstellung' : ''))),
+        h('a', { class: 'btn small', href: '/api/backup/download?file=' + encodeURIComponent(x.file), download: '' }, '⤓'),
+        h('button', { class: 'btn small', onclick: () => restoreFrom(fmtDate(x.at), () => api('POST', '/api/backup/restore?file=' + encodeURIComponent(x.file))) }, 'Wiederherstellen'),
+        h('button', { class: 'btn small ghost danger', onclick: () => confirm('Diese Sicherung löschen?') && run(() => api('DELETE', '/api/backup?file=' + encodeURIComponent(x.file)), 'Gelöscht.')() }, '✕'))))) : null,
+    h('p', { class: 'hint', style: { marginTop: '10px' } }, '⚠ Die Datei enthält deine Schlüssel und Zugänge – sicher aufbewahren, nicht weitergeben.'));
+
   // ----- Allgemein + Zugang -----
   const auto = h('input', { type: 'checkbox', checked: st.settings.autoArchive });
   const old = h('input', { type: 'password', autocomplete: 'current-password' });
@@ -1038,7 +1071,7 @@ async function renderSettings() {
       h('button', { class: 'btn small', onclick: () => { const n = prompt('Name des neuen Kanals:'); if (n) run(() => api('POST', '/api/profiles', { name: n }), 'Kanal angelegt.')(); } }, '+ Kanal')),
     h('div', { class: 'settings' }, st.profiles.map(channelBox)),
     h('h2', { class: 'h2', style: { marginTop: '24px' } }, 'Apps & Zugang'),
-    h('div', { class: 'settings' }, claudeBox, cutBox, musicBox, thumbBox, googleBox, tiktokBox, account));
+    h('div', { class: 'settings' }, claudeBox, cutBox, musicBox, thumbBox, googleBox, tiktokBox, backupBox, account));
 }
 
 start();

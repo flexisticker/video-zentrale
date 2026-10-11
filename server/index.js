@@ -18,6 +18,7 @@ import * as whisper from './whisper.js';
 import * as thumbs from './thumbs.js';
 import * as music from './music.js';
 import * as ver from './version.js';
+import * as backup from './backup.js';
 import * as ai2 from './ai.js';
 
 const PORT = Number(process.env.PORT || 8090);
@@ -32,6 +33,7 @@ youtube.init();
 ai.init();
 autocut.init();
 ver.init();
+backup.init();
 const scanAll = () => lib.scan().then(() => { ai.autoQueue(); autocut.autoQueue(); });
 autocut.onDone(() => scanAll().catch(() => {}));
 
@@ -379,6 +381,25 @@ async function api(req, res, url) {
     if (ph[2] === '/recut' && m === 'POST') return send(res, 200, await thumbs.recut(photo.id));
     if (!ph[2] && m === 'PUT') return send(res, 200, thumbs.updatePhoto(photo.id, await readJson(req)));
     if (!ph[2] && m === 'DELETE') { thumbs.removePhoto(photo.id); return send(res, 200, { ok: true }); }
+  }
+  if (p === '/api/backup' && m === 'GET') return send(res, 200, backup.status());
+  if (p === '/api/backup' && m === 'POST') { backup.create(); return send(res, 200, backup.status()); }
+  if (p === '/api/backup' && m === 'DELETE') { backup.remove(url.searchParams.get('file')); return send(res, 200, backup.status()); }
+  if (p === '/api/backup/config' && m === 'POST') { backup.configure(await readJson(req)); return send(res, 200, backup.status()); }
+  if (p === '/api/backup/download' && m === 'GET') {
+    const name = url.searchParams.get('file');
+    let buf, file;
+    if (name) { const f = backup.fileOf(name); if (!f) throw new HttpError(404, 'Sicherung nicht gefunden.'); buf = fs.readFileSync(f); file = path.basename(f); }
+    else { buf = backup.build().buf; file = `video-zentrale-sicherung-${new Date().toISOString().slice(0, 10)}.zip`; }
+    return send(res, 200, buf, { 'Content-Type': 'application/zip', 'Content-Disposition': `attachment; filename="${file}"` });
+  }
+  if (p === '/api/backup/restore' && m === 'POST') {
+    const name = url.searchParams.get('file');
+    let buf;
+    if (name) { const f = backup.fileOf(name); if (!f) throw new HttpError(404, 'Sicherung nicht gefunden.'); buf = fs.readFileSync(f); }
+    else buf = await readRaw(req, 500 * 1024 * 1024);
+    try { return send(res, 200, { ...backup.restore(buf), status: backup.status() }); }
+    catch (e) { throw new HttpError(400, e.message); }
   }
   if (p === '/api/version' && m === 'GET') return send(res, 200, ver.info());
   if (p === '/api/version/check' && m === 'POST') { await ver.checkUpdate(true); return send(res, 200, ver.info()); }

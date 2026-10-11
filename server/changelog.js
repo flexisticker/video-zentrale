@@ -1,5 +1,10 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.7.0', date: '11.10.2026', items: [
+    'Sicherung der Einstellungen: Kanäle, Verbindungen, Schlüssel, Videodaten, Fotos und Transkripte als ZIP.',
+    'Täglich automatisch (Uhrzeit und Anzahl einstellbar), jederzeit „Jetzt sichern“ oder herunterladen.',
+    'Wiederherstellen aus einer Datei oder einer Sicherung auf dem Server – der vorherige Stand wird vorher automatisch gesichert.',
+  ] },
   { version: '1.6.0', date: '11.10.2026', items: [
     'Neuer Name: Micha’s Video-Zentrale.',
     'Hintergrundmusik: eigene Titel aus dem Ordner „musik“ (z. B. Epidemic Sound, je Kanal und Stimmung) oder KI-Musik über fal.ai (Sonilo, kommerziell nutzbar).',

@@ -39,6 +39,10 @@ Video-Zentrale (Browser) ── prüfen, freigeben ──▶ YouTube (privat) / 
   Titel, erzeugt fal.ai **KI-Musik** (Sonilo text-to-music, laut Anbieter kommerziell nutzbar, 0,0025 $/s ≈ 0,15 $/min; Datei +
   Nachweis mit Prompt in `musik\ki`). Gemischt unter die Stimme (Musik ca. −28 LUFS, Stimme −14 LUFS) mit Ducking. Standard: in Shorts
   an, Langfassung aus. Einstellungen → Hintergrundmusik; Musikstil je Kanal in den Kanaleinstellungen.
+- **Sicherung:** Einstellungen → 💾 Sicherung. Täglich automatisch (Standard 03:30, 14 aufheben) nach `/data/sicherung`
+  (= `/mnt/user/appdata/video-zentrale/sicherung`), „Jetzt sichern“, „Sicherung herunterladen“ (ZIP), Wiederherstellen aus Datei oder
+  Server-Liste (vorher automatische Sicherung „vor-wiederherstellung“). Enthält Kanäle, Verbindungen/Schlüssel, Einstellungen,
+  Videodaten, Fotos, Transkripte – nicht die Videos/Musik. Datei sicher aufbewahren (enthält Schlüssel).
 - **Versionierung:** Version oben rechts (Klick = Versionen / Was ist neu), Build-Nummer/Commit/Datum setzt die GitHub Action.
   Nach einem Update zeigt die Zentrale einmal „Was ist neu“. Alle 6 Std. wird auf ghcr.io nachgesehen, ob ein neueres Image da ist
   (Label `de.flexisticker.version`) – dann leuchtet „⬆ Update“.

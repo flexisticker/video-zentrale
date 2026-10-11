@@ -87,6 +87,11 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   Label-Abruf auf ghcr.io (Blob-Download in der Sandbox gesperrt, Token + Manifest gingen).
 - Netzwerk Kunde: `videos.flexisticker.de` braucht wie `studio` einen lokalen UniFi-DNS-Eintrag → 192.168.1.111 (NPM), sonst kommt
   die Anfrage über die öffentliche IP (Hairpin-NAT) und die Access List „Nur Heimnetz“ antwortet 403.
+- 1.7.0 (11.10.2026): **Sicherung** (`server/backup.js`, `db().backup`): ZIP ohne Fremdpaket (deflateRaw + `zlib.crc32`),
+  Inhalt `info.json`, `zentrale.json` (ohne `sessions`), `fotos/`, `transkripte/`. Täglich zur Uhrzeit (holt verpasste nach),
+  `/data/sicherung`, `keep` Stück. Wiederherstellen: `store.replace()` (Sitzungen bleiben), vorher `create('vor-wiederherstellung')`.
+  Routen `/api/backup[/config|/download|/restore]`. Getestet (Playwright): sichern, herunterladen (unzip ok), ändern, aus Liste und Datei
+  wiederherstellen, angemeldet geblieben.
 - Einrichtung beim Kunden (11.10.2026): Zentrale läuft über `https://videos.flexisticker.de` (NPM, Access List „Nur Heimnetz“,
   lokaler UniFi-DNS-Eintrag → 192.168.1.111). Browser zeigte trotzdem 403: Chrome/Edge „Sicheres DNS“ fragte Google/Cloudflare
   (öffentliche IP) → ausschalten bzw. „aktueller Dienstanbieter“, `net-internals/#dns` leeren. Prüfung: `curl -I` am PC.

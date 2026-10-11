@@ -42,6 +42,7 @@ const empty = () => ({
     genModel: 'fal-ai/nano-banana/edit', autoThumb: true, generated: 0 },     //   + KI-Titelbild aus Foto & Standbild
   music: { enabled: true, shorts: true, long: false, source: 'mixed', level: 'mittel', duck: true, longMax: 180,  // Hintergrundmusik
     model: 'sonilo/v1.1/text-to-music', generated: 0, spent: 0, recent: [] },
+  backup: { auto: true, time: '03:30', keep: 14, lastAt: '', lastFile: '', lastError: '' },        // Sicherung
   photos: [],                                                      // Fotos des Creators für Titelbilder
   cut: { auto: true, longVersion: true, cutPauses: true, silenceDb: -45, minPause: 20, shorts: 3, shortMin: 30, shortMax: 45,
     moveRaw: true, whisper: { enabled: true, model: 'small', threads: 4, gpu: true },
@@ -59,6 +60,19 @@ export function load() {
   try { raw = JSON.parse(fs.readFileSync(FILE, 'utf8')); }
   catch (e) { if (e.code !== 'ENOENT') console.error('Speicher nicht lesbar:', e.message); }
   if (!raw) return state;
+  return normalize(raw);
+}
+
+// Ganzen Stand ersetzen (Wiederherstellung einer Sicherung); Anmeldesitzungen bleiben.
+export function replace(raw) {
+  const sessions = state.sessions;
+  normalize(raw);
+  state.sessions = sessions;
+  saveNow();
+  return state;
+}
+
+function normalize(raw) {
   const base = empty();
   state = { ...base, ...raw, settings: { ...base.settings, ...raw.settings } };
   // 1.0 → 1.1: Verbindungen und Vorgaben lagen global, jetzt je Kanal (gehen an den Standardkanal).
@@ -76,6 +90,7 @@ export function load() {
   state.ai = { ...base.ai, ...raw.ai };
   state.fal = { ...base.fal, ...raw.fal };
   state.music = { ...base.music, ...raw.music };
+  state.backup = { ...base.backup, ...raw.backup };
   state.photos = Array.isArray(raw.photos) ? raw.photos : [];
   state.cut = { ...base.cut, ...raw.cut, whisper: { ...base.cut.whisper, ...raw.cut?.whisper },
     captions: { ...base.cut.captions, ...raw.cut?.captions }, facecam: { ...base.cut.facecam, ...raw.cut?.facecam },
