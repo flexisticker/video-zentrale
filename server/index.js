@@ -283,7 +283,7 @@ async function api(req, res, url) {
     }
     if (sub === '/cut' && m === 'POST') {
       const b = await readJson(req);
-      autocut.enqueue(v, { force: !!b.force });
+      autocut.enqueue(v, { force: !!b.force, now: true });
       return send(res, 200, publicVideo(v));
     }
     if (sub === '/transcript' && m === 'GET') {
@@ -304,7 +304,11 @@ async function api(req, res, url) {
       if (fm[2] && m === 'POST') { lib.setImage(v, fs.readFileSync(file), '.jpg'); return send(res, 200, publicVideo(v)); }
     }
     let vm;
-    if ((vm = /^\/variant\/([1-4])(\/cover|\/boost)?$/.exec(sub))) {
+    if (sub === '/aithumb' && m === 'POST') {
+      await thumbs.generateAi(v, (n) => { const f = ai2.framePath(v, n); return fs.existsSync(f) ? f : null; });
+      return send(res, 200, publicVideo(v));
+    }
+    if ((vm = /^\/variant\/([1-5])(\/cover|\/boost)?$/.exec(sub))) {
       const k = Number(vm[1]), file = thumbs.variantPath(v, k);
       if (!vm[2] && m === 'GET') { if (!fs.existsSync(file)) throw new HttpError(404, 'Variante fehlt.'); return sendFile(req, res, file, 'image/jpeg'); }
       if (vm[2] === '/cover' && m === 'POST') { lib.setImage(v, fs.readFileSync(file), '.jpg'); return send(res, 200, publicVideo(v)); }

@@ -36,10 +36,12 @@ const empty = () => ({
   youtube: { clientId: '', clientSecret: '' },                   // Google-App (für alle Kanäle gleich)
   tiktok: { clientKey: '', clientSecret: '', redirectUri: '' },  // TikTok-App (für alle Konten gleich)
   ai: { apiKey: '', auto: true, hints: '', spent: 0, count: 0 },  // Claude (Anthropic-API)
-  fal: { key: '', count: 0, model: 'fal-ai/flux-pro/kontext', boosts: 0 },  // fal.ai: Freistellen + KI-Aufwertung
+  fal: { key: '', count: 0, model: 'fal-ai/flux-pro/kontext', boosts: 0,     // fal.ai: Freistellen + KI-Aufwertung
+    genModel: 'fal-ai/nano-banana/edit', autoThumb: true, generated: 0 },     //   + KI-Titelbild aus Foto & Standbild
   photos: [],                                                      // Fotos des Creators für Titelbilder
   cut: { auto: true, longVersion: true, cutPauses: true, silenceDb: -45, minPause: 20, shorts: 3, shortMin: 30, shortMax: 45,
-    moveRaw: true, whisper: { enabled: true, model: 'small', threads: 4 },
+    moveRaw: true, whisper: { enabled: true, model: 'small', threads: 4, gpu: true },
+    window: { enabled: false, from: '01:00', to: '07:00' },                          // Nachtbetrieb
     captions: { enabled: true, color: '#FFE14D' },                                   // animierte Untertitel in Shorts
     facecam: { enabled: false, x: 0, y: 0, w: 0, h: 0 } },                           // Bereich der Facecam (Anteile 0–1)
 });
@@ -71,7 +73,8 @@ export function load() {
   state.fal = { ...base.fal, ...raw.fal };
   state.photos = Array.isArray(raw.photos) ? raw.photos : [];
   state.cut = { ...base.cut, ...raw.cut, whisper: { ...base.cut.whisper, ...raw.cut?.whisper },
-    captions: { ...base.cut.captions, ...raw.cut?.captions }, facecam: { ...base.cut.facecam, ...raw.cut?.facecam } };
+    captions: { ...base.cut.captions, ...raw.cut?.captions }, facecam: { ...base.cut.facecam, ...raw.cut?.facecam },
+    window: { ...base.cut.window, ...raw.cut?.window } };
   for (const k of ['category', 'tags', 'footer']) delete state.settings[k];
   const defaults = Object.fromEntries(defaultProfiles().map((p) => [p.id, p]));
   for (const p of state.profiles) {

@@ -260,7 +260,8 @@ function card(v) {
       h('div', { class: 'meta' }, fmtDate(v.mtime), ' · ', fmtSize(v.size)),
       h('div', { class: 'chips' }, channelBadge(v),
         ['queued', 'running'].includes(v.ai?.state) ? h('span', { class: 'chip run' }, '✨ Claude schreibt …') : null,
-        v.cut?.state === 'queued' ? h('span', { class: 'chip run' }, '✂ wartet auf Schnitt') : null,
+        v.cut?.state === 'queued' ? h('span', { class: 'chip run' }, S.settings?.cut?.window?.enabled && !S.settings?.cut?.windowOpen && !v.cut.now
+          ? `🌙 schneidet ab ${S.settings.cut.window.from} Uhr` : '✂ wartet auf Schnitt') : null,
         v.cut?.state === 'running' ? h('span', { class: 'chip run', title: v.cut.step }, `✂ ${v.cut.step || 'schneidet'} ${v.cut.progress ? v.cut.progress + ' %' : ''}`) : null,
         v.cut?.state === 'error' ? h('span', { class: 'chip bad', title: v.cut.error }, '✂ Fehler') : null,
         v.cut?.state === 'done' ? h('span', { class: 'chip ok' }, `✂ ${v.cut.outputs?.length || 0} Videos`) : null,
@@ -488,7 +489,7 @@ function renderAi(box, v) {
           const b = h('button', { class: 'variant', title: (t.ai ? 'KI-Aufwertung' : t.text + (t.photo ? ' · ' + t.photo : '')) + ' – als Titelbild nehmen',
             onclick: async () => { try { Object.assign(v, await api('POST', `/api/videos/${v.id}/variant/${t.k}/cover`)); d.setCover(); toast('Titelbild übernommen.'); } catch (x) { toast(x.message, true); } } });
           b.style.backgroundImage = `url("/api/videos/${v.id}/variant/${t.k}?t=${v.thumbVariantsAt || 0}")`;
-          const wrap = h('div', { class: 'vwrap' }, b, t.ai ? h('span', { class: 'chip ok' }, '✨ KI') : null);
+          const wrap = h('div', { class: 'vwrap' + (t.gen ? ' gen' : '') }, b, t.ai ? h('span', { class: 'chip ok' }, t.gen ? '✨ KI-Titelbild' : '✨ KI-Aufwertung') : null);
           if (!t.ai && S.settings?.fal?.configured) wrap.append(h('button', { class: 'btn small ghost', title: 'Mit fal.ai aufwerten (kostet Guthaben)', onclick: async (e) => {
             e.target.disabled = true; e.target.textContent = '✨ wird aufgewertet …';
             try { Object.assign(v, await api('POST', `/api/videos/${v.id}/variant/${t.k}/boost`)); await refresh(); updateDetail(true); toast('KI-Variante fertig.'); }
@@ -496,7 +497,14 @@ function renderAi(box, v) {
           } }, '✨ KI-Aufwertung'));
           return wrap;
         })),
-        h('button', { class: 'btn small ghost', onclick: async () => { try { Object.assign(v, await api('POST', `/api/videos/${v.id}/variants`)); await refresh(); updateDetail(true); toast('Neu erzeugt.'); } catch (x) { toast(x.message, true); } } }, '↻ Varianten neu bauen (z. B. nach neuen Fotos)')) : null,
+        h('div', { class: 'row' },
+          S.settings?.fal?.configured && v.width > v.height ? h('button', { class: 'btn small primary', onclick: async (e) => {
+            e.target.disabled = true; e.target.textContent = '✨ KI malt … (ca. 10–20 s)';
+            try { Object.assign(v, await api('POST', `/api/videos/${v.id}/aithumb`)); await refresh(); updateDetail(true); toast('KI-Titelbild fertig.'); }
+            catch (x) { toast(x.message, true); e.target.disabled = false; e.target.textContent = '✨ KI-Titelbild erzeugen'; }
+          } }, v.thumbVariants.some((t) => t.gen) ? '✨ Neues KI-Titelbild' : '✨ KI-Titelbild erzeugen') : null,
+          h('button', { class: 'btn small ghost', onclick: async () => { try { Object.assign(v, await api('POST', `/api/videos/${v.id}/variants`)); await refresh(); updateDetail(true); toast('Neu erzeugt.'); } catch (x) { toast(x.message, true); } } }, '↻ Varianten neu bauen (z. B. nach neuen Fotos)')),
+        a.aiThumbError ? h('div', { class: 'status err' }, 'KI-Titelbild: ' + a.aiThumbError) : null) : null,
       a.frames?.length ? h('details', {}, h('summary', { class: 'meta' }, 'Standbilder – Claude empfiehlt Bild ' + a.thumbnailFrame + (a.thumbnailText ? ', Text: „' + a.thumbnailText + '“' : '') + ':'),
         h('div', { class: 'frames' }, a.frames.map((n) => {
           const b = h('button', { class: 'frame' + (n === a.thumbnailFrame ? ' best' : ''), title: 'Als Titelbild nehmen', onclick: () => d.setCoverFromFrame(n) });
@@ -851,6 +859,11 @@ async function renderSettings() {
     h('button', { class: 'btn small', onclick: () => markFacecam(cam, (r) => { cam = { ...cam, ...r }; camInfo.textContent = `markiert: ${Math.round(r.x * 100)} % / ${Math.round(r.y * 100)} %, ${Math.round(r.w * 100)} × ${Math.round(r.h * 100)} % – noch speichern`; }) }, '⬚ Facecam markieren'), camInfo));
   const wModel = h('select', {}, Object.entries(w.whisper?.models || w.models || {}).map(([m, d]) => h('option', { value: m, selected: w.model === m }, `${m} – ${d}${(w.installed || []).includes(m) ? ' ✓ geladen' : ''}`)));
   const wThreads = numIn(w.threads, { min: 1, max: 32 });
+  const wGpu = cb(w.useGpu);
+  const win = c.window || {};
+  const wnOn = cb(win.enabled), wnFrom = h('input', { type: 'time', value: win.from || '01:00' }), wnTo = h('input', { type: 'time', value: win.to || '07:00' });
+  const gpuInfo = !w.gpu?.available ? 'Grafikkarten-Version ist in diesem Image nicht enthalten.'
+    : w.gpu.tried ? (w.gpu.ok ? '🟢 läuft auf der Grafikkarte' : '⚪ Grafikkarte ging nicht (' + (w.gpu.error || '?') + ') – nutzt Prozessor') : 'wird beim nächsten Mal ausprobiert';
   const dl = w.download;
   const cutBox = h('div', { class: 'box' }, h('h3', {}, '✂ Automatischer Schnitt'),
     c.running ? h('p', { class: 'hint' }, 'Läuft gerade' + (c.queued ? `, ${c.queued} warten` : '') + '.') : null,
@@ -861,6 +874,9 @@ async function renderSettings() {
     h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Shorts je Video (0 = keine)'), cShorts),
       h('div', {}, h('label', {}, 'Länge von – bis (s)'), h('div', { class: 'row' }, cSmin, cSmax))),
     h('label', { class: 'check' }, cMove, 'Original danach nach „Rohvideos“ verschieben'),
+    h('label', { class: 'check' }, wnOn, '🌙 Nachtbetrieb: nur in diesem Zeitfenster schneiden'),
+    h('div', { class: 'row' }, h('span', { class: 'hint' }, 'von'), wnFrom, h('span', { class: 'hint' }, 'bis'), wnTo,
+      h('span', { class: 'hint' }, c.window?.enabled ? (c.windowOpen ? '(gerade offen)' : '(gerade zu – „Jetzt schneiden“ geht trotzdem)') : '')),
     h('label', { class: 'check' }, capOn, 'Animierte Untertitel in Shorts (Wort für Wort)'),
     h('div', { class: 'row' }, h('span', { class: 'hint' }, 'Farbe des gesprochenen Worts:'), capColor),
     h('label', { class: 'check' }, camOn, 'Facecam-Layout für Shorts (Facecam oben, Spiel unten)'),
@@ -870,17 +886,22 @@ async function renderSettings() {
     h('p', { class: 'hint' }, 'Wandelt Gesprochenes in Text – Claude versteht dann, was du sagst. Läuft lokal auf dem Server, kostet nichts. Das Modell wird beim ersten Mal geladen.'),
     dl ? h('p', { class: dl.error ? 'err' : 'hint' }, dl.error || `Lade Modell „${dl.model}“ … ${dl.total ? Math.round(dl.done / dl.total * 100) + ' %' : Math.round(dl.done / 1e6) + ' MB'}`) : null,
     h('label', { class: 'check' }, wOn, 'Sprache erkennen'),
-    h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Modell'), wModel), h('div', {}, h('label', {}, 'CPU-Kerne'), wThreads)),
+    h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Modell'), wModel), h('div', {}, h('label', {}, 'CPU-Kerne (ohne Grafikkarte)'), wThreads)),
+    h('label', { class: 'check' }, wGpu, 'Whisper auf der Grafikkarte (deutlich schneller, Prozessor bleibt frei)'),
+    h('p', { class: 'hint' }, gpuInfo),
     h('div', { class: 'row', style: { marginTop: '12px' } },
       h('button', { class: 'btn', onclick: run(() => api('POST', '/api/cut/config', { auto: cAuto.checked, longVersion: cLong.checked, cutPauses: cPause.checked,
         silenceDb: Number(cDb.value), minPause: Number(cMin.value), shorts: Number(cShorts.value), shortMin: Number(cSmin.value), shortMax: Number(cSmax.value),
-        moveRaw: cMove.checked, whisper: { enabled: wOn.checked, model: wModel.value, threads: Number(wThreads.value) },
+        moveRaw: cMove.checked, whisper: { enabled: wOn.checked, model: wModel.value, threads: Number(wThreads.value), gpu: wGpu.checked },
+        window: { enabled: wnOn.checked, from: wnFrom.value, to: wnTo.value },
         captions: { enabled: capOn.checked, color: capColor.value }, facecam: { enabled: camOn.checked, x: cam.x, y: cam.y, w: cam.w, h: cam.h } }), 'Gespeichert.') }, 'Speichern')));
 
   // ----- Titelbilder & Fotos -----
   const fl = st.fal;
   const fKey = h('input', { type: 'password', autocomplete: 'off', placeholder: fl.configured ? 'gespeichert (' + fl.keyHint + ') – zum Ändern neu eintragen' : 'fal.ai API-Schlüssel' });
   const fModel = h('input', { value: fl.model });
+  const fGen = h('input', { value: fl.genModel });
+  const fAuto = cb(fl.autoThumb);
   const upLabel = h('select', {}, fl.labels.map((l) => h('option', { value: l }, l)));
   const upChannel = h('select', {}, h('option', { value: '' }, 'alle Kanäle'), st.profiles.map((p) => h('option', { value: p.id }, p.name)));
   const upInput = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', multiple: true, class: 'hidden', onchange: async (e) => {
@@ -913,11 +934,12 @@ async function renderSettings() {
     h('div', { class: 'row' }, upLabel, upChannel, h('button', { class: 'btn primary', onclick: () => upInput.click() }, '⤒ Fotos hochladen'), upInput),
     phList.photos.length ? photoGrid : h('p', { class: 'hint' }, 'Noch keine Fotos.'),
     h('h3', { style: { marginTop: '16px' } }, 'fal.ai'),
-    fl.configured ? h('p', { class: 'ok-text' }, `✓ eingerichtet · ${fl.count} freigestellt, ${fl.boosts} KI-Aufwertungen`) : h('p', { class: 'hint' }, 'Schlüssel von fal.ai (Dashboard → API Keys). Freistellen kostet nur Bruchteile eines Cents; „KI-Aufwertung“ eines Titelbilds je nach Modell einige Cent.'),
+    fl.configured ? h('p', { class: 'ok-text' }, `✓ eingerichtet · ${fl.count} freigestellt, ${fl.generated} KI-Titelbilder, ${fl.boosts} KI-Aufwertungen`) : h('p', { class: 'hint' }, 'Schlüssel von fal.ai (Dashboard → API Keys). Freistellen kostet nur Bruchteile eines Cents; „KI-Aufwertung“ eines Titelbilds je nach Modell einige Cent.'),
     h('label', {}, 'API-Schlüssel'), fKey,
-    h('details', {}, h('summary', { class: 'hint' }, 'Modell für die KI-Aufwertung'), fModel),
+    h('label', { class: 'check' }, fAuto, '✨ Für jedes neue Video automatisch ein KI-Titelbild erzeugen (ca. 4 Cent)'),
+    h('details', {}, h('summary', { class: 'hint' }, 'Modelle (fal.ai)'), h('label', {}, 'KI-Titelbild'), fGen, h('label', {}, 'KI-Aufwertung'), fModel),
     h('div', { class: 'row', style: { marginTop: '10px' } },
-      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/fal/config', { key: fKey.value, model: fModel.value }), 'Gespeichert.') }, 'Speichern')));
+      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/fal/config', { key: fKey.value, model: fModel.value, genModel: fGen.value, autoThumb: fAuto.checked }), 'Gespeichert.') }, 'Speichern')));
 
   // ----- Allgemein + Zugang -----
   const auto = h('input', { type: 'checkbox', checked: st.settings.autoArchive });

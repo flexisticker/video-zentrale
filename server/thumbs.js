@@ -22,11 +22,14 @@ export const variantPath = (v, k) => path.join(VAR_DIR, `${v.id}-${k}.jpg`);
 
 export function falStatus() {
   return { configured: !!fal().key, keyHint: fal().key ? '…' + fal().key.slice(-4) : '', count: fal().count || 0,
-    boosts: fal().boosts || 0, model: fal().model, labels: LABELS };
+    boosts: fal().boosts || 0, model: fal().model, labels: LABELS,
+    genModel: fal().genModel, autoThumb: fal().autoThumb !== false, generated: fal().generated || 0 };
 }
 export function falConfigure(b) {
   if (typeof b.key === 'string' && b.key.trim()) fal().key = b.key.trim();
   if (typeof b.model === 'string' && /^[a-z0-9][a-z0-9\-/.]{2,80}$/i.test(b.model.trim())) fal().model = b.model.trim();
+  if (typeof b.genModel === 'string' && /^[a-z0-9][a-z0-9\-/.]{2,80}$/i.test(b.genModel.trim())) fal().genModel = b.genModel.trim();
+  if (typeof b.autoThumb === 'boolean') fal().autoThumb = b.autoThumb;
   if (b.removeKey === true) fal().key = '';
   saveNow();
 }
@@ -229,6 +232,60 @@ export async function boost(v, k) {
   if (res.code !== 0) throw new Error('KI-Bild nicht lesbar.');
   fal().boosts = (fal().boosts || 0) + 1;
   v.thumbVariants = [...(v.thumbVariants || []).filter((x) => x.k !== 4), { k: 4, text: 'KI-Aufwertung', ai: true, from: k }];
+  v.thumbVariantsAt = Date.now();
+  saveNow();
+  return v.thumbVariants;
+}
+
+// KI-Titelbild: Bild-KI (Standard Nano Banana Edit) bekommt Foto des Creators + Standbild + Bildidee von Claude → Variante 5.
+export const autoAiThumb = () => !!fal().key && fal().autoThumb !== false;
+
+const toDataUri = (file) => {
+  const buf = fs.readFileSync(file);
+  const mime = isPng(buf) ? 'image/png' : isWebp(buf) ? 'image/webp' : 'image/jpeg';
+  return `data:${mime};base64,${buf.toString('base64')}`;
+};
+
+export async function generateAi(v, framePathOf) {
+  if (!fal().key) throw new Error('Kein fal.ai-Schlüssel eingetragen (Einstellungen → Titelbilder).');
+  const idea = v.ai?.aiThumb || { frame: v.ai?.thumbnailFrame || 2, photo: '', text: v.ai?.thumbnailText || v.title, scene: '' };
+  const frame = framePathOf(idea.frame) || framePathOf(2) || framePathOf(1);
+  if (!frame) throw new Error('Keine Standbilder – erst „Vorschlag von Claude“ holen.');
+  const ch = profiles.effective(v);
+  const avail = photosFor(ch?.id);
+  const photo = idea.photo === '' && v.ai?.aiThumb ? null : (avail.find((p) => p.label === idea.photo) || avail[0] || null);
+  const text = String(idea.text || '').toUpperCase().slice(0, 40);
+  const color = ch?.color || '#7c5cff';
+  const images = photo ? [toDataUri(photoPath(photo)), toDataUri(frame)] : [toDataUri(frame)];
+  const prompt = [
+    'Create a high-impact, click-worthy YouTube thumbnail in 16:9.',
+    photo ? 'Use the person from the FIRST image as the main subject: keep his face, identity, hairstyle and skin tone exactly the same; large, sharp and well lit, filling about 40% of the frame.' : '',
+    `Use the ${photo ? 'SECOND' : 'FIRST'} image (a frame from the video) as the scene and background reference.`,
+    idea.scene ? 'Composition: ' + idea.scene : '',
+    text ? `Add the headline text "${text}" in huge bold uppercase letters with a thick dark outline, spelled exactly like that, at most two lines, highly readable on a phone.` : '',
+    `Accent color ${color}. Vivid colors, strong contrast, depth, professional YouTube style.`,
+    'No other text, no watermarks, no logos, no borders.',
+  ].filter(Boolean).join(' ');
+  const r = await fetch(`${FAL}/${fal().genModel || 'fal-ai/nano-banana/edit'}`, {
+    method: 'POST',
+    headers: { Authorization: 'Key ' + fal().key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt, image_urls: images, aspect_ratio: '16:9', output_format: 'jpeg', num_images: 1 }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401 || r.status === 403) throw new Error('fal.ai-Schlüssel ungültig.');
+  if (r.status === 402 || /balance|credit|insufficient/i.test(JSON.stringify(j))) throw new Error('fal.ai: kein Guthaben mehr.');
+  const url = j.images?.[0]?.url;
+  if (!r.ok || !url) throw new Error('fal.ai: ' + (j.detail?.[0]?.msg || j.detail || j.error || r.status));
+  const img = await fetch(url);
+  if (!img.ok) throw new Error('fal.ai: Ergebnis nicht abrufbar.');
+  fs.mkdirSync(TMP, { recursive: true });
+  const raw = path.join(TMP, `${v.id}-ai-raw`);
+  fs.writeFileSync(raw, Buffer.from(await img.arrayBuffer()));
+  const res = await ffmpeg(['-i', raw, '-vf', 'scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720', '-frames:v', '1', '-q:v', '3', variantPath(v, 5)]);
+  fs.rmSync(raw, { force: true });
+  if (res.code !== 0) throw new Error('KI-Bild nicht lesbar.');
+  fal().generated = (fal().generated || 0) + 1;
+  v.thumbVariants = [{ k: 5, text, ai: true, gen: true, photo: photo?.label || '' }, ...(v.thumbVariants || []).filter((x) => x.k !== 5)];
   v.thumbVariantsAt = Date.now();
   saveNow();
   return v.thumbVariants;

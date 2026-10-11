@@ -69,11 +69,12 @@ http.createServer(async (req, res) => {
   }
   if (p === '/v2/post/publish/status/fetch/') return json(res, 200, { data: { status: tt.got >= tt.size ? 'SEND_TO_USER_INBOX' : 'PROCESSING_UPLOAD' }, error: { code: 'ok' } });
   // fal.ai: Freistellen (liefert Test-Person mit Transparenz) und KI-Aufwertung (liefert das Eingangsbild zurück)
-  if (p === '/fal-ai/birefnet' || p.startsWith('/fal-ai/flux')) {
+  if (p === '/fal-ai/birefnet' || p.startsWith('/fal-ai/flux') || p === '/fal-ai/nano-banana/edit') {
     if (req.headers.authorization !== 'Key fal-test') return json(res, 401, { detail: 'Unauthorized' });
     const j = JSON.parse(b.toString());
-    log.push({ fal: { model: p, prompt: (j.prompt || '').slice(0, 60), img: j.image_url?.slice(0, 30) } });
-    falLast = Buffer.from(j.image_url.split(',')[1], 'base64');
+    const imgs = j.image_urls || [j.image_url];
+    log.push({ fal: { model: p, prompt: (j.prompt || '').slice(0, 400), imgs: imgs.length, aspect: j.aspect_ratio } });
+    falLast = Buffer.from(imgs[imgs.length - 1].split(',')[1], 'base64');
     if (p === '/fal-ai/birefnet') return json(res, 200, { image: { url: 'http://127.0.0.1:9300/falimg/cut.png' } });
     return json(res, 200, { images: [{ url: 'http://127.0.0.1:9300/falimg/last' }] });
   }
@@ -106,6 +107,7 @@ http.createServer(async (req, res) => {
           titles: ['1v3 Clutch in letzter Sekunde 😱', 'Die krasseste Runde der Woche', 'Fortnite: Clutch mit 1 HP'],
           description: 'Diese Runde war wild.\n\nSchreib in die Kommentare, wie du gespielt hättest!', tags: ['fortnite', 'clutch', 'gaming', 'deutsch'],
           tiktok: '1 HP, 3 Gegner, 0 Plan 😅 #fortnite #clutch #gaming', thumbnailFrame: 2, thumbnailText: '1 HP CLUTCH',
+          aiThumb: { frame: 2, photo: 'schockiert', text: '1 HP Clutch', scene: 'The shocked streamer leans in from the right, the game fight explodes behind him in the left half, text top left.' },
           thumbs: [{ frame: 2, photo: 'schockiert', text: '1 HP?!', side: 'right' }, { frame: 4, photo: 'jubelnd', text: 'Clutch des Jahres', side: 'left' }, { frame: 5, photo: '', text: 'Wie?!', side: 'right' }] };
     return json(res, 200, { id: 'msg_1', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn',
       content: [{ type: 'text', text: JSON.stringify(out) }], usage: { input_tokens: 7000, output_tokens: 900 } });

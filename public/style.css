@@ -180,3 +180,5 @@ input.color.small { width: 60px; height: 32px; }
 .phcard .photo { position: relative; }
 .photo-img { position: absolute; inset: 0; background: center / contain no-repeat; }
 .phcard .photo { background-repeat: repeat; }
+.vwrap.gen { grid-column: 1 / -1; }
+.cam + .row input[type=time], .box input[type=time] { width: auto; }

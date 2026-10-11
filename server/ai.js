@@ -68,7 +68,7 @@ function schema(ids, labels) {
   return {
     type: 'object',
     additionalProperties: false,
-    required: ['summary', 'game', 'channel', 'channelReason', 'titles', 'description', 'tags', 'tiktok', 'thumbnailFrame', 'thumbnailText', 'thumbs'],
+    required: ['summary', 'game', 'channel', 'channelReason', 'titles', 'description', 'tags', 'tiktok', 'thumbnailFrame', 'thumbnailText', 'thumbs', 'aiThumb'],
     properties: {
       summary: s('Ein Satz: was im Video passiert (für den Creator, nicht fürs Publikum).'),
       game: s('Erkanntes Spiel bzw. Produkt/Thema, leer wenn unklar.'),
@@ -80,6 +80,15 @@ function schema(ids, labels) {
       tiktok: s('TikTok-Text: 1–2 kurze Sätze mit Hook + 3–6 passende Hashtags, höchstens 300 Zeichen.'),
       thumbnailFrame: { type: 'integer', description: 'Nummer des Standbilds (1–6), das sich am besten als Titelbild eignet.' },
       thumbnailText: s('2–4 Wörter als Text fürs Titelbild (groß, knallig).'),
+      aiThumb: { type: 'object', additionalProperties: false, required: ['frame', 'photo', 'text', 'scene'],
+        description: 'Idee für ein von einer Bild-KI erzeugtes Titelbild (das stärkste, klickstärkste).',
+        properties: {
+          frame: { type: 'integer', description: 'Standbild-Nummer 1–6 als Szenen-Vorlage' },
+          photo: { type: 'string', enum: labels, description: 'Gesichtsausdruck des Creators ("" = Creator nicht ins Bild)' },
+          text: s('2–4 Wörter Schlagzeile fürs Bild, exakt so geschrieben, wie sie erscheinen soll'),
+          scene: s('Auf Englisch: Bildaufbau für die Bild-KI – was im Vordergrund/Hintergrund passiert, Pose und Emotion der Person, '
+            + 'Licht und Farben, wo der Text steht. Konkret, bildhaft, 2–4 Sätze, ohne den Text selbst zu wiederholen.'),
+        } },
       thumbs: { type: 'array', description: 'Genau 3 unterschiedliche Titelbild-Ideen (Bild, Foto des Creators, Text, Seite des Fotos).',
         items: { type: 'object', additionalProperties: false, required: ['frame', 'photo', 'text', 'side'], properties: {
           frame: { type: 'integer', description: 'Standbild-Nummer 1–6 als Hintergrund' },
@@ -188,6 +197,8 @@ export async function suggest(v, extra = '') {
     thumbs: (Array.isArray(out.thumbs) ? out.thumbs : []).slice(0, 3).map((t) => ({
       frame: frames.some((f) => f.n === t.frame) ? t.frame : frames[0].n, photo: clip(t.photo, 30),
       text: clip(t.text, 60), side: t.side === 'left' ? 'left' : 'right' })),
+    aiThumb: out.aiThumb ? { frame: frames.some((f) => f.n === out.aiThumb.frame) ? out.aiThumb.frame : frames[0].n,
+      photo: clip(out.aiThumb.photo, 30), text: clip(out.aiThumb.text, 60), scene: clip(out.aiThumb.scene, 1200) } : null,
   };
   // Noch nichts von Hand oder per .json eingetragen → Vorschlag gleich übernehmen (bleibt änderbar).
   if (!v.editedAt && !v.metaAt) {
@@ -201,9 +212,15 @@ export async function suggest(v, extra = '') {
   // Titelbild-Varianten (Standbild + Foto + Text); ohne eigenes Titelbild gleich Variante 1 nehmen
   let vars = [];
   try { vars = await thumbs.makeVariants(v, (n) => { const f = framePath(v, n); return fs.existsSync(f) ? f : null; }); } catch (e) { console.error('Varianten', e.message); }
+  // KI-Titelbild (fal.ai) – wird bevorzugt Titelbild, wenn noch keins gesetzt ist
+  let aiOk = false;
+  if (thumbs.autoAiThumb() && v.width > v.height && v.ai.aiThumb) {
+    try { await thumbs.generateAi(v, (n) => { const f = framePath(v, n); return fs.existsSync(f) ? f : null; }); aiOk = true; }
+    catch (e) { v.ai.aiThumbError = e.message; console.error('KI-Titelbild', e.message); }
+  }
   if (!v.image) {
     try {
-      const src = vars.length ? thumbs.variantPath(v, 1) : framePath(v, v.ai.thumbnailFrame);
+      const src = aiOk ? thumbs.variantPath(v, 5) : vars.length ? thumbs.variantPath(v, 1) : framePath(v, v.ai.thumbnailFrame);
       setImage(v, fs.readFileSync(src), '.jpg'); v.ai.coverApplied = true;
     } catch { /* egal */ }
   }

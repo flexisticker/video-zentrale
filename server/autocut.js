@@ -17,7 +17,10 @@ const FONTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fon
 const TMP = path.join(DATA_DIR, 'tmp');
 const cfg = () => db().cut;
 
-export function status() { return { ...cfg(), whisper: whisper.status(), gpu: gpu.status(), running: running ? { id: running } : null, queued: queue.length }; }
+export function status() {
+  return { ...cfg(), whisper: whisper.status(), gpu: gpu.status(), running: running ? { id: running } : null, queued: queue.length,
+    windowOpen: inWindow() };
+}
 
 export function configure(b) {
   const c = cfg();
@@ -31,6 +34,13 @@ export function configure(b) {
   if (b.shortMin != null && !isNaN(b.shortMin)) c.shortMin = Math.round(num(b.shortMin, 10, 170));
   if (b.shortMax != null && !isNaN(b.shortMax)) c.shortMax = Math.round(num(b.shortMax, c.shortMin, 180));
   if (typeof b.moveRaw === 'boolean') c.moveRaw = b.moveRaw;
+  if (b.window) {
+    const t = (x) => /^([01]\d|2[0-3]):[0-5]\d$/.test(x || '');
+    if (typeof b.window.enabled === 'boolean') c.window.enabled = b.window.enabled;
+    if (t(b.window.from)) c.window.from = b.window.from;
+    if (t(b.window.to)) c.window.to = b.window.to;
+  }
+  if (typeof (b.whisper || {}).gpu === 'boolean') c.whisper.gpu = b.whisper.gpu;
   if (b.captions) {
     if (typeof b.captions.enabled === 'boolean') c.captions.enabled = b.captions.enabled;
     if (/^#[0-9a-f]{6}$/i.test(b.captions.color || '')) c.captions.color = b.captions.color;
@@ -287,20 +297,44 @@ async function runCut(v) {
 const queue = [];
 let running = null;
 
-export function enqueue(v, { force = false } = {}) {
+// Zeitfenster (Nachtbetrieb): „01:00“–„07:00“, auch über Mitternacht („22:00“–„06:00“)
+const minutes = (t) => { const [h, m] = String(t || '0:0').split(':').map(Number); return (h || 0) * 60 + (m || 0); };
+export function inWindow(d = new Date()) {
+  const w = cfg().window;
+  if (!w?.enabled) return true;
+  const now = d.getHours() * 60 + d.getMinutes(), a = minutes(w.from), b = minutes(w.to);
+  return a <= b ? now >= a && now < b : now >= a || now < b;
+}
+
+export function enqueue(v, { force = false, now = false } = {}) {
   if (v.missing) throw new Error('Videodatei nicht gefunden.');
-  if (['queued', 'running'].includes(v.cut?.state)) return;
+  if (['queued', 'running'].includes(v.cut?.state)) {
+    if (now && v.cut.state === 'queued' && !priority.has(v.id)) { priority.add(v.id); v.cut = { ...v.cut, now: true }; save(); next(); }
+    return;
+  }
   if (v.cut?.state === 'done' && !force) return;
-  v.cut = { state: 'queued', step: '', progress: 0, at: new Date().toISOString() };
+  v.cut = { state: 'queued', step: '', progress: 0, at: new Date().toISOString(), now: !!now };
+  if (now) priority.add(v.id);
   queue.push(v.id);
   save();
   next();
 }
+const priority = new Set(); // „Jetzt schneiden“ von Hand: ignoriert das Zeitfenster
 
+let windowTimer = null;
 async function next() {
   if (running) return;
-  const id = queue.shift();
+  // Von Hand angestoßene zuerst; sonst nur im Zeitfenster
+  let i = queue.findIndex((x) => priority.has(x));
+  if (i < 0 && !inWindow()) {
+    clearTimeout(windowTimer);
+    windowTimer = setTimeout(next, 60_000); // jede Minute nachsehen, ob das Fenster offen ist
+    return;
+  }
+  if (i < 0) i = 0;
+  const [id] = queue.splice(i, 1);
   if (!id) return;
+  priority.delete(id);
   running = id;
   const v = db().videos[id];
   try {

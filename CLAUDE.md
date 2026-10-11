@@ -65,6 +65,14 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
 - 1.4.1: Freigestellte Fotos erschienen in den Einstellungen weiter mit Hintergrund – Browser-Zwischenspeicher (gleiche Bild-URL).
   Jetzt `photo.rev` in der URL, Schachbrett hinter Fotos, Status „✓ freigestellt“, Knopf zeigt „wird freigestellt …“.
   fal-Anfrageverlauf (Connector `search_request_history`) zeigte: Freistellen beim Kunden lief erfolgreich (200).
+- 1.5.0 (11.10.2026): **Whisper auf der GPU** (zweiter whisper.cpp-Build mit CUDA im Dockerfile, Stufe `nvidia/cuda:12.4.1-devel`,
+  Architekturen 61;75;86, CUDA-Bibliotheken nach `/usr/local/lib/whisper-cuda`; `whisper.js` versucht GPU zuerst, Fehler → Prozessor,
+  `cut.whisper.gpu`), **Nachtbetrieb** (`cut.window {enabled, from, to}`, `autocut.inWindow()`, manueller Schnitt = Vorrang),
+  **KI-Titelbild** (Claude-Schema `aiThumb {frame, photo, text, scene}`, `thumbs.generateAi()` → `fal-ai/nano-banana/edit`
+  mit Foto + Standbild, 16:9, 0,04 $ → Variante 5, `fal.autoThumb`, `fal.genModel`). Workflow schafft vor dem Build Platz.
+  **Nicht getestet:** CUDA-Whisper auf der echten GTX 1050 Ti, Nano Banana mit echten Fotos des Kunden.
+- Musik/Sound: Epidemic Sound hat keine API für uns → Kunde lädt Titel selbst herunter. KI-Alternative (angeboten, nicht gebaut):
+  Sonilo (fal, „commercial-use-safe“) video-to-music 0,009 $/s, text-to-music 0,0025 $/s, Sound-Effekte 0,0018–0,009 $/s.
 - Ideen: KI-B-Roll per fal.ai (Video-Modelle), Viralitäts-Bewertung, Hook-Einblendung, Zeitplan.
 - Entscheidung Kunde: Auslieferungen immer direkt auf `main` pushen.
 - Ideen: Zeitplan (publishAt), Shorts automatisch aus langen Videos, Titelbild-Vorlagen, Untertitel (whisper).

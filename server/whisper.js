@@ -5,6 +5,10 @@ import { spawn } from 'node:child_process';
 import { db, save, DATA_DIR } from './store.js';
 
 const BIN = process.env.WHISPER_BIN || 'whisper-cli';
+// Variante mit NVIDIA-CUDA (eigener Build im Image); CUDA-Bibliotheken liegen daneben, der Treiber kommt vom Host.
+const BIN_GPU = process.env.WHISPER_BIN_GPU || '/usr/local/bin/whisper-cli-cuda';
+const GPU_LIBS = process.env.WHISPER_GPU_LIBS || '/usr/local/lib/whisper-cuda';
+let gpuState = { tried: false, ok: false, error: '' };
 const MODEL_URL = process.env.WHISPER_MODEL_URL || 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{m}.bin';
 const DIR = path.join(DATA_DIR, 'whisper');
 const TMP = path.join(DATA_DIR, 'tmp');
@@ -17,7 +21,8 @@ let download = null; // { model, done, total, error }
 
 export function status() {
   const c = cfg();
-  return { enabled: c.enabled, model: c.model, threads: c.threads, models: MODELS,
+  return { enabled: c.enabled, model: c.model, threads: c.threads, models: MODELS, useGpu: c.gpu !== false,
+    gpu: { available: fs.existsSync(BIN_GPU), ...gpuState },
     installed: Object.keys(MODELS).filter((m) => fs.existsSync(modelFile(m))),
     download: download && { ...download } };
 }
@@ -50,10 +55,10 @@ async function ensureModel(m) {
   }
 }
 
-function run(cmd, args, onLine) {
+function run(cmd, args, onLine, env) {
   return new Promise((resolve) => {
     let err = '';
-    const p = spawn('nice', ['-n', '15', cmd, ...args], { stdio: ['ignore', 'ignore', 'pipe'] });
+    const p = spawn('nice', ['-n', '15', cmd, ...args], { stdio: ['ignore', 'ignore', 'pipe'], env: env ? { ...process.env, ...env } : process.env });
     p.stderr.on('data', (d) => { const s = d.toString(); err = (err + s).slice(-4000); if (onLine) for (const l of s.split(/\r?\n/)) onLine(l); });
     p.on('error', (e) => resolve({ code: -1, err: e.message }));
     p.on('close', (code) => resolve({ code, err }));
@@ -79,10 +84,17 @@ async function doTranscribe(videoFile, key, onProgress) {
     const a = await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', videoFile, '-map', '0:a:0', '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav]);
     if (a.code !== 0 || !fs.existsSync(wav)) return []; // keine Tonspur
     // -ml 1 -sow: ein Segment je Wort → Zeitmarken pro Wort
-    const r = await run(BIN, ['-m', model, '-f', wav, '-l', 'de', '-t', String(c.threads || 4), '-ml', '1', '-sow', '-oj', '-of', base, '-pp'], (l) => {
-      const m = /progress\s*=\s*(\d+)%/.exec(l);
-      if (m) onProgress(Number(m[1]));
-    });
+    const args = ['-m', model, '-f', wav, '-l', 'de', '-ml', '1', '-sow', '-oj', '-of', base, '-pp'];
+    const prog = (l) => { const m = /progress\s*=\s*(\d+)%/.exec(l); if (m) onProgress(Number(m[1])); };
+    let r = null;
+    // Grafikkarte zuerst (wenn eingebaut, erlaubt und nicht schon gescheitert)
+    if (c.gpu !== false && fs.existsSync(BIN_GPU) && !(gpuState.tried && !gpuState.ok)) {
+      r = await run(BIN_GPU, [...args, '-t', '2'], prog, { LD_LIBRARY_PATH: GPU_LIBS + (process.env.LD_LIBRARY_PATH ? ':' + process.env.LD_LIBRARY_PATH : '') });
+      const failed = r.code !== 0;
+      gpuState = { tried: true, ok: !failed, error: failed ? (r.err.split('\n').find((l) => /cuda|libcuda|CUDA|device|GPU/i.test(l)) || r.err.trim().split('\n').pop() || '').slice(0, 200) : '' };
+      if (failed) { console.error('Whisper auf Grafikkarte gescheitert, nehme Prozessor:', gpuState.error); r = null; }
+    }
+    if (!r) r = await run(BIN, [...args, '-t', String(c.threads || 4)], prog);
     if (r.code !== 0) throw new Error('Whisper-Fehler: ' + (r.err.trim().split('\n').pop() || r.code));
     const j = JSON.parse(fs.readFileSync(base + '.json', 'utf8'));
     return (j.transcription || []).map((x) => ({ s: (x.offsets?.from || 0) / 1000, e: (x.offsets?.to || 0) / 1000, t: String(x.text || '').trim() }))

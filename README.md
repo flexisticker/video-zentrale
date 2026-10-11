@@ -19,6 +19,8 @@ Video-Zentrale (Browser) ── prüfen, freigeben ──▶ YouTube (privat) / 
   Bildmitte, neu kodiert). Die Short-Stellen wählt **Claude** aus den ~12 auffälligsten Kandidaten (Standbild + Lautstärke +
   Gesagtes), ohne API-Schlüssel die lautesten Stellen. Ergebnisse → `geschnitten` (mit Claude-Vorschlag), Original → `rohvideos`.
   Sicherungen: ohne Tonspur oder wenn mehr als die Hälfte wegfiele, wird nichts gekürzt. Läuft nacheinander mit niedriger Priorität.
+- **Nachtbetrieb:** unter Einstellungen → Automatischer Schnitt ein Zeitfenster (Standard 01:00–07:00) einschalten – neue
+  Aufnahmen warten dann bis zum Fensterbeginn (Kachel zeigt „🌙 schneidet ab …“). „Jetzt schneiden“ im Detail geht trotzdem sofort.
 - **Shorts im Detail:** animierte Untertitel Wort für Wort (Schrift Anton, gesprochenes Wort farbig, Farbe einstellbar),
   optional **Facecam-Layout** (Facecam oben, Spiel unten – Bereich einmal unter Einstellungen → Automatischer Schnitt
   auf einem Standbild markieren). Kodiert wird auf der **Grafikkarte** (NVENC), wenn verfügbar, sonst Prozessor.
@@ -28,8 +30,12 @@ Video-Zentrale (Browser) ── prüfen, freigeben ──▶ YouTube (privat) / 
   (Standbild, Gesichtsausdruck, 2–4 Wörter, Seite); die Zentrale baut sie mit ffmpeg (1280 × 720, Kanalfarbe).
   Variante 1 wird automatisch Titelbild, solange keins da ist. „✨ KI-Aufwertung“ schickt eine Variante an
   FLUX Kontext (fal.ai, ca. 4 Cent) → Variante 4. Nur für Querformat (Shorts/TikTok-Cover wählt man in der App).
+- **KI-Titelbild:** Claude beschreibt zu jedem Video eine passende Szene + Bildtext; Nano Banana (fal.ai, ca. 4 Cent) malt daraus
+  mit deinem Foto und einem Standbild ein komplettes Titelbild (Variante 5, wird bevorzugt als Titelbild gesetzt). Automatisch
+  (abschaltbar unter Einstellungen → fal.ai) oder per Knopf „✨ KI-Titelbild erzeugen“ im Detail.
 - **Sprache → Text (Whisper):** whisper.cpp im Container, Modell (Standard „small“, ~470 MB) wird beim ersten Mal von
-  huggingface.co nach `/data/whisper` geladen. Transkript im Detail aufklappbar (Klick auf Zeit springt im Video), geht an Claude.
+  huggingface.co nach `/data/whisper` geladen. Läuft auf der **Grafikkarte** (CUDA, gleiche Unraid-Einstellungen wie NVENC),
+  sonst automatisch auf dem Prozessor. Transkript im Detail aufklappbar (Klick auf Zeit springt im Video), geht an Claude.
 - **Kanäle:** jedes Video gehört zu einem Kanal (Start: **MichaModus** = Gaming, Standard; **3dbymicha** = gewerblich).
   Je Kanal eigene YouTube- und TikTok-Verbindung sowie Vorgaben (Kategorie, Tags, Text unter der Beschreibung).
   Die Zentrale **schlägt den Kanal vor**: `"channel"` in der .json › Stichwörter des Kanals in Titel/Dateiname (zählen doppelt),
