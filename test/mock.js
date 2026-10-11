@@ -60,5 +60,25 @@ http.createServer(async (req, res) => {
     res.writeHead(tt.got >= tt.size ? 201 : 206); return res.end();
   }
   if (p === '/v2/post/publish/status/fetch/') return json(res, 200, { data: { status: tt.got >= tt.size ? 'SEND_TO_USER_INBOX' : 'PROCESSING_UPLOAD' }, error: { code: 'ok' } });
+  if (p === '/v1/messages') {
+    const j = JSON.parse(b.toString());
+    const imgs = j.messages[0].content.filter((c) => c.type === 'image').length;
+    log.push({ claude: { model: j.model, imgs, fallbacks: j.fallbacks, beta: req.headers['anthropic-beta'], key: req.headers['x-api-key'],
+      effort: j.output_config?.effort, schema: Object.keys(j.output_config?.format?.schema?.properties || {}), channels: j.output_config?.format?.schema?.properties?.channel?.enum } });
+    if (req.headers['x-api-key'] !== 'sk-ant-test') return json(res, 401, { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } });
+    const text = j.messages[0].content[0].text;
+    const filament = /Dateiname: .*filament/i.test(text);
+    const out = filament
+      ? { summary: 'Testdruck mit PETG auf dem A1.', game: 'Bambu Lab A1', channel: '3dbymicha', channelReason: 'Es geht um 3D-Druck mit PETG.',
+          titles: ['PETG auf dem Bambu A1 – so klappt der erste Druck', 'Neues Filament im Test: PETG', 'PETG vs. PLA – mein Ergebnis'],
+          description: 'Heute teste ich neues PETG-Filament auf dem Bambu Lab A1.\n\nWas taugt es?', tags: ['3d-druck', 'petg', 'bambu lab', 'filament'],
+          tiktok: 'PETG-Test auf dem A1 – Ergebnis? 👀 #3ddruck #bambulab #petg', thumbnailFrame: 4, thumbnailText: 'PETG TEST' }
+      : { summary: 'Clutch-Szene im Shooter.', game: 'Fortnite', channel: 'michamodus', channelReason: 'Gameplay-Highlight.',
+          titles: ['1v3 Clutch in letzter Sekunde 😱', 'Die krasseste Runde der Woche', 'Fortnite: Clutch mit 1 HP'],
+          description: 'Diese Runde war wild.\n\nSchreib in die Kommentare, wie du gespielt hättest!', tags: ['fortnite', 'clutch', 'gaming', 'deutsch'],
+          tiktok: '1 HP, 3 Gegner, 0 Plan 😅 #fortnite #clutch #gaming', thumbnailFrame: 2, thumbnailText: '1 HP CLUTCH' };
+    return json(res, 200, { id: 'msg_1', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn',
+      content: [{ type: 'text', text: JSON.stringify(out) }], usage: { input_tokens: 7000, output_tokens: 900 } });
+  }
   json(res, 404, { error: 'mock 404 ' + p });
 }).listen(9300, () => console.log('mock 9300'));

@@ -11,6 +11,7 @@ import * as youtube from './youtube.js';
 import * as tiktok from './tiktok.js';
 import * as jobs from './jobs.js';
 import * as profiles from './profiles.js';
+import * as ai from './ai.js';
 
 const PORT = Number(process.env.PORT || 8090);
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -21,6 +22,8 @@ load();
 lib.ensureDirs();
 jobs.init();
 youtube.init();
+ai.init();
+const scanAll = () => lib.scan().then(() => ai.autoQueue());
 
 // ---------- Hilfen ----------
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
@@ -191,7 +194,7 @@ async function api(req, res, url) {
     return send(res, 200, { videos: Object.values(db().videos).map(publicVideo), busy: jobs.busy() });
   }
   if (p === '/api/scan' && m === 'POST') {
-    await lib.scan();
+    await scanAll();
     return send(res, 200, { ok: true });
   }
 
@@ -219,7 +222,7 @@ async function api(req, res, url) {
       Object.assign(video, { size: st.size, mtime: st.mtimeMs });
       saveNow();
     }
-    lib.scan();
+    scanAll();
     return send(res, 200, { ok: true, name: target, id: video?.id || null });
   }
 
@@ -262,6 +265,19 @@ async function api(req, res, url) {
       lib.moveVideo(v, folder);
       return send(res, 200, publicVideo(v));
     }
+    if (sub === '/ai' && m === 'POST') {
+      const b = await readJson(req);
+      if (v.missing) throw new HttpError(409, 'Videodatei nicht gefunden.');
+      ai.enqueue(v, String(b.extra || '').slice(0, 500));
+      return send(res, 200, publicVideo(v));
+    }
+    let fm;
+    if ((fm = /^\/ai-frame\/([1-9])(\/cover)?$/.exec(sub))) {
+      const file = ai.framePath(v, Number(fm[1]));
+      if (!fs.existsSync(file)) throw new HttpError(404, 'Standbild fehlt.');
+      if (!fm[2] && m === 'GET') return sendFile(req, res, file, 'image/jpeg');
+      if (fm[2] && m === 'POST') { lib.setImage(v, fs.readFileSync(file), '.jpg'); return send(res, 200, publicVideo(v)); }
+    }
     if (sub === '/forget' && m === 'POST') {
       if (!v.missing) throw new HttpError(409, 'Nur fehlende Videos können entfernt werden.');
       delete db().videos[v.id]; saveNow();
@@ -279,7 +295,7 @@ async function api(req, res, url) {
   }
 
   if (p === '/api/settings' && m === 'GET') {
-    return send(res, 200, { settings: db().settings, youtube: youtube.status(), tiktok: tiktok.status(),
+    return send(res, 200, { settings: db().settings, youtube: youtube.status(), tiktok: tiktok.status(), ai: ai.status(),
       profiles: profiles.list().map(profiles.publicProfile), version: VERSION });
   }
   if (p === '/api/settings' && m === 'PUT') {
@@ -290,6 +306,7 @@ async function api(req, res, url) {
     saveNow();
     return send(res, 200, { ok: true });
   }
+  if (p === '/api/ai/config' && m === 'POST') { ai.configure(await readJson(req)); return send(res, 200, ai.status()); }
   if (p === '/api/profiles' && m === 'POST') return send(res, 200, profiles.publicProfile(profiles.create(await readJson(req))));
   if (p === '/api/youtube/config' && m === 'POST') { youtube.configure(await readJson(req)); return send(res, 200, youtube.status()); }
   if (p === '/api/tiktok/config' && m === 'POST') { tiktok.configure(await readJson(req)); return send(res, 200, tiktok.status()); }
@@ -343,6 +360,6 @@ const server = http.createServer(async (req, res) => {
 server.requestTimeout = 0; // große Uploads
 server.listen(PORT, () => console.log(`Video-Zentrale ${VERSION} läuft auf Port ${PORT}`));
 
-lib.scan();
-setInterval(() => lib.scan().catch((e) => console.error('Scan:', e.message)), 60_000);
+scanAll();
+setInterval(() => scanAll().catch((e) => console.error('Scan:', e.message)), 60_000);
 process.on('SIGTERM', () => { try { saveNow(); } finally { process.exit(0); } });

@@ -168,7 +168,8 @@ function startPolling() {
       if (S.openId) updateDetail(); else if (S.tab !== 'einstellungen') renderMain();
       updateCounts();
     } catch { /* still */ }
-    const active = S.busy || S.videos.some((v) => ['queued', 'uploading', 'processing'].includes(v.yt?.state) || ['queued', 'uploading', 'processing'].includes(v.tt?.state));
+    const active = S.busy || S.videos.some((v) => ['queued', 'uploading', 'processing'].includes(v.yt?.state) || ['queued', 'uploading', 'processing'].includes(v.tt?.state)
+      || ['queued', 'running'].includes(v.ai?.state));
     pollTimer = setTimeout(tick, active ? 2000 : 15000);
   };
   pollTimer = setTimeout(tick, 2000);
@@ -255,7 +256,9 @@ function card(v) {
     h('div', { class: 'body' },
       h('div', { class: 'title' }, v.title || v.file),
       h('div', { class: 'meta' }, fmtDate(v.mtime), ' · ', fmtSize(v.size)),
-      h('div', { class: 'chips' }, channelBadge(v), stateChip('YouTube', v.yt), stateChip('TikTok', v.tt)),
+      h('div', { class: 'chips' }, channelBadge(v),
+        ['queued', 'running'].includes(v.ai?.state) ? h('span', { class: 'chip run' }, '✨ Claude schreibt …') : null,
+        stateChip('YouTube', v.yt), stateChip('TikTok', v.tt)),
       running ? h('div', { class: 'bar-progress' }, h('i', { style: { width: (running.progress || 0) + '%' } })) : null));
 }
 
@@ -347,7 +350,9 @@ function openDetail(id) {
       v.file, ' · ', fmtSize(v.size), v.width ? ` · ${v.width} × ${v.height}` : '', v.duration ? ' · ' + fmtDur(v.duration) : ''),
     h('div', { style: { marginTop: '10px' } }, moveBox));
 
+  const aiBox = h('div', { class: 'section ai' });
   const right = h('div', {},
+    aiBox,
     h('label', {}, 'Kanal'), chan, chanReason,
     field('title', 'Titel (YouTube)', 100),
     field('description', 'Beschreibung (YouTube)', 5000, { area: true, rows: 6 }),
@@ -371,7 +376,12 @@ function openDetail(id) {
   document.body.append(modal);
   const onKey = (e) => { if (e.key === 'Escape' && !document.querySelector('.modal input:focus, .modal textarea:focus')) close(); };
   document.addEventListener('keydown', onKey);
-  detail = { id, v, ytBox, ttBox, moveBox, folderEl, ensureSaved, chanInfo, chan, cleanup: () => document.removeEventListener('keydown', onKey) };
+  const setField = (k, val) => { f[k].value = val; f[k].dispatchEvent(new Event('input')); };
+  const setCoverFromFrame = async (n) => {
+    try { Object.assign(v, await api('POST', `/api/videos/${v.id}/ai-frame/${n}/cover`)); setCover(); toast('Titelbild übernommen.'); }
+    catch (x) { toast(x.message, true); }
+  };
+  detail = { id, v, ytBox, ttBox, moveBox, folderEl, ensureSaved, chanInfo, chan, aiBox, f, setField, setCover, setCoverFromFrame, isDirty: () => !saveBtn.disabled, markClean: () => { saveBtn.disabled = true; }, cleanup: () => document.removeEventListener('keydown', onKey) };
   updateDetail();
 }
 
@@ -438,10 +448,63 @@ function platformBox(box, v, key, label, color) {
   box.replaceChildren(...[...kids, actions].filter(Boolean));
 }
 
+function renderAi(box, v) {
+  const a = v.ai || {};
+  const conf = S.settings?.ai?.configured;
+  const hint = h('input', { placeholder: 'Hinweis für Claude (optional), z. B. „Thema: 1v3 in Runde 5“' });
+  const ask = h('button', { class: 'btn primary', disabled: !conf || ['queued', 'running'].includes(a.state), onclick: async () => {
+    try { await detail.ensureSaved(); Object.assign(v, await api('POST', `/api/videos/${v.id}/ai`, { extra: hint.value })); await refresh(); updateDetail(); startPolling(); }
+    catch (x) { toast(x.message, true); }
+  } }, a.titles ? '✨ Neuen Vorschlag holen' : '✨ Vorschlag von Claude');
+  const kids = [h('h3', {}, '✨ Claude')];
+  if (!conf) kids.push(h('div', { class: 'hint' }, 'Claude ist noch nicht eingerichtet – ', h('a', { href: '#einstellungen' }, 'Einstellungen → Claude'), '.'));
+  if (a.state === 'queued' || a.state === 'running') kids.push(h('div', { class: 'status' }, 'Claude schaut sich das Video an und schreibt … (ca. 20–60 s)'));
+  if (a.state === 'error') kids.push(h('div', { class: 'status err' }, a.error || 'Fehler'));
+  if (a.titles?.length) {
+    const d = detail;
+    kids.push(
+      h('div', { class: 'meta' }, a.summary, a.game ? ' · ' + a.game : '', a.applied ? ' · automatisch übernommen' : ''),
+      h('div', { class: 'ai-titles' }, h('b', {}, 'Titel – anklicken zum Übernehmen:'),
+        a.titles.map((t) => h('button', { class: 'btn small ai-pick', onclick: () => d.setField('title', t) }, t))),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn small', onclick: () => d.setField('description', a.description) }, 'Beschreibung übernehmen'),
+        h('button', { class: 'btn small', onclick: () => d.setField('tags', a.tags.join(', ')) }, 'Tags übernehmen'),
+        h('button', { class: 'btn small', onclick: () => d.setField('tiktok', a.tiktok) }, 'TikTok-Text übernehmen'),
+        h('button', { class: 'btn small primary', onclick: () => {
+          d.setField('title', a.titles[0]); d.setField('description', a.description); d.setField('tags', a.tags.join(', ')); d.setField('tiktok', a.tiktok);
+          if (a.channel && !d.chan.value) { d.chan.value = a.channel; d.chan.dispatchEvent(new Event('change')); }
+          toast('Übernommen – noch speichern.');
+        } }, 'Alles übernehmen')),
+      a.frames?.length ? h('div', {}, h('b', { class: 'meta' }, 'Titelbild – Claude empfiehlt Bild ' + a.thumbnailFrame + (a.thumbnailText ? ', Text: „' + a.thumbnailText + '“' : '') + ':'),
+        h('div', { class: 'frames' }, a.frames.map((n) => {
+          const b = h('button', { class: 'frame' + (n === a.thumbnailFrame ? ' best' : ''), title: 'Als Titelbild nehmen', onclick: () => d.setCoverFromFrame(n) });
+          b.style.backgroundImage = `url("/api/videos/${v.id}/ai-frame/${n}?t=${encodeURIComponent(a.at)}")`;
+          return b;
+        }))) : null,
+      h('div', { class: 'hint' }, 'Vorschlag vom ' + fmtDate(a.at) + (a.cost ? ' · ca. ' + a.cost.toFixed(3).replace('.', ',') + ' $' : '')));
+  }
+  if (conf) kids.push(h('div', { class: 'row', style: { marginTop: '8px' } }, hint, ask));
+  add(box, ...kids.filter(Boolean)); // add() filtert null
+}
+
 function updateDetail() {
   if (!detail) return;
   const v = S.videos.find((x) => x.id === detail.id);
   if (!v) return;
+  const aiChanged = JSON.stringify(v.ai || null) !== detail.aiSeen;
+  if (aiChanged) {
+    detail.aiSeen = JSON.stringify(v.ai || null);
+    // Vorschlag wurde serverseitig übernommen und hier ist nichts ungespeichert → Felder auffrischen
+    if (v.ai?.applied && v.ai?.state === 'done' && !detail.isDirty()) {
+      for (const k of ['title', 'description', 'tags', 'tiktok']) detail.f[k].value = v[k] || '';
+      for (const k of ['title', 'description', 'tags', 'tiktok']) detail.f[k].dispatchEvent(new Event('input'));
+      detail.markClean();
+      detail.v.title = v.title;
+    }
+    Object.assign(detail.v, { ai: v.ai, suggestion: v.suggestion, hasImage: v.hasImage, imageVersion: v.imageVersion, image: v.image });
+    detail.setCover(); detail.chanInfo();
+    detail.aiBox.replaceChildren(); renderAi(detail.aiBox, detail.v);
+  }
   // Felder nicht überschreiben, nur Status-Teile
   Object.assign(detail.v, { yt: v.yt, tt: v.tt, folder: v.folder, file: v.file, hasImage: v.hasImage, imageVersion: v.imageVersion });
   if (!detail.chan.value && v.suggestion?.id !== detail.v.suggestion?.id) { detail.v.suggestion = v.suggestion; detail.chanInfo(); }
@@ -527,11 +590,12 @@ async function renderSettings() {
     const color = h('input', { type: 'color', value: p.color, class: 'color' });
     const def = h('input', { type: 'checkbox', checked: p.isDefault });
     const kw = h('textarea', { rows: 3, value: p.keywords, placeholder: 'z. B. fortnite, minecraft, clutch' });
+    const style = h('textarea', { rows: 2, value: p.aiStyle, placeholder: 'Worum geht es, wie soll Claude schreiben, wer schaut zu?' });
     const cat = h('select', {}, CATEGORIES.map(([id, n]) => h('option', { value: id, selected: p.category === id }, n)));
     const tags = h('input', { value: p.tags });
     const footer = h('textarea', { rows: 3, value: p.footer, placeholder: 'z. B. Links zu Discord/Shop, „Musik: Epidemic Sound“' });
     const save = run(() => api('PUT', '/api/profiles/' + p.id, { name: name.value, color: color.value, isDefault: def.checked || undefined,
-      keywords: kw.value, category: cat.value, tags: tags.value, footer: footer.value }), 'Kanal gespeichert.');
+      keywords: kw.value, aiStyle: style.value, category: cat.value, tags: tags.value, footer: footer.value }), 'Kanal gespeichert.');
 
     // YouTube
     const yp = y.pending[p.id];
@@ -574,6 +638,7 @@ async function renderSettings() {
     const box = h('div', { class: 'box channelbox' }, head,
       h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Name'), name), h('div', {}, h('label', {}, 'Farbe'), color)),
       h('label', { class: 'check' }, def, 'Standardkanal (wenn kein Stichwort passt)'),
+      h('label', {}, 'Beschreibung für Claude (Thema, Ton, Publikum)'), style,
       h('label', {}, 'Stichwörter für den Vorschlag (mit Komma; Titel/Dateiname zählt doppelt)'), kw,
       h('div', { class: 'two' }, h('div', {}, h('label', {}, 'YouTube-Kategorie'), cat), h('div', {}, h('label', {}, 'Standard-Tags'), tags)),
       h('label', {}, 'Text unter jeder YouTube-Beschreibung'), footer,
@@ -614,6 +679,24 @@ async function renderSettings() {
     h('div', { class: 'row', style: { marginTop: '12px' } },
       h('button', { class: 'btn', onclick: run(() => api('POST', '/api/tiktok/config', { clientKey: tKey.value, clientSecret: tSecret.value, redirectUri: tRedirect.value }), 'Gespeichert.') }, 'Speichern')));
 
+  // ----- Claude -----
+  const a = st.ai;
+  const aKey = h('input', { type: 'password', autocomplete: 'off', placeholder: a.configured ? 'gespeichert (' + a.keyHint + ') – zum Ändern neu eintragen' : 'sk-ant-…' });
+  const aAuto = h('input', { type: 'checkbox', checked: a.auto });
+  const aHints = h('textarea', { rows: 3, value: a.hints, placeholder: 'z. B. „Ich heiße Micha“, „keine Emojis im Titel“, „immer auf Deutsch“' });
+  const claudeBox = h('div', { class: 'box' }, h('h3', {}, '✨ Claude (Vorschläge für Titel & Texte)'),
+    a.configured ? h('p', { class: 'ok-text' }, '✓ eingerichtet · bisher ' + a.count + ' Vorschläge, ca. ' + (a.spent || 0).toFixed(2).replace('.', ',') + ' $') : null,
+    h('ol', { class: 'steps' },
+      h('li', {}, 'console.anthropic.com: Konto anlegen, unter Billing Guthaben aufladen (z. B. 5 $; eigene Abrechnung, nicht im Claude-Abo enthalten).'),
+      h('li', {}, 'API Keys → „Create Key“ → hier einfügen und speichern.'),
+      h('li', {}, 'Ein Vorschlag kostet etwa 2–6 Cent (Claude Opus 5.5 schaut 6 Standbilder an).')),
+    h('label', {}, 'API-Schlüssel'), aKey,
+    h('label', { class: 'check' }, aAuto, 'Neue Videos unter „Zur Freigabe“ automatisch vorschlagen lassen'),
+    h('label', {}, 'Allgemeine Hinweise an Claude'), aHints,
+    h('div', { class: 'row', style: { marginTop: '12px' } },
+      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/ai/config', { apiKey: aKey.value, auto: aAuto.checked, hints: aHints.value }), 'Gespeichert.') }, 'Speichern'),
+      a.configured ? h('button', { class: 'btn ghost danger', onclick: () => confirm('API-Schlüssel entfernen?') && run(() => api('POST', '/api/ai/config', { removeKey: true }), 'Schlüssel entfernt.')() }, 'Schlüssel entfernen') : null));
+
   // ----- Allgemein + Zugang -----
   const auto = h('input', { type: 'checkbox', checked: st.settings.autoArchive });
   const old = h('input', { type: 'password', autocomplete: 'current-password' });
@@ -633,7 +716,7 @@ async function renderSettings() {
       h('button', { class: 'btn small', onclick: () => { const n = prompt('Name des neuen Kanals:'); if (n) run(() => api('POST', '/api/profiles', { name: n }), 'Kanal angelegt.')(); } }, '+ Kanal')),
     h('div', { class: 'settings' }, st.profiles.map(channelBox)),
     h('h2', { class: 'h2', style: { marginTop: '24px' } }, 'Apps & Zugang'),
-    h('div', { class: 'settings' }, googleBox, tiktokBox, account));
+    h('div', { class: 'settings' }, claudeBox, googleBox, tiktokBox, account));
 }
 
 start();

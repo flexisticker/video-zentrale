@@ -131,3 +131,14 @@ ol.steps { padding-left: 20px; margin: 6px 0; color: var(--muted); font-size: 13
 .conn .code { font-size: 20px; }
 input.color { padding: 2px; height: 38px; }
 .channelbox h3 .chip { margin-left: 6px; }
+
+/* Claude */
+.section.ai { border-color: rgba(124, 92, 255, .5); margin-top: 0; margin-bottom: 4px; }
+.section.ai .row input { flex: 1; min-width: 180px; width: auto; }
+.ai-titles { display: grid; gap: 6px; margin: 8px 0; justify-items: start; }
+.ai-pick { white-space: normal; text-align: left; }
+.frames { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin: 6px 0; }
+.frame { aspect-ratio: 16 / 9; background: #000 center / cover no-repeat; border: 2px solid var(--line); border-radius: 6px; padding: 0; }
+.frame.best { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(124, 92, 255, .4); }
+.frame:hover { border-color: var(--text); }
+@media (max-width: 560px) { .frames { grid-template-columns: repeat(3, 1fr); } }

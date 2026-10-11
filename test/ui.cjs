@@ -45,9 +45,9 @@ const mock = () => fetch('http://127.0.0.1:9300/_log').then((r) => r.json());
 
   // "Irgendwas" (Standard = MichaModus) auf 3dbymicha umstellen und zu YouTube
   await pg.click('.card:has-text("Irgendwas")'); await pg.waitForSelector('.modal');
-  console.log('Detail-Hinweis:', await pg.textContent('.modal .detail > div:nth-child(2) .hint'));
+  console.log('Detail-Hinweis:', await pg.textContent('.modal select + .hint'));
   await pg.selectOption('.modal select >> nth=0', '3dbymicha'); await pg.waitForTimeout(200);
-  console.log('nach Wahl:', await pg.textContent('.modal .detail > div:nth-child(2) .hint'));
+  console.log('nach Wahl:', await pg.textContent('.modal select + .hint'));
   await pg.screenshot({ path: T + '/3-detail.png', fullPage: true });
   await pg.click('.modal button:has-text("Auf YouTube hochladen")');
   await pg.waitForSelector('.modal >> text=Hochgeladen (privat)', { timeout: 30000 });

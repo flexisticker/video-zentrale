@@ -3,7 +3,8 @@ FROM node:22-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production PORT=8090 DATA_DIR=/data VIDEO_DIR=/videos TZ=Europe/Berlin
-COPY package.json ./
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY server ./server
 COPY public ./public
 # Unraid: Eintrag „WebUI“ im Container-Menü

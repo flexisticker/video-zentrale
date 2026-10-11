@@ -13,11 +13,14 @@ export const emptyConnections = () => ({
 // Startwerte für die beiden Kanäle des Kunden (alles in den Einstellungen änderbar).
 export const defaultProfiles = () => [
   { id: 'michamodus', name: 'MichaModus', color: '#7c5cff', isDefault: true, category: '20', tags: 'gaming, deutsch', footer: '',
+    aiStyle: 'Gaming-Kanal: Highlights, Clutches, Fails und Let\'s Plays – locker, humorvoll, mit Hook; Publikum eher jung.',
     keywords: 'gaming, gameplay, lets play, letsplay, zocken, clutch, stream, twitch, ps5, xbox, controller, fortnite, minecraft, '
       + 'valorant, warzone, call of duty, cod, apex, gta, fifa, ea fc, rocket league, cs2, league of legends, elden ring, '
       + 'zelda, mario, pokemon, ranked, boss',
     ...emptyConnections() },
   { id: '3dbymicha', name: '3dbymicha', color: '#25c4f4', isDefault: false, category: '28', tags: '3d-druck, 3d druck, bambu lab', footer: '',
+    aiStyle: 'Gewerblicher Kanal rund um 3D-Druck (Bambu Lab A1 / A1 mini) und Druck von Flexisticker (Tassen, Textilien): '
+      + 'Werkstatt-Einblicke, Produkte, Tipps – freundlich, sachlich, zeigt Können; potenzielle Kunden und Maker als Publikum.',
     keywords: '3d, 3d-druck, 3d druck, 3ddruck, 3d print, 3d printing, 3d-drucker, drucker, bambu, bambulab, a1 mini, ams, '
       + 'filament, pla, petg, tpu, slicer, druckbett, nozzle, cad, fusion 360, tinkercad, makerworld, printables, flexisticker, '
       + 'tasse, tassen, sublimation, dtf, plotter, textildruck, werkstatt',
@@ -32,6 +35,7 @@ const empty = () => ({
   profiles: defaultProfiles(),                                   // Kanäle mit eigenen Verbindungen und Vorgaben
   youtube: { clientId: '', clientSecret: '' },                   // Google-App (für alle Kanäle gleich)
   tiktok: { clientKey: '', clientSecret: '', redirectUri: '' },  // TikTok-App (für alle Konten gleich)
+  ai: { apiKey: '', auto: true, hints: '', spent: 0, count: 0 },  // Claude (Anthropic-API)
 });
 
 let state = empty();
@@ -57,11 +61,14 @@ export function load() {
   }
   state.youtube = { clientId: raw.youtube?.clientId || '', clientSecret: raw.youtube?.clientSecret || '' };
   state.tiktok = { clientKey: raw.tiktok?.clientKey || '', clientSecret: raw.tiktok?.clientSecret || '', redirectUri: raw.tiktok?.redirectUri || '' };
+  state.ai = { ...base.ai, ...raw.ai };
   for (const k of ['category', 'tags', 'footer']) delete state.settings[k];
+  const defaults = Object.fromEntries(defaultProfiles().map((p) => [p.id, p]));
   for (const p of state.profiles) {
     const c = emptyConnections();
     p.youtube = { ...c.youtube, ...p.youtube };
     p.tiktok = { ...c.tiktok, ...p.tiktok };
+    if (p.aiStyle === undefined) p.aiStyle = defaults[p.id]?.aiStyle || '';
   }
   return state;
 }

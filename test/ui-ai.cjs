@@ -1,0 +1,35 @@
+// Oberflächentest Claude-Vorschläge (Server 8190 mit ANTHROPIC_BASE_URL auf test/mock.js)
+const { chromium } = require(require('child_process').execSync('npm root -g').toString().trim() + '/playwright');
+const T = process.argv[2], B = 'http://localhost:8190';
+(async () => {
+  const br = await chromium.launch();
+  const pg = await br.newPage({ viewport: { width: 1400, height: 900 } });
+  const errs = []; pg.on('pageerror', (e) => errs.push(e.message)); pg.on('dialog', (d) => d.accept());
+  await pg.goto(B);
+  await pg.fill('input[type=password]', 'geheim123'); await pg.click('button[type=submit]');
+  await pg.waitForSelector('.card');
+  await pg.click('text=Einstellungen'); await pg.waitForSelector('text=Claude (Vorschläge');
+  const box = pg.locator('.box', { hasText: 'Claude (Vorschläge' });
+  await box.locator('input[type=password]').fill('sk-ant-test');
+  await box.locator('button', { hasText: 'Speichern' }).click();
+  await box.locator('text=eingerichtet').waitFor();
+  await pg.screenshot({ path: T + '/ai-1-settings.png' });
+  await pg.click('text=Zur Freigabe');
+  await pg.waitForFunction(() => !document.body.innerText.includes('Claude schreibt'), null, { timeout: 90000 });
+  await pg.waitForTimeout(1500);
+  console.log('Kacheln:', await pg.$$eval('.card', (cs) => cs.map((c) => c.querySelector('.title').textContent + ' | ' + c.querySelector('.chip.channel')?.textContent)));
+  await pg.screenshot({ path: T + '/ai-2-grid.png' });
+  await pg.click('.card:has-text("Clutch")'); await pg.waitForSelector('.section.ai .ai-pick');
+  await pg.click('.ai-pick >> nth=2');
+  console.log('Titel nach Klick:', await pg.inputValue('.modal .detail > div:nth-child(2) input:not([type=file]) >> nth=1'));
+  await pg.click('.frame >> nth=0'); await pg.waitForSelector('text=Titelbild übernommen');
+  await pg.screenshot({ path: T + '/ai-3-detail.png', fullPage: true });
+  await pg.fill('.section.ai input', 'Thema: letzte Runde'); await pg.click('.section.ai button:has-text("Neuen Vorschlag")');
+  await pg.waitForSelector('.section.ai >> text=Claude schaut'); await pg.waitForSelector('.section.ai .ai-pick', { timeout: 60000 });
+  console.log('zweiter Vorschlag ok');
+  await pg.setViewportSize({ width: 390, height: 844 }); await pg.waitForTimeout(500);
+  console.log('Handy Detail Überlauf:', await pg.evaluate(() => document.querySelector('.modal').scrollWidth > innerWidth));
+  await pg.screenshot({ path: T + '/ai-4-handy.png' });
+  console.log('JS-Fehler:', errs);
+  await br.close();
+})().catch((e) => { console.error('FEHLER', e); process.exit(1); });

@@ -18,6 +18,12 @@ Video-Zentrale (Browser) ── prüfen, freigeben ──▶ YouTube (privat) / 
   Die Zentrale **schlägt den Kanal vor**: `"channel"` in der .json › Stichwörter des Kanals in Titel/Dateiname (zählen doppelt),
   Tags, Beschreibung › Standardkanal. Im Detail lässt sich der Kanal ändern; die Kacheln zeigen ihn als Abzeichen
   (gestrichelt mit „?“ = Vorschlag), oben gibt es einen Kanal-Filter.
+- **Claude schlägt vor:** Für neue Videos unter „Zur Freigabe“ schaut sich Claude 6 Standbilder an und schlägt
+  3 Titel, Beschreibung, Tags, TikTok-Text, den Kanal und das beste Standbild als Titelbild (plus kurzen Bildtext) vor.
+  Ist noch nichts von Hand oder per .json eingetragen, wird der erste Vorschlag gleich übernommen (bleibt änderbar),
+  ohne eigenes Titelbild wird das empfohlene Standbild gesetzt. Im Detail: andere Titel anklicken, einzelne Teile
+  übernehmen, mit Hinweis neu vorschlagen lassen. Claude hört den Ton nicht – Inhalte aus Gesprochenem gehen in die Notiz.
+  Braucht einen eigenen API-Schlüssel von console.anthropic.com (Guthaben, ca. 2–6 Cent je Vorschlag, Modell Claude Opus 5.5).
 - **Zur Freigabe** = Ordner `geschnitten`. Neben `Mein Video.mp4` dürfen liegen:
   `Mein Video.jpg` (oder .png/.webp) als Titelbild und `Mein Video.json` mit Texten:
   ```json
