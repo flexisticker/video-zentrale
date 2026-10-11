@@ -10,6 +10,7 @@ import * as lib from './library.js';
 import * as youtube from './youtube.js';
 import * as tiktok from './tiktok.js';
 import * as jobs from './jobs.js';
+import * as profiles from './profiles.js';
 
 const PORT = Number(process.env.PORT || 8090);
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -86,7 +87,7 @@ function checkLimit(ip) {
 
 function publicVideo(v) {
   const strip = (s) => s && { ...s, history: undefined, historyCount: s.history?.length || 0 };
-  return { ...v, yt: strip(v.yt), tt: strip(v.tt),
+  return { ...v, yt: strip(v.yt), tt: strip(v.tt), suggestion: profiles.suggest(v),
     imageVersion: v.image ? (v.imageAt || v.mtime) : v.thumbAt, hasImage: !!lib.imagePath(v) };
 }
 
@@ -137,7 +138,7 @@ async function api(req, res, url) {
 
   // TikTok leitet hierher zurück (ohne Sitzungs-Cookie, abgesichert über "state").
   if (p === '/oauth/tiktok' && m === 'GET') {
-    try { await tiktok.finishConnect(url.href); res.writeHead(302, { Location: '/?tiktok=ok#einstellungen' }); }
+    try { const p = await tiktok.finishConnect(url.href); res.writeHead(302, { Location: '/?tiktok=ok&kanal=' + encodeURIComponent(p.name) + '#einstellungen' }); }
     catch (e) { res.writeHead(302, { Location: '/?tiktok=' + encodeURIComponent(e.message) + '#einstellungen' }); }
     return res.end();
   }
@@ -238,6 +239,11 @@ async function api(req, res, url) {
       for (const [k, max] of [['title', 100], ['description', 5000], ['tags', 500], ['tiktok', 2200], ['note', 2000], ['category', 4]]) {
         if (k in b) v[k] = str(b[k], max);
       }
+      if ('channel' in b) {
+        const c = String(b.channel || '');
+        if (c && !profiles.get(c)) throw new HttpError(400, 'Unbekannter Kanal.');
+        if (c !== (v.channel || '')) { v.channel = c; v.channelFrom = c ? 'manual' : ''; }
+      }
       v.editedAt = new Date().toISOString();
       saveNow();
       return send(res, 200, publicVideo(v));
@@ -273,26 +279,35 @@ async function api(req, res, url) {
   }
 
   if (p === '/api/settings' && m === 'GET') {
-    return send(res, 200, { settings: db().settings, youtube: youtube.status(), tiktok: tiktok.status(), version: VERSION });
+    return send(res, 200, { settings: db().settings, youtube: youtube.status(), tiktok: tiktok.status(),
+      profiles: profiles.list().map(profiles.publicProfile), version: VERSION });
   }
   if (p === '/api/settings' && m === 'PUT') {
     const b = await readJson(req);
     const s = db().settings;
-    if (typeof b.category === 'string') s.category = b.category.slice(0, 4);
     if (typeof b.language === 'string') s.language = b.language.slice(0, 8);
-    if (typeof b.footer === 'string') s.footer = b.footer.slice(0, 2000);
-    if (typeof b.tags === 'string') s.tags = b.tags.slice(0, 500);
     if (typeof b.autoArchive === 'boolean') s.autoArchive = b.autoArchive;
     saveNow();
     return send(res, 200, { ok: true });
   }
+  if (p === '/api/profiles' && m === 'POST') return send(res, 200, profiles.publicProfile(profiles.create(await readJson(req))));
   if (p === '/api/youtube/config' && m === 'POST') { youtube.configure(await readJson(req)); return send(res, 200, youtube.status()); }
-  if (p === '/api/youtube/connect' && m === 'POST') return send(res, 200, await youtube.startConnect());
-  if (p === '/api/youtube/disconnect' && m === 'POST') { youtube.disconnect(); return send(res, 200, youtube.status()); }
   if (p === '/api/tiktok/config' && m === 'POST') { tiktok.configure(await readJson(req)); return send(res, 200, tiktok.status()); }
-  if (p === '/api/tiktok/auth-url' && m === 'GET') return send(res, 200, { url: tiktok.authUrl() });
-  if (p === '/api/tiktok/finish' && m === 'POST') { const b = await readJson(req); return send(res, 200, await tiktok.finishConnect(b.url)); }
-  if (p === '/api/tiktok/disconnect' && m === 'POST') { tiktok.disconnect(); return send(res, 200, tiktok.status()); }
+  if (p === '/api/tiktok/finish' && m === 'POST') {
+    const b = await readJson(req);
+    return send(res, 200, profiles.publicProfile(await tiktok.finishConnect(b.url, b.profileId)));
+  }
+  if ((r = /^\/api\/profiles\/([a-z0-9-]{1,40})(\/.*)?$/.exec(p))) {
+    const prof = profiles.get(r[1]);
+    if (!prof) throw new HttpError(404, 'Kanal nicht gefunden.');
+    const sub = r[2] || '';
+    if (sub === '' && m === 'PUT') return send(res, 200, profiles.publicProfile(profiles.update(prof.id, await readJson(req))));
+    if (sub === '' && m === 'DELETE') { profiles.remove(prof.id); return send(res, 200, { ok: true }); }
+    if (sub === '/youtube/connect' && m === 'POST') return send(res, 200, await youtube.startConnect(prof));
+    if (sub === '/youtube/disconnect' && m === 'POST') { youtube.disconnect(prof); return send(res, 200, { ok: true }); }
+    if (sub === '/tiktok/auth-url' && m === 'GET') return send(res, 200, { url: tiktok.authUrl(prof) });
+    if (sub === '/tiktok/disconnect' && m === 'POST') { tiktok.disconnect(prof); return send(res, 200, { ok: true }); }
+  }
 
   throw new HttpError(404, 'Unbekannt.');
 }

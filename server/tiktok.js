@@ -3,25 +3,23 @@
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { db, saveNow } from './store.js';
+import * as profiles from './profiles.js';
 
 const AUTH = process.env.TT_AUTH_BASE || 'https://www.tiktok.com';
 const API = process.env.TT_API_BASE || 'https://open.tiktokapis.com';
 const SCOPE = 'user.info.basic,video.upload';
 const CHUNK = 10 * 1024 * 1024; // 5–64 MB, letzter Teil darf größer sein
 
-let access = { token: '', until: 0 };
-let states = new Map(); // state -> Ablaufzeit
+const access = new Map(); // Kanal-ID -> { token, until }
+const states = new Map(); // state -> { until, profileId }
 
 const cfg = () => db().tiktok;
+const conn = (p) => p.tiktok;
 
 export function status() {
   const c = cfg();
-  return {
-    configured: !!(c.clientKey && c.clientSecret && c.redirectUri),
-    connected: !!c.refreshToken && (!c.refreshExpires || Date.now() < c.refreshExpires),
-    user: c.user, clientKey: c.clientKey, hasSecret: !!c.clientSecret, redirectUri: c.redirectUri,
-    refreshExpires: c.refreshExpires || 0,
-  };
+  return { configured: !!(c.clientKey && c.clientSecret && c.redirectUri), clientKey: c.clientKey,
+    hasSecret: !!c.clientSecret, redirectUri: c.redirectUri };
 }
 
 export function configure({ clientKey, clientSecret, redirectUri }) {
@@ -36,38 +34,39 @@ export function configure({ clientKey, clientSecret, redirectUri }) {
   saveNow();
 }
 
-export function disconnect() {
-  const c = cfg();
-  c.refreshToken = ''; c.refreshExpires = 0; c.user = null; access = { token: '', until: 0 };
+export function disconnect(p) {
+  Object.assign(conn(p), { refreshToken: '', refreshExpires: 0, user: null });
+  access.delete(p.id);
   saveNow();
 }
 
-export function authUrl() {
+export function authUrl(p) {
   const c = cfg();
   if (!c.clientKey || !c.clientSecret || !c.redirectUri) throw new Error('Erst Client Key, Client Secret und Redirect URI eintragen.');
   const state = crypto.randomBytes(16).toString('hex');
-  states.set(state, Date.now() + 15 * 60_000);
+  states.set(state, { until: Date.now() + 15 * 60_000, profileId: p.id });
   const q = new URLSearchParams({ client_key: c.clientKey, scope: SCOPE, response_type: 'code',
     redirect_uri: c.redirectUri, state });
   return AUTH + '/v2/auth/authorize/?' + q;
 }
 
-async function tokenCall(data) {
+async function tokenCall(p, data) {
   const c = cfg();
   const r = await fetch(API + '/v2/oauth/token/', { method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ client_key: c.clientKey, client_secret: c.clientSecret, ...data }) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || !j.access_token) throw new Error('TikTok lehnt ab: ' + (j.error_description || j.error || r.status));
-  c.refreshToken = j.refresh_token || c.refreshToken;
-  if (j.refresh_expires_in) c.refreshExpires = Date.now() + j.refresh_expires_in * 1000;
-  access = { token: j.access_token, until: Date.now() + ((j.expires_in || 86400) - 120) * 1000 };
+  conn(p).refreshToken = j.refresh_token || conn(p).refreshToken;
+  if (j.refresh_expires_in) conn(p).refreshExpires = Date.now() + j.refresh_expires_in * 1000;
+  access.set(p.id, { token: j.access_token, until: Date.now() + ((j.expires_in || 86400) - 120) * 1000 });
   saveNow();
-  return access.token;
+  return j.access_token;
 }
 
 // code + state kommen über die Weiterleitung oder werden als kopierte Adresse eingefügt.
-export async function finishConnect(input) {
+// Gibt den verbundenen Kanal zurück.
+export async function finishConnect(input, profileId) {
   let code = '', state = '';
   const text = String(input || '').trim();
   try {
@@ -80,28 +79,32 @@ export async function finishConnect(input) {
     code = text;
   }
   if (!code) throw new Error('Kein Code in der Adresse gefunden.');
+  let id = profileId;
   if (state) {
-    const until = states.get(state);
-    if (!until || until < Date.now()) throw new Error('Anmeldung abgelaufen oder fremd – bitte neu starten.');
+    const st = states.get(state);
+    if (!st || st.until < Date.now()) throw new Error('Anmeldung abgelaufen oder fremd – bitte neu starten.');
     states.delete(state);
-  }
-  await tokenCall({ code: decodeURIComponent(code), grant_type: 'authorization_code', redirect_uri: cfg().redirectUri });
-  await loadUser().catch(() => {});
-  return status();
+    id = st.profileId;
+  } else if (!profileId) throw new Error('Anmeldung ohne Kennung – bitte die komplette Adresse einfügen.');
+  const p = profiles.get(id);
+  if (!p) throw new Error('Kanal nicht gefunden.');
+  await tokenCall(p, { code: decodeURIComponent(code), grant_type: 'authorization_code', redirect_uri: cfg().redirectUri });
+  await loadUser(p).catch(() => {});
+  return p;
 }
 
-async function token() {
-  const c = cfg();
-  if (!c.refreshToken) throw new Error('TikTok ist nicht verbunden (Einstellungen).');
-  if (access.token && Date.now() < access.until) return access.token;
-  try { return await tokenCall({ grant_type: 'refresh_token', refresh_token: c.refreshToken }); }
-  catch (e) { throw new Error('TikTok-Anmeldung abgelaufen – in den Einstellungen neu verbinden. (' + e.message + ')'); }
+async function token(p) {
+  if (!conn(p).refreshToken) throw new Error(`TikTok ist für „${p.name}“ nicht verbunden (Einstellungen).`);
+  const a = access.get(p.id);
+  if (a && Date.now() < a.until) return a.token;
+  try { return await tokenCall(p, { grant_type: 'refresh_token', refresh_token: conn(p).refreshToken }); }
+  catch (e) { throw new Error(`TikTok-Anmeldung von „${p.name}“ abgelaufen – in den Einstellungen neu verbinden. (` + e.message + ')'); }
 }
 
-async function loadUser() {
-  const r = await fetch(API + '/v2/user/info/?fields=display_name,avatar_url', { headers: { Authorization: 'Bearer ' + await token() } });
+async function loadUser(p) {
+  const r = await fetch(API + '/v2/user/info/?fields=open_id,display_name,avatar_url', { headers: { Authorization: 'Bearer ' + await token(p) } });
   const j = await r.json();
-  cfg().user = j.data?.user ? { name: j.data.user.display_name || '' } : null;
+  conn(p).user = j.data?.user ? { name: j.data.user.display_name || '', openId: j.data.user.open_id || '' } : null;
   saveNow();
 }
 
@@ -115,12 +118,12 @@ function apiErr(j, fallback) {
   return fallback;
 }
 
-export async function upload(filePath, progress) {
+export async function upload(p, filePath, progress) {
   const size = fs.statSync(filePath).size;
   const chunk = size < 5 * 1024 * 1024 ? size : CHUNK;
   const count = Math.max(1, Math.floor(size / chunk));
   const r = await fetch(API + '/v2/post/publish/inbox/video/init/', { method: 'POST',
-    headers: { Authorization: 'Bearer ' + await token(), 'Content-Type': 'application/json; charset=UTF-8' },
+    headers: { Authorization: 'Bearer ' + await token(p), 'Content-Type': 'application/json; charset=UTF-8' },
     body: JSON.stringify({ source_info: { source: 'FILE_UPLOAD', video_size: size, chunk_size: chunk, total_chunk_count: count } }) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || !j.data?.upload_url) throw new Error(apiErr(j, 'Upload-Start fehlgeschlagen (' + r.status + ')'));
@@ -148,9 +151,9 @@ export async function upload(filePath, progress) {
 }
 
 // PROCESSING_UPLOAD → SEND_TO_USER_INBOX (fertig, Hinweis in der App) | FAILED
-export async function checkStatus(publishId) {
+export async function checkStatus(p, publishId) {
   const r = await fetch(API + '/v2/post/publish/status/fetch/', { method: 'POST',
-    headers: { Authorization: 'Bearer ' + await token(), 'Content-Type': 'application/json; charset=UTF-8' },
+    headers: { Authorization: 'Bearer ' + await token(p), 'Content-Type': 'application/json; charset=UTF-8' },
     body: JSON.stringify({ publish_id: publishId }) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(apiErr(j, 'Status nicht abrufbar (' + r.status + ')'));

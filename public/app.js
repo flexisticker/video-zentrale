@@ -12,7 +12,8 @@ const TABS = [
 ];
 
 const FOLDER_NAMES = { eingang: 'Eingang (roh)', geschnitten: 'Zur Freigabe', hochgeladen: 'Hochgeladen' };
-const S = { videos: [], busy: false, tab: 'geschnitten', search: '', openId: null, settings: null, uploads: [], version: '' };
+const S = { videos: [], busy: false, tab: 'geschnitten', search: '', channel: '', openId: null, settings: null, version: '' };
+try { S.channel = localStorage.getItem('vz-channel') || ''; } catch { /* egal */ }
 const app = document.getElementById('app');
 
 // ---------- Hilfen ----------
@@ -72,6 +73,22 @@ function hashtags(tags) {
   return String(tags || '').split(',').map((t) => t.trim().replace(/[^\p{L}\p{N}_]/gu, '')).filter(Boolean).map((t) => '#' + t).join(' ');
 }
 
+const profilesList = () => S.settings?.profiles || [];
+const profileOf = (id) => profilesList().find((p) => p.id === id) || null;
+// Kanal, in den das Video geht: eigene Wahl oder Vorschlag.
+const channelOf = (v) => profileOf(v.channel) || profileOf(v.suggestion?.id);
+
+function channelBadge(v) {
+  const p = channelOf(v);
+  if (!p) return null;
+  const auto = !v.channel;
+  const b = h('span', { class: 'chip channel' + (auto ? ' auto' : ''), title: auto ? 'Vorschlag – ' + (v.suggestion?.reason || '') : 'Kanal' },
+    h('span', { class: 'dot' }), p.name, auto ? ' ?' : '');
+  b.firstChild.style.background = p.color;
+  b.style.borderColor = p.color;
+  return b;
+}
+
 function stateChip(label, s) {
   const st = s?.state || 'none';
   if (st === 'none') return h('span', { class: 'chip' }, label + ': –');
@@ -116,7 +133,7 @@ async function boot() {
   if (q.has('tiktok')) {
     const r = q.get('tiktok');
     history.replaceState(null, '', '/' + location.hash);
-    if (r === 'ok') toast('TikTok verbunden.'); else toast('TikTok: ' + r, true);
+    if (r === 'ok') toast('TikTok verbunden' + (q.get('kanal') ? ' für „' + q.get('kanal') + '“.' : '.')); else toast('TikTok: ' + r, true);
   }
   readHash();
   await Promise.all([refresh(), loadSettings()]);
@@ -193,7 +210,16 @@ function renderMain() {
   if (!mainEl) return;
   if (S.tab === 'einstellungen') return renderSettings();
   const q = S.search.toLowerCase();
-  const list = S.videos.filter((v) => v.folder === S.tab && (!q || (v.title + ' ' + v.file + ' ' + v.tags).toLowerCase().includes(q)));
+  const list = S.videos.filter((v) => v.folder === S.tab && (!q || (v.title + ' ' + v.file + ' ' + v.tags).toLowerCase().includes(q))
+    && (!S.channel || channelOf(v)?.id === S.channel));
+  const setChannel = (id) => { S.channel = id; try { localStorage.setItem('vz-channel', id); } catch { /* egal */ } renderMain(); };
+  const filter = profilesList().length > 1 ? h('div', { class: 'filter' },
+    h('button', { class: 'btn small' + (!S.channel ? ' on' : ''), onclick: () => setChannel('') }, 'Alle Kanäle'),
+    profilesList().map((p) => {
+      const b = h('button', { class: 'btn small' + (S.channel === p.id ? ' on' : ''), onclick: () => setChannel(p.id) }, h('span', { class: 'dot' }), p.name);
+      b.firstChild.style.background = p.color;
+      return b;
+    })) : null;
   const missing = S.videos.filter((v) => v.missing && v.folder === S.tab);
   const keepFocus = document.activeElement?.id === 'search';
   const search = h('input', { id: 'search', type: 'search', placeholder: 'Suchen …', value: S.search,
@@ -205,7 +231,7 @@ function renderMain() {
   };
   const grid = h('div', { class: 'grid' }, list.filter((v) => !v.missing).map(card));
   mainEl.replaceChildren(...[
-    h('div', { class: 'bar' }, search, h('span', { class: 'hint' }, hints[S.tab]),
+    h('div', { class: 'bar' }, search, filter, h('span', { class: 'hint' }, hints[S.tab]),
       h('div', { style: { flex: '1' } }),
       h('button', { class: 'btn small ghost', onclick: async () => { await api('POST', '/api/scan'); await refresh(); renderMain(); updateCounts(); toast('Ordner neu eingelesen.'); } }, '↻ Ordner prüfen')),
     list.some((v) => !v.missing) ? grid : h('div', { class: 'empty' },
@@ -229,7 +255,7 @@ function card(v) {
     h('div', { class: 'body' },
       h('div', { class: 'title' }, v.title || v.file),
       h('div', { class: 'meta' }, fmtDate(v.mtime), ' · ', fmtSize(v.size)),
-      h('div', { class: 'chips' }, stateChip('YouTube', v.yt), stateChip('TikTok', v.tt)),
+      h('div', { class: 'chips' }, channelBadge(v), stateChip('YouTube', v.yt), stateChip('TikTok', v.tt)),
       running ? h('div', { class: 'bar-progress' }, h('i', { style: { width: (running.progress || 0) + '%' } })) : null));
 }
 
@@ -254,14 +280,31 @@ function openDetail(id) {
   };
   const saveBtn = h('button', { class: 'btn primary', disabled: true, onclick: () => saveFields() }, 'Speichern');
   const dirty = () => { saveBtn.disabled = false; };
-  const cat = h('select', { onchange: dirty }, CATEGORIES.map(([id, n]) => h('option', { value: id, selected: String(v.category) === id }, n)));
+  const cat = h('select', { onchange: dirty }, h('option', { value: '' }, 'Vorgabe des Kanals'),
+    CATEGORIES.map(([id, n]) => h('option', { value: id, selected: String(v.category) === id }, n)));
   f.category = cat;
+  const chan = h('select', { onchange: () => { dirty(); chanInfo(); } });
+  const chanReason = h('div', { class: 'hint' });
+  const chanInfo = () => {
+    const auto = profileOf(v.suggestion?.id);
+    const cur = chan.options.length ? chan.value : (v.channel || '');
+    chan.replaceChildren(h('option', { value: '' }, 'Automatisch' + (auto && !v.channel ? ': ' + auto.name : '')),
+      ...profilesList().map((p) => h('option', { value: p.id }, p.name)));
+    chan.value = cur;
+    const p = chan.value ? profileOf(chan.value) : auto;
+    const why = !chan.value ? 'Vorschlag (' + (v.suggestion?.reason || '–') + ')' : v.channelFrom === 'json' && chan.value === v.channel ? 'aus der .json' : 'von dir gewählt';
+    chanReason.textContent = p ? `→ YouTube ${p.youtube.channel ? '„' + p.youtube.channel.title + '“' : '(nicht verbunden)'} · TikTok ${p.tiktok.user?.name ? '„' + p.tiktok.user.name + '“' : p.tiktok.connected ? 'verbunden' : '(nicht verbunden)'} · ${why}` : '';
+    chan.style.borderColor = p?.color || '';
+  };
+  chanInfo();
+  f.channel = chan;
 
   async function saveFields(silent) {
     const body = {};
-    for (const k of ['title', 'description', 'tags', 'tiktok', 'note', 'category']) body[k] = f[k].value;
+    for (const k of ['title', 'description', 'tags', 'tiktok', 'note', 'category', 'channel']) body[k] = f[k].value;
     const nv = await api('PUT', '/api/videos/' + v.id, body);
     Object.assign(v, nv);
+    chanInfo(); updateDetail();
     saveBtn.disabled = true;
     if (!silent) toast('Gespeichert.');
   }
@@ -305,10 +348,11 @@ function openDetail(id) {
     h('div', { style: { marginTop: '10px' } }, moveBox));
 
   const right = h('div', {},
+    h('label', {}, 'Kanal'), chan, chanReason,
     field('title', 'Titel (YouTube)', 100),
     field('description', 'Beschreibung (YouTube)', 5000, { area: true, rows: 6 }),
     h('div', { class: 'two' },
-      h('div', {}, field('tags', 'Tags (mit Komma getrennt)', 500)),
+      h('div', {}, field('tags', 'Tags (mit Komma getrennt)', 500, { placeholder: 'leer = Vorgabe des Kanals' })),
       h('div', {}, h('label', {}, 'Kategorie'), cat)),
     field('tiktok', 'TikTok-Text (zum Einfügen in der App)', 2200, { area: true, rows: 3, placeholder: 'leer = Titel + Hashtags aus den Tags' }),
     h('div', { class: 'row', style: { marginTop: '6px' } },
@@ -327,20 +371,26 @@ function openDetail(id) {
   document.body.append(modal);
   const onKey = (e) => { if (e.key === 'Escape' && !document.querySelector('.modal input:focus, .modal textarea:focus')) close(); };
   document.addEventListener('keydown', onKey);
-  detail = { id, v, ytBox, ttBox, moveBox, folderEl, ensureSaved, cleanup: () => document.removeEventListener('keydown', onKey) };
+  detail = { id, v, ytBox, ttBox, moveBox, folderEl, ensureSaved, chanInfo, chan, cleanup: () => document.removeEventListener('keydown', onKey) };
   updateDetail();
 }
 
 function platformBox(box, v, key, label, color) {
   const s = v[key] || { state: 'none' };
   const platform = key === 'yt' ? 'youtube' : 'tiktok';
-  const conn = S.settings?.[platform]?.connected;
-  const kids = [h('h3', {}, h('span', { class: 'dot', style: { background: color } }), label)];
+  const target = profileOf(detail.chan.value) || channelOf(v);
+  const conn = target?.[platform]?.connected;
+  const account = key === 'yt' ? target?.youtube.channel?.title : target?.tiktok.user?.name;
+  const kids = [h('h3', {}, h('span', { class: 'dot', style: { background: color } }), label,
+    target ? h('span', { class: 'meta' }, ' → ' + target.name + (account && account !== target.name ? ' (' + account + ')' : '')) : null)];
   const doUpload = async () => {
     try {
       await detail.ensureSaved();
-      if (key === 'yt' && !confirm('Video jetzt als PRIVAT auf YouTube hochladen?\nÖffentlich stellst du es danach in YouTube Studio.')) return;
-      if (key === 'tt' && !confirm('Video jetzt als Entwurf an TikTok senden?\nVeröffentlichen (Text, Sichtbarkeit) machst du danach in der TikTok-App.')) return;
+      const t = channelOf(v);
+      const acc = key === 'yt' ? t?.youtube.channel?.title : t?.tiktok.user?.name;
+      const where = `Kanal „${t?.name}“` + (acc && acc !== t?.name ? ` (${key === 'yt' ? 'YouTube' : 'TikTok'}: ${acc})` : '');
+      if (key === 'yt' && !confirm(`Video jetzt als PRIVAT auf YouTube hochladen?\n${where}\n\nÖffentlich stellst du es danach in YouTube Studio.`)) return;
+      if (key === 'tt' && !confirm(`Video jetzt als Entwurf an TikTok senden?\n${where}\n\nVeröffentlichen (Text, Sichtbarkeit) machst du danach in der TikTok-App.`)) return;
       Object.assign(v, await api('POST', `/api/videos/${v.id}/upload/${platform}`));
       S.busy = true; updateDetail(); startPolling();
     } catch (x) { toast(x.message, true); }
@@ -366,20 +416,21 @@ function platformBox(box, v, key, label, color) {
     kids.push(h('div', { class: 'status err' }, s.error || 'Fehler'));
   } else if (s.state === 'done') {
     if (key === 'yt') {
-      kids.push(h('div', { class: 'status ok-text' }, s.manual ? '✓ Als erledigt markiert ' : `✓ Hochgeladen (${s.privacy === 'public' ? 'öffentlich' : 'privat'}) `, fmtDate(s.at)));
+      kids.push(h('div', { class: 'status ok-text' }, s.manual ? '✓ Als erledigt markiert ' : `✓ Hochgeladen (${s.privacy === 'public' ? 'öffentlich' : 'privat'}) `,
+        s.profileName ? 'auf „' + (s.channelTitle || s.profileName) + '“ ' : '', fmtDate(s.at)));
       if (s.thumbError) kids.push(h('div', { class: 'status err' }, s.thumbError));
       kids.push(h('div', { class: 'row' },
         s.studio ? h('a', { class: 'btn small', href: s.studio, target: '_blank', rel: 'noopener' }, 'In YouTube Studio öffnen → veröffentlichen') : null,
         s.url ? h('a', { class: 'btn small ghost', href: s.url, target: '_blank', rel: 'noopener' }, 'Ansehen') : null));
     } else {
-      kids.push(h('div', { class: 'status ok-text' }, s.manual ? '✓ Als erledigt markiert ' : '✓ In deinem TikTok-Posteingang ', fmtDate(s.at)),
+      kids.push(h('div', { class: 'status ok-text' }, s.manual ? '✓ Als erledigt markiert ' : '✓ Im TikTok-Posteingang ', s.profileName ? 'von „' + s.profileName + '“ ' : '', fmtDate(s.at)),
         s.manual ? null : h('div', { class: 'status' }, s.note || 'Öffne die TikTok-App → Benachrichtigung „Bearbeiten“ → Text einfügen → Posten.'),
         s.url ? h('a', { class: 'btn small ghost', href: s.url, target: '_blank', rel: 'noopener' }, 'Ansehen') : null);
     }
   }
   const actions = h('div', { class: 'row', style: { marginTop: '8px' } });
   if (['none', 'error', 'done'].includes(s.state)) {
-    if (!conn) actions.append(h('span', { class: 'hint' }, `${label} ist nicht verbunden – `), h('a', { href: '#einstellungen' }, 'Einstellungen'));
+    if (!conn) actions.append(h('span', { class: 'hint' }, `${label} ist für „${target?.name || '–'}“ nicht verbunden – `), h('a', { href: '#einstellungen' }, 'Einstellungen'));
     else actions.append(h('button', { class: btnClass, onclick: doUpload }, s.state === 'done' ? upLabel.replace('▲', '↻ Erneut:') : s.state === 'error' ? '↻ Erneut versuchen' : upLabel));
     if (s.state !== 'done') actions.append(h('button', { class: 'btn small ghost', onclick: markDone }, 'Schon erledigt'));
   }
@@ -393,6 +444,7 @@ function updateDetail() {
   if (!v) return;
   // Felder nicht überschreiben, nur Status-Teile
   Object.assign(detail.v, { yt: v.yt, tt: v.tt, folder: v.folder, file: v.file, hasImage: v.hasImage, imageVersion: v.imageVersion });
+  if (!detail.chan.value && v.suggestion?.id !== detail.v.suggestion?.id) { detail.v.suggestion = v.suggestion; detail.chanInfo(); }
   platformBox(detail.ytBox, detail.v, 'yt', 'YouTube', 'var(--yt)');
   platformBox(detail.ttBox, detail.v, 'tt', 'TikTok', 'var(--tt)');
   const mv = async (folder, msg) => {
@@ -454,93 +506,134 @@ function uploadFiles(files) {
 // ---------- Einstellungen ----------
 async function loadSettings() { S.settings = await api('GET', '/api/settings'); return S.settings; }
 
+// append ohne null/false (sonst steht „null“ im Text)
+const add = (el, ...kids) => el.append(...kids.flat().filter((k) => k != null && k !== false));
+
 async function renderSettings() {
   const st = await loadSettings();
   if (S.tab !== 'einstellungen' || S.openId) return;
-  const s = st.settings;
+  const again = () => renderSettings();
+  const run = (fn, msg) => async () => { try { await fn(); if (msg) toast(msg); again(); } catch (x) { toast(x.message, true); } };
+  const y = st.youtube, t = st.tiktok;
 
-  // Allgemein
-  const cat = h('select', {}, CATEGORIES.map(([id, n]) => h('option', { value: id, selected: s.category === id }, n)));
-  const tags = h('input', { value: s.tags, placeholder: 'z. B. gaming, deutsch, letsplay' });
-  const footer = h('textarea', { rows: 4, value: s.footer, placeholder: 'z. B. Links zu Discord, Twitch, Musik von Epidemic Sound …' });
-  const auto = h('input', { type: 'checkbox', checked: s.autoArchive });
-  const general = h('div', { class: 'box' }, h('h3', {}, 'Vorgaben für neue Videos'),
-    h('label', {}, 'YouTube-Kategorie'), cat,
-    h('label', {}, 'Standard-Tags'), tags,
-    h('label', {}, 'Text unter jeder YouTube-Beschreibung'), footer,
-    h('label', { class: 'check' }, auto, 'Nach YouTube + TikTok automatisch ins Archiv'),
-    h('div', { class: 'row', style: { marginTop: '14px' } }, h('button', { class: 'btn primary', onclick: async () => {
-      try { await api('PUT', '/api/settings', { category: cat.value, tags: tags.value, footer: footer.value, autoArchive: auto.checked }); toast('Gespeichert.'); }
-      catch (x) { toast(x.message, true); }
-    } }, 'Speichern')));
+  // ----- Kanäle -----
+  const dupYt = new Map(), dupTt = new Map();
+  for (const p of st.profiles) {
+    if (p.youtube.channel?.id) dupYt.set(p.youtube.channel.id, [...(dupYt.get(p.youtube.channel.id) || []), p.name]);
+    if (p.tiktok.user?.name) dupTt.set(p.tiktok.user.name, [...(dupTt.get(p.tiktok.user.name) || []), p.name]);
+  }
+  const channelBox = (p) => {
+    const name = h('input', { value: p.name });
+    const color = h('input', { type: 'color', value: p.color, class: 'color' });
+    const def = h('input', { type: 'checkbox', checked: p.isDefault });
+    const kw = h('textarea', { rows: 3, value: p.keywords, placeholder: 'z. B. fortnite, minecraft, clutch' });
+    const cat = h('select', {}, CATEGORIES.map(([id, n]) => h('option', { value: id, selected: p.category === id }, n)));
+    const tags = h('input', { value: p.tags });
+    const footer = h('textarea', { rows: 3, value: p.footer, placeholder: 'z. B. Links zu Discord/Shop, „Musik: Epidemic Sound“' });
+    const save = run(() => api('PUT', '/api/profiles/' + p.id, { name: name.value, color: color.value, isDefault: def.checked || undefined,
+      keywords: kw.value, category: cat.value, tags: tags.value, footer: footer.value }), 'Kanal gespeichert.');
 
-  // YouTube
-  const y = st.youtube;
+    // YouTube
+    const yp = y.pending[p.id];
+    const ytPart = h('div', { class: 'conn' }, h('b', {}, h('span', { class: 'dot', style: { background: 'var(--yt)' } }), ' YouTube'));
+    if (p.youtube.connected) {
+      add(ytPart, h('div', { class: 'ok-text' }, '✓ ', p.youtube.channel ? '„' + p.youtube.channel.title + '“' : 'verbunden'),
+        (dupYt.get(p.youtube.channel?.id) || []).length > 1 ? h('div', { class: 'err' }, 'Achtung: gleicher YouTube-Kanal wie bei ' + dupYt.get(p.youtube.channel.id).filter((n) => n !== p.name).join(', ') + ' – beim Verbinden den richtigen Kanal wählen.') : null,
+        h('button', { class: 'btn small danger', onclick: () => confirm(`YouTube von „${p.name}“ trennen?`) && run(() => api('POST', `/api/profiles/${p.id}/youtube/disconnect`))() }, 'Trennen'));
+    } else if (yp) {
+      add(ytPart, h('div', {}, 'Öffne ', h('a', { href: yp.url, target: '_blank', rel: 'noopener' }, yp.url), ' und gib ein:'),
+        h('div', { class: 'code' }, yp.code),
+        h('div', { class: 'hint' }, `Dort das Google-Konto bzw. den Kanal „${p.name}“ wählen (bei Brand-Konten erscheint eine Kanalauswahl).`),
+        yp.error ? h('div', { class: 'err' }, yp.error) : null);
+      setTimeout(() => { if (S.tab === 'einstellungen' && !S.openId) again(); }, 4000);
+    } else {
+      add(ytPart, h('button', { class: 'btn small yt', disabled: !y.configured, title: y.configured ? '' : 'Erst unten die Google-App eintragen',
+        onclick: run(() => api('POST', `/api/profiles/${p.id}/youtube/connect`)) }, 'YouTube verbinden'));
+    }
+
+    // TikTok
+    const paste = h('input', { placeholder: 'Adresse nach der Anmeldung einfügen' });
+    const ttPart = h('div', { class: 'conn' }, h('b', {}, h('span', { class: 'dot', style: { background: 'var(--tt)' } }), ' TikTok'));
+    if (p.tiktok.connected) {
+      add(ttPart, h('div', { class: 'ok-text' }, '✓ ', p.tiktok.user?.name ? '„' + p.tiktok.user.name + '“' : 'verbunden',
+        p.tiktok.refreshExpires ? h('span', { class: 'hint' }, ' · gültig bis ' + fmtDate(p.tiktok.refreshExpires)) : null),
+        (dupTt.get(p.tiktok.user?.name) || []).length > 1 ? h('div', { class: 'err' }, 'Achtung: gleiches TikTok-Konto wie bei ' + dupTt.get(p.tiktok.user.name).filter((n) => n !== p.name).join(', ') + '.') : null,
+        h('button', { class: 'btn small danger', onclick: () => confirm(`TikTok von „${p.name}“ trennen?`) && run(() => api('POST', `/api/profiles/${p.id}/tiktok/disconnect`))() }, 'Trennen'));
+    } else {
+      add(ttPart, 
+        h('div', { class: 'hint' }, `Vorher im Browser bei TikTok mit dem Konto „${p.name}“ angemeldet sein (oder dort abmelden, dann fragt TikTok nach).`),
+        h('div', { class: 'row' },
+          h('button', { class: 'btn small tt', disabled: !t.configured, title: t.configured ? '' : 'Erst unten die TikTok-App eintragen',
+            onclick: async () => { try { const { url } = await api('GET', `/api/profiles/${p.id}/tiktok/auth-url`); window.open(url, '_blank', 'noopener'); } catch (x) { toast(x.message, true); } } }, 'TikTok verbinden')),
+        h('div', { class: 'row', style: { marginTop: '6px' } }, paste,
+          h('button', { class: 'btn small', onclick: run(() => api('POST', '/api/tiktok/finish', { url: paste.value, profileId: p.id }), 'TikTok verbunden.') }, 'Übernehmen')));
+    }
+
+    const head = h('h3', {}, h('span', { class: 'dot' }), p.name, p.isDefault ? h('span', { class: 'chip' }, 'Standard') : null);
+    head.firstChild.style.background = p.color;
+    const box = h('div', { class: 'box channelbox' }, head,
+      h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Name'), name), h('div', {}, h('label', {}, 'Farbe'), color)),
+      h('label', { class: 'check' }, def, 'Standardkanal (wenn kein Stichwort passt)'),
+      h('label', {}, 'Stichwörter für den Vorschlag (mit Komma; Titel/Dateiname zählt doppelt)'), kw,
+      h('div', { class: 'two' }, h('div', {}, h('label', {}, 'YouTube-Kategorie'), cat), h('div', {}, h('label', {}, 'Standard-Tags'), tags)),
+      h('label', {}, 'Text unter jeder YouTube-Beschreibung'), footer,
+      h('div', { class: 'row', style: { marginTop: '12px' } },
+        h('button', { class: 'btn primary', onclick: save }, 'Speichern'),
+        st.profiles.length > 1 ? h('button', { class: 'btn ghost danger', onclick: () => confirm(`Kanal „${p.name}“ löschen?`) && run(() => api('DELETE', '/api/profiles/' + p.id), 'Kanal gelöscht.')() }, 'Löschen') : null),
+      ytPart, ttPart);
+    box.style.borderTop = '3px solid ' + p.color;
+    return box;
+  };
+
+  // ----- Google-App -----
   const yId = h('input', { value: y.clientId, placeholder: '…apps.googleusercontent.com' });
   const ySecret = h('input', { type: 'password', placeholder: y.hasSecret ? '•••••• gespeichert' : 'Client-Secret', autocomplete: 'off' });
-  const ytBox = h('div', { class: 'box' }, h('h3', {}, h('span', { class: 'dot', style: { background: 'var(--yt)' } }), ' YouTube'));
-  if (y.connected) {
-    ytBox.append(h('p', { class: 'ok-text' }, '✓ Verbunden', y.channel ? ' mit „' + y.channel.title + '“' : ''),
-      h('p', { class: 'hint' }, 'Uploads landen als privat. In YouTube Studio auf „Öffentlich“ stellen.'),
-      h('button', { class: 'btn danger', onclick: async () => { if (confirm('YouTube-Verbindung trennen?')) { await api('POST', '/api/youtube/disconnect'); renderSettings(); } } }, 'Trennen'));
-  } else if (y.pending) {
-    ytBox.append(h('p', {}, '1. Öffne ', h('a', { href: y.pending.url, target: '_blank', rel: 'noopener' }, y.pending.url), ' (auch am Handy).'),
-      h('p', {}, '2. Gib diesen Code ein:'), h('div', { class: 'code' }, y.pending.code),
-      h('p', { class: 'hint' }, '3. Google-Konto des Kanals wählen und zulassen (Hinweis „nicht überprüfte App“ → Erweitert → Weiter). Diese Seite merkt es automatisch.'),
-      y.pending.error ? h('p', { class: 'err' }, y.pending.error) : null);
-    setTimeout(() => { if (S.tab === 'einstellungen' && !S.openId) renderSettings(); }, 4000);
-  } else {
-    ytBox.append(
-      h('ol', { class: 'steps' },
-        h('li', {}, 'Google Cloud Console: Projekt anlegen, „YouTube Data API v3“ aktivieren.'),
-        h('li', {}, 'OAuth-Zustimmungsbildschirm: Extern, dich als Testnutzer, dann „App veröffentlichen“ (sonst läuft die Anmeldung nach 7 Tagen ab).'),
-        h('li', {}, 'Anmeldedaten → OAuth-Client-ID → Typ „Fernseher und Geräte mit begrenzter Eingabe“.'),
-        h('li', {}, 'Client-ID und Secret hier eintragen, speichern, verbinden.')),
-      h('label', {}, 'Client-ID'), yId, h('label', {}, 'Client-Secret'), ySecret,
-      h('div', { class: 'row', style: { marginTop: '12px' } },
-        h('button', { class: 'btn', onclick: async () => { try { await api('POST', '/api/youtube/config', { clientId: yId.value, clientSecret: ySecret.value }); toast('Gespeichert.'); renderSettings(); } catch (x) { toast(x.message, true); } } }, 'Speichern'),
-        h('button', { class: 'btn yt', disabled: !y.configured, onclick: async () => { try { await api('POST', '/api/youtube/connect'); renderSettings(); } catch (x) { toast(x.message, true); } } }, 'Mit YouTube verbinden')));
-  }
+  const googleBox = h('div', { class: 'box' }, h('h3', {}, h('span', { class: 'dot', style: { background: 'var(--yt)' } }), ' Google-App (für alle YouTube-Kanäle)'),
+    y.configured ? h('p', { class: 'ok-text' }, '✓ eingerichtet') : null,
+    h('ol', { class: 'steps' },
+      h('li', {}, 'Google Cloud Console: Projekt anlegen, „YouTube Data API v3“ aktivieren.'),
+      h('li', {}, 'OAuth-Zustimmungsbildschirm: Extern, dann „App veröffentlichen“ (sonst läuft die Anmeldung nach 7 Tagen ab).'),
+      h('li', {}, 'Anmeldedaten → OAuth-Client-ID → Typ „Fernseher und Geräte mit begrenzter Eingabe“.'),
+      h('li', {}, 'Hier eintragen, dann oben je Kanal „YouTube verbinden“.')),
+    h('label', {}, 'Client-ID'), yId, h('label', {}, 'Client-Secret'), ySecret,
+    h('div', { class: 'row', style: { marginTop: '12px' } },
+      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/youtube/config', { clientId: yId.value, clientSecret: ySecret.value }), 'Gespeichert.') }, 'Speichern')));
 
-  // TikTok
-  const t = st.tiktok;
+  // ----- TikTok-App -----
   const suggest = location.protocol === 'https:' ? location.origin + '/oauth/tiktok' : '';
   const tKey = h('input', { value: t.clientKey, placeholder: 'Client Key' });
   const tSecret = h('input', { type: 'password', placeholder: t.hasSecret ? '•••••• gespeichert' : 'Client Secret', autocomplete: 'off' });
   const tRedirect = h('input', { value: t.redirectUri || suggest, placeholder: 'https://…/oauth/tiktok' });
-  const tPaste = h('input', { placeholder: 'https://…?code=…&state=…' });
-  const ttBox = h('div', { class: 'box' }, h('h3', {}, h('span', { class: 'dot', style: { background: 'var(--tt)' } }), ' TikTok'));
-  if (t.connected) {
-    ttBox.append(h('p', { class: 'ok-text' }, '✓ Verbunden', t.user?.name ? ' als „' + t.user.name + '“' : ''),
-      h('p', { class: 'hint' }, 'Videos kommen als Entwurf in deinen TikTok-Posteingang.' + (t.refreshExpires ? ' Anmeldung gültig bis ' + fmtDate(t.refreshExpires) + '.' : '')),
-      h('button', { class: 'btn danger', onclick: async () => { if (confirm('TikTok-Verbindung trennen?')) { await api('POST', '/api/tiktok/disconnect'); renderSettings(); } } }, 'Trennen'));
-  } else {
-    ttBox.append(
-      h('ol', { class: 'steps' },
-        h('li', {}, 'developers.tiktok.com: App anlegen, Produkte „Login Kit“ und „Content Posting API“ hinzufügen, Scope video.upload.'),
-        h('li', {}, 'Redirect URI eintragen (muss https sein). Am besten die Zentrale über https erreichbar machen (z. B. Nginx Proxy Manager) → Adresse + /oauth/tiktok.'),
-        h('li', {}, 'Ohne https-Zugang: irgendeine eigene https-Adresse eintragen und nach der Anmeldung die Adresse aus dem Browser unten einfügen.'),
-        h('li', {}, 'App im Sandbox-Modus lassen und dein TikTok-Konto als Target User eintragen.')),
-      h('label', {}, 'Client Key'), tKey, h('label', {}, 'Client Secret'), tSecret, h('label', {}, 'Redirect URI'), tRedirect,
-      h('div', { class: 'row', style: { marginTop: '12px' } },
-        h('button', { class: 'btn', onclick: async () => { try { await api('POST', '/api/tiktok/config', { clientKey: tKey.value, clientSecret: tSecret.value, redirectUri: tRedirect.value }); toast('Gespeichert.'); renderSettings(); } catch (x) { toast(x.message, true); } } }, 'Speichern'),
-        h('button', { class: 'btn tt', disabled: !t.configured, onclick: async () => { try { const { url } = await api('GET', '/api/tiktok/auth-url'); window.open(url, '_blank', 'noopener'); } catch (x) { toast(x.message, true); } } }, 'Mit TikTok verbinden')),
-      h('label', {}, 'Adresse nach der Anmeldung (nur ohne https-Weiterleitung nötig)'), tPaste,
-      h('div', { class: 'row', style: { marginTop: '8px' } },
-        h('button', { class: 'btn small', onclick: async () => { try { await api('POST', '/api/tiktok/finish', { url: tPaste.value }); toast('TikTok verbunden.'); renderSettings(); } catch (x) { toast(x.message, true); } } }, 'Übernehmen')));
-  }
+  const tiktokBox = h('div', { class: 'box' }, h('h3', {}, h('span', { class: 'dot', style: { background: 'var(--tt)' } }), ' TikTok-App (für alle TikTok-Konten)'),
+    t.configured ? h('p', { class: 'ok-text' }, '✓ eingerichtet') : null,
+    h('ol', { class: 'steps' },
+      h('li', {}, 'developers.tiktok.com: App anlegen, „Login Kit“ + „Content Posting API“, Scope video.upload.'),
+      h('li', {}, 'Sandbox: beide TikTok-Konten als Target User eintragen.'),
+      h('li', {}, 'Redirect URI (https): Zentrale über Nginx Proxy Manager → Adresse + /oauth/tiktok; sonst eigene https-Adresse und nach der Anmeldung die Adresse beim Kanal einfügen.')),
+    h('label', {}, 'Client Key'), tKey, h('label', {}, 'Client Secret'), tSecret, h('label', {}, 'Redirect URI'), tRedirect,
+    h('div', { class: 'row', style: { marginTop: '12px' } },
+      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/tiktok/config', { clientKey: tKey.value, clientSecret: tSecret.value, redirectUri: tRedirect.value }), 'Gespeichert.') }, 'Speichern')));
 
-  // Konto
+  // ----- Allgemein + Zugang -----
+  const auto = h('input', { type: 'checkbox', checked: st.settings.autoArchive });
   const old = h('input', { type: 'password', autocomplete: 'current-password' });
   const neu = h('input', { type: 'password', autocomplete: 'new-password' });
-  const account = h('div', { class: 'box' }, h('h3', {}, 'Zugang'),
+  const account = h('div', { class: 'box' }, h('h3', {}, 'Allgemein & Zugang'),
+    h('label', { class: 'check' }, auto, 'Nach YouTube + TikTok automatisch ins Archiv'),
+    h('div', { class: 'row', style: { marginTop: '8px' } }, h('button', { class: 'btn small', onclick: run(() => api('PUT', '/api/settings', { autoArchive: auto.checked }), 'Gespeichert.') }, 'Speichern')),
     h('label', {}, 'Altes Passwort'), old, h('label', {}, 'Neues Passwort (mind. 8 Zeichen)'), neu,
     h('div', { class: 'row', style: { marginTop: '12px' } },
       h('button', { class: 'btn', onclick: async () => { try { await api('POST', '/api/password', { old: old.value, password: neu.value }); old.value = neu.value = ''; toast('Passwort geändert.'); } catch (x) { toast(x.message, true); } } }, 'Passwort ändern'),
       h('button', { class: 'btn ghost', onclick: async () => { await api('POST', '/api/logout'); start(); } }, 'Abmelden')),
     h('p', { class: 'hint', style: { marginTop: '14px' } }, 'Video-Zentrale ' + (st.version || '')));
 
-  mainEl.replaceChildren(h('div', { class: 'settings' }, ytBox, ttBox, general, account));
+  mainEl.replaceChildren(
+    h('div', { class: 'bar' }, h('h2', { class: 'h2' }, 'Kanäle'), h('span', { class: 'hint' }, 'Jeder Kanal hat eigene YouTube-/TikTok-Verbindung und Vorgaben. Die Zentrale schlägt je Video den Kanal vor.'),
+      h('div', { style: { flex: '1' } }),
+      h('button', { class: 'btn small', onclick: () => { const n = prompt('Name des neuen Kanals:'); if (n) run(() => api('POST', '/api/profiles', { name: n }), 'Kanal angelegt.')(); } }, '+ Kanal')),
+    h('div', { class: 'settings' }, st.profiles.map(channelBox)),
+    h('h2', { class: 'h2', style: { marginTop: '24px' } }, 'Apps & Zugang'),
+    h('div', { class: 'settings' }, googleBox, tiktokBox, account));
 }
 
 start();

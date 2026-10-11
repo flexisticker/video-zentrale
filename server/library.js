@@ -5,6 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { db, save, DATA_DIR } from './store.js';
+import * as profiles from './profiles.js';
 
 export const VIDEO_DIR = process.env.VIDEO_DIR || '/videos';
 export const FOLDERS = ['eingang', 'geschnitten', 'hochgeladen'];
@@ -59,17 +60,18 @@ function readMeta(folder, jsonName) {
       category: str(m.category, 4),
       tiktok: str(m.tiktok ?? m.caption, 2200),
       note: str(m.note, 2000),
+      channel: profiles.find(m.channel ?? m.kanal)?.id || '',
     };
   } catch { return null; }
 }
 
 export function newVideo(folder, file) {
   const id = crypto.randomBytes(8).toString('hex');
-  const s = db().settings;
   const v = {
     id, folder, file, createdAt: new Date().toISOString(),
     title: path.basename(file, path.extname(file)).slice(0, 100),
-    description: '', tags: s.tags || '', category: s.category || '20', tiktok: '', note: '',
+    // leer = Vorgabe des Kanals (Tags, Kategorie) beim Upload
+    description: '', tags: '', category: '', tiktok: '', note: '', channel: '', channelFrom: '',
     size: 0, mtime: 0, duration: null, width: null, height: null, image: null, thumbAt: 0,
     yt: { state: 'none' }, tt: { state: 'none' }, missing: false,
   };
@@ -112,7 +114,10 @@ async function doScan() {
         const jm = fs.statSync(path.join(dirOf(folder), side.json)).mtimeMs;
         if (jm > (v.metaAt || 0)) {
           const m = readMeta(folder, side.json);
-          if (m) for (const k of Object.keys(m)) if (m[k]) v[k] = m[k];
+          if (m) {
+            for (const k of Object.keys(m)) if (m[k]) v[k] = m[k];
+            if (m.channel) v.channelFrom = 'json';
+          }
           v.metaAt = jm; changed = true;
         }
       }

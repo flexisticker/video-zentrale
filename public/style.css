@@ -117,3 +117,17 @@ ol.steps { padding-left: 20px; margin: 6px 0; color: var(--muted); font-size: 13
   .two { grid-template-columns: 1fr; }
   .settings { grid-template-columns: 1fr; }
 }
+
+/* Kanäle */
+.chip.channel { display: inline-flex; align-items: center; gap: 5px; color: var(--text); }
+.chip.channel.auto { border-style: dashed; color: var(--muted); }
+.chip .dot, .btn .dot { width: 8px; height: 8px; }
+.filter { display: flex; gap: 6px; flex-wrap: wrap; }
+.btn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.h2 { font-size: 17px; margin: 0; }
+.conn { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 10px; display: grid; gap: 6px; justify-items: start; }
+.conn .row { width: 100%; }
+.conn .row input { flex: 1; min-width: 160px; width: auto; }
+.conn .code { font-size: 20px; }
+input.color { padding: 2px; height: 38px; }
+.channelbox h3 .chip { margin-left: 6px; }

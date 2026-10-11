@@ -1,7 +1,8 @@
 // Nachbau der Google-/YouTube- und TikTok-Schnittstellen für lokale Tests.
 import http from 'node:http';
 const log = [];
-let tokenCalls = 0, ytFailOnce = true;
+let tokenCalls = 0, ytFailOnce = true, devN = 0;
+const YT_NAMES = { 'dev1': 'MichaModus', 'dev2': '3D by Micha' };
 const yt = { size: 0, got: 0 }, tt = { size: 0, got: 0, chunks: 0 };
 const body = (req) => new Promise((r) => { const c = []; req.on('data', (d) => c.push(d)); req.on('end', () => r(Buffer.concat(c))); });
 const json = (res, s, j, h = {}) => { res.writeHead(s, { 'Content-Type': 'application/json', ...h }); res.end(JSON.stringify(j)); };
@@ -10,18 +11,22 @@ http.createServer(async (req, res) => {
   const p = u.pathname;
   log.push({ m: req.method, p, range: req.headers['content-range'], len: b.length });
   if (p === '/_log') return json(res, 200, { log, yt, tt });
-  if (p === '/device/code') return json(res, 200, { device_code: 'dev1', user_code: 'ABCD-EFGH', verification_url: 'https://www.google.com/device', interval: 1, expires_in: 600 });
+  if (p === '/device/code') return json(res, 200, { device_code: 'dev' + (++devN), user_code: 'ABCD-EFGH', verification_url: 'https://www.google.com/device', interval: 1, expires_in: 600 });
   if (p === '/token') {
     const f = new URLSearchParams(b.toString());
     if (f.get('grant_type').includes('device_code')) {
-      if (++tokenCalls < 2) return json(res, 428, { error: 'authorization_pending' });
-      return json(res, 200, { access_token: 'at1', refresh_token: 'rt1', expires_in: 3600 });
+      if (++tokenCalls % 2) return json(res, 428, { error: 'authorization_pending' });
+      const d = f.get('device_code');
+      return json(res, 200, { access_token: 'at-' + d, refresh_token: 'rt-' + d, expires_in: 3600 });
     }
-    return json(res, 200, { access_token: 'at2', expires_in: 3600 });
+    return json(res, 200, { access_token: 'at-' + f.get('refresh_token').slice(3), expires_in: 3600 });
   }
-  if (p === '/youtube/v3/channels') return json(res, 200, { items: [{ id: 'UC1', snippet: { title: 'Testkanal' } }] });
+  if (p === '/youtube/v3/channels') {
+    const d = String(req.headers.authorization).replace('Bearer at-', '');
+    return json(res, 200, { items: [{ id: 'UC-' + d, snippet: { title: YT_NAMES[d] || d } }] });
+  }
   if (p === '/upload/youtube/v3/videos') {
-    yt.meta = JSON.parse(b.toString()); yt.size = Number(req.headers['x-upload-content-length']); yt.got = 0;
+    yt.meta = JSON.parse(b.toString()); yt.auth = req.headers.authorization; yt.size = Number(req.headers['x-upload-content-length']); yt.got = 0;
     res.writeHead(200, { Location: 'http://127.0.0.1:9300/yt-session' }); return res.end();
   }
   if (p === '/yt-session') {
@@ -35,10 +40,17 @@ http.createServer(async (req, res) => {
     res.writeHead(308, { Range: `bytes=0-${e}` }); return res.end();
   }
   if (p === '/upload/youtube/v3/thumbnails/set') { yt.thumb = { len: b.length, type: req.headers['content-type'] }; return json(res, 200, {}); }
-  if (p === '/v2/oauth/token/') return json(res, 200, { access_token: 'tt-at', refresh_token: 'tt-rt', expires_in: 86400, refresh_expires_in: 31536000, open_id: 'o1' });
-  if (p === '/v2/user/info/') return json(res, 200, { data: { user: { display_name: 'TestTok' } }, error: { code: 'ok' } });
+  if (p === '/v2/oauth/token/') {
+    const f = new URLSearchParams(b.toString());
+    const who = f.get('code') || f.get('refresh_token').slice(3);
+    return json(res, 200, { access_token: 'tt-' + who, refresh_token: 'rt-' + who, expires_in: 86400, refresh_expires_in: 31536000, open_id: 'o-' + who });
+  }
+  if (p === '/v2/user/info/') {
+    const who = String(req.headers.authorization).replace('Bearer tt-', '');
+    return json(res, 200, { data: { user: { display_name: who, open_id: 'o-' + who } }, error: { code: 'ok' } });
+  }
   if (p === '/v2/post/publish/inbox/video/init/') {
-    const j = JSON.parse(b.toString()); tt.init = j.source_info; tt.size = j.source_info.video_size; tt.got = 0; tt.chunks = 0;
+    const j = JSON.parse(b.toString()); tt.init = j.source_info; tt.auth = req.headers.authorization; tt.size = j.source_info.video_size; tt.got = 0; tt.chunks = 0;
     return json(res, 200, { data: { publish_id: 'pub1', upload_url: 'http://127.0.0.1:9300/tt-up' }, error: { code: 'ok' } });
   }
   if (p === '/tt-up') {

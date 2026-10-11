@@ -13,10 +13,15 @@ Video-Zentrale (Browser) ── prüfen, freigeben ──▶ YouTube (privat) / 
                                                        \\PowerServer\videos\hochgeladen  (Archiv, automatisch)
 ```
 
+- **Kanäle:** jedes Video gehört zu einem Kanal (Start: **MichaModus** = Gaming, Standard; **3dbymicha** = gewerblich).
+  Je Kanal eigene YouTube- und TikTok-Verbindung sowie Vorgaben (Kategorie, Tags, Text unter der Beschreibung).
+  Die Zentrale **schlägt den Kanal vor**: `"channel"` in der .json › Stichwörter des Kanals in Titel/Dateiname (zählen doppelt),
+  Tags, Beschreibung › Standardkanal. Im Detail lässt sich der Kanal ändern; die Kacheln zeigen ihn als Abzeichen
+  (gestrichelt mit „?“ = Vorschlag), oben gibt es einen Kanal-Filter.
 - **Zur Freigabe** = Ordner `geschnitten`. Neben `Mein Video.mp4` dürfen liegen:
   `Mein Video.jpg` (oder .png/.webp) als Titelbild und `Mein Video.json` mit Texten:
   ```json
-  { "title": "…", "description": "…", "tags": ["gaming", "deutsch"], "category": "20", "tiktok": "Text #gaming" }
+  { "title": "…", "description": "…", "tags": ["gaming", "deutsch"], "category": "20", "tiktok": "Text #gaming", "channel": "MichaModus" }
   ```
 - Ohne Titelbild erzeugt die Zentrale ein Vorschaubild aus dem Video. Im Detail: „Aktuelles Videobild nehmen“
   (Standbild aus dem Player) oder eigenes Bild hochladen.
@@ -38,6 +43,7 @@ Video-Zentrale (Browser) ── prüfen, freigeben ──▶ YouTube (privat) / 
    - Pfad: `/data` → `/mnt/user/appdata/video-zentrale`
    - Variable `TZ` = `Europe/Berlin`
    - Icon URL (erweiterte Ansicht): `http://192.168.1.10:8094/icon.svg`
+   - WebUI (erweiterte Ansicht): `http://[IP]:[PORT:8090]/` (ab 1.1 bringt das Image die Angabe selbst mit)
 3. Browser: `http://192.168.1.10:8094` → beim ersten Start Passwort festlegen.
 4. Updates wie bei Flex-Studio: Docker → „Check for Updates“ → „apply update“.
 
@@ -60,8 +66,9 @@ im Aufnahmeordner. Optional MKV → MP4 umpacken und Vorschaubild (braucht ffmpe
    Eine Prüfung durch Google ist dafür nicht nötig; beim Verbinden erscheint nur „Google hat diese App nicht überprüft“
    → „Erweitert“ → „Weiter“.
 4. „Anmeldedaten“ → „Anmeldedaten erstellen“ → OAuth-Client-ID → Typ **„Fernseher und Geräte mit begrenzter Eingabe“**.
-5. Client-ID und Client-Secret in der Zentrale unter Einstellungen → YouTube eintragen → „Mit YouTube verbinden“
-   → angezeigten Code unter google.com/device eingeben (geht auch am Handy).
+5. Client-ID und Client-Secret in der Zentrale unter Einstellungen → „Google-App“ eintragen. Dann **je Kanal**
+   „YouTube verbinden“ → Code unter google.com/device eingeben und dort das passende Konto bzw. den Kanal wählen
+   (bei Brand-Konten fragt Google nach dem Kanal). Eine Google-App reicht für beide Kanäle.
 
 ## TikTok verbinden (einmalig)
 
@@ -74,7 +81,9 @@ im Aufnahmeordner. Optional MKV → MP4 umpacken und Vorschaubild (braucht ffmpe
      der Browserzeile kopieren und in der Zentrale bei „Adresse nach der Anmeldung“ einfügen.
 4. App im **Sandbox**-Modus lassen, dein TikTok-Konto als „Target User“ eintragen (für den Entwurfs-Upload reicht das;
    eine Prüfung durch TikTok braucht es erst für direktes Veröffentlichen).
-5. Client Key, Client Secret, Redirect URI in der Zentrale eintragen → „Mit TikTok verbinden“.
+5. Client Key, Client Secret, Redirect URI unter „TikTok-App“ eintragen. Dann **je Kanal** „TikTok verbinden“ –
+   vorher im Browser bei TikTok mit genau diesem Konto angemeldet sein (für das zweite Konto bei TikTok abmelden
+   oder ein privates Fenster nehmen). Beide Konten in der Sandbox als Target User eintragen.
 
 ## Technik
 
