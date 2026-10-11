@@ -57,7 +57,7 @@ const empty = () => ({
     model: 'sonilo/v1.1/text-to-music', generated: 0, spent: 0, recent: [] },
   backup: { auto: true, time: '03:30', keep: 14, lastAt: '', lastFile: '', lastError: '' },        // Sicherung
   photos: [],                                                      // Fotos des Creators für Titelbilder
-  cut: { auto: true, longVersion: true, summary: 0, cutPauses: true, silenceDb: -45, minPause: 20, shorts: 3, shortMin: 30, shortMax: 45,
+  cut: { auto: true, longVersion: true, longCopy: false, summary: 0, cutPauses: true, silenceDb: -45, minPause: 20, shorts: 3, shortMin: 30, shortMax: 45,
     moveRaw: true, whisper: { enabled: true, model: 'small', threads: 4, gpu: true },
     window: { enabled: false, from: '01:00', to: '07:00' },                          // Nachtbetrieb
     captions: { enabled: true, color: '#FFE14D' },                                   // animierte Untertitel in Shorts

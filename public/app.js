@@ -1262,6 +1262,7 @@ async function renderSettings() {
   const c = st.cut, w = c.whisper;
   const cb = (on) => h('input', { type: 'checkbox', checked: on });
   const numIn = (val, attrs = {}) => h('input', { type: 'number', value: val, ...attrs });
+  const cCopy = cb(c.longCopy);
   const cAuto = cb(c.auto), cLong = cb(c.longVersion), cPause = cb(c.cutPauses), cMove = cb(c.moveRaw);
   const cDb = numIn(c.silenceDb, { min: -70, max: -20 }), cMin = numIn(c.minPause, { min: 5, max: 600 });
   const cShorts = numIn(c.shorts, { min: 0, max: 10 }), cSmin = numIn(c.shortMin, { min: 10, max: 170 }), cSmax = numIn(c.shortMax, { min: 10, max: 180 });
@@ -1290,6 +1291,7 @@ async function renderSettings() {
     h('label', { class: 'check' }, cAuto, 'Neue Rohaufnahmen im Eingang automatisch schneiden'),
     h('label', { class: 'check' }, cLong, 'Langfassung für YouTube erzeugen'),
     h('label', { class: 'check' }, cPause, 'dabei ruhige Abschnitte (Menü, Pause, Laden) herausschneiden'),
+    h('label', { class: 'check' }, cCopy, 'Langfassung schnell ohne Neukodieren (nur Keyframes – kann an Schnitten ruckeln)'),
     h('div', { class: 'two' }, h('div', {}, h('label', {}, 'ruhig = leiser als (LUFS)'), cDb), h('div', {}, h('label', {}, 'ab Länge (Sekunden)'), cMin)),
     h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Shorts je Video (0 = keine)'), cShorts),
       h('div', {}, h('label', {}, 'Länge von – bis (s)'), h('div', { class: 'row' }, cSmin, cSmax))),
@@ -1316,7 +1318,7 @@ async function renderSettings() {
     h('div', { class: 'row', style: { marginTop: '12px' } },
       h('button', { class: 'btn', onclick: run(() => api('POST', '/api/cut/config', { auto: cAuto.checked, longVersion: cLong.checked, cutPauses: cPause.checked,
         silenceDb: Number(cDb.value), minPause: Number(cMin.value), shorts: Number(cShorts.value), shortMin: Number(cSmin.value), shortMax: Number(cSmax.value),
-        moveRaw: cMove.checked, summary: Number(cSum.value), whisper: { enabled: wOn.checked, model: wModel.value, threads: Number(wThreads.value), gpu: wGpu.checked },
+        moveRaw: cMove.checked, summary: Number(cSum.value), longCopy: cCopy.checked, whisper: { enabled: wOn.checked, model: wModel.value, threads: Number(wThreads.value), gpu: wGpu.checked },
         window: { enabled: wnOn.checked, from: wnFrom.value, to: wnTo.value }, linkedin: { format: liFmt.value, captions: liCap.checked },
         captions: { enabled: capOn.checked, color: capColor.value }, facecam: { enabled: camOn.checked, x: cam.x, y: cam.y, w: cam.w, h: cam.h } }), 'Gespeichert.') }, 'Speichern')));
 

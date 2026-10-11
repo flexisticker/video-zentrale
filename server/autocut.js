@@ -36,6 +36,7 @@ export function configure(b) {
   if (b.shortMin != null && !isNaN(b.shortMin)) c.shortMin = Math.round(num(b.shortMin, 10, 170));
   if (b.shortMax != null && !isNaN(b.shortMax)) c.shortMax = Math.round(num(b.shortMax, c.shortMin, 180));
   if (typeof b.moveRaw === 'boolean') c.moveRaw = b.moveRaw;
+  if (typeof b.longCopy === 'boolean') c.longCopy = b.longCopy;
   if (b.summary != null && !isNaN(b.summary)) c.summary = Math.round(num(b.summary, 0, 1800));
   if (b.window) {
     const t = (x) => /^([01]\d|2[0-3]):[0-5]\d$/.test(x || '');
@@ -161,22 +162,55 @@ function concatList(file, ranges) {
 
 const LOUDNORM = 'loudnorm=I=-14:TP=-1.5:LRA=11';
 
+// Bildrate der Quelle (für gleichmäßige Ausgabe); OBS nimmt oft mit variabler Rate auf
+function probeFps(file) {
+  return new Promise((resolve) => {
+    let out = '';
+    const p = spawn('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=avg_frame_rate,r_frame_rate', '-of', 'csv=p=0', file], { stdio: ['ignore', 'pipe', 'ignore'] });
+    p.stdout.on('data', (d) => { out += d; });
+    p.on('error', () => resolve(30));
+    p.on('close', () => {
+      const rates = out.trim().split(/[\s,]+/).map((x) => { const [a, b] = x.split('/').map(Number); return b ? a / b : a; }).filter((x) => x > 1 && x < 241);
+      const f = rates[0] || 30;
+      const std = [24, 25, 30, 48, 50, 60].reduce((best, x) => (Math.abs(x - f) < Math.abs(best - f) ? x : best), 30);
+      resolve(Math.min(60, Math.abs(std - f) < 1.5 ? std : Math.round(f)));
+    });
+  });
+}
+
 async function renderLong(v, file, keep, hasAudio, out, onP, track) {
   const total = keep.reduce((s, [a, b]) => s + b - a, 0);
   const mInput = track ? ['-stream_loop', '-1', '-i', track.file] : [];
-  const audio = track ? ['-filter_complex', music.mixGraph({ hasVoice: hasAudio, dur: total, track }), '-map', '[aout]', '-c:a', 'aac', '-b:a', '192k', '-t', total.toFixed(2)]
-    : hasAudio ? ['-map', '0:a:0', '-af', LOUDNORM, '-c:a', 'aac', '-b:a', '192k'] : [];
-  let args;
-  if (keep.length === 1 && keep[0][0] === 0) {
-    args = ['-i', file, ...mInput, '-map', '0:v:0', ...audio, '-c:v', 'copy'];
-  } else {
-    // Schnitte ohne Neukodieren des Bildes: setzt an Keyframes an (± 1–2 s), dafür schnell.
-    const list = path.join(TMP, v.id + '-schnitt.txt');
-    fs.writeFileSync(list, concatList(file, keep));
-    args = ['-f', 'concat', '-safe', '0', '-i', list, ...mInput, '-map', '0:v:0', ...audio, '-c:v', 'copy'];
+  const whole = keep.length === 1 && keep[0][0] === 0;
+  // Schnell ohne Neukodieren nur, wenn nichts geschnitten wird oder ausdrücklich gewünscht (setzt an Keyframes an → kann ruckeln)
+  if (whole || cfg().longCopy) {
+    const audio = track ? ['-filter_complex', music.mixGraph({ hasVoice: hasAudio, dur: total, track }), '-map', '[aout]', '-c:a', 'aac', '-b:a', '192k', '-t', total.toFixed(2)]
+      : hasAudio ? ['-map', '0:a:0', '-af', LOUDNORM, '-c:a', 'aac', '-b:a', '192k'] : [];
+    let args;
+    if (whole) args = ['-i', file, ...mInput, '-map', '0:v:0', ...audio, '-c:v', 'copy'];
+    else {
+      const list = path.join(TMP, v.id + '-schnitt.txt');
+      fs.writeFileSync(list, concatList(file, keep));
+      args = ['-f', 'concat', '-safe', '0', '-i', list, ...mInput, '-map', '0:v:0', ...audio, '-c:v', 'copy'];
+    }
+    const r = await ffmpeg([...args, '-movflags', '+faststart', '-progress', 'pipe:1', '-y', out], progressFrom(total, onP));
+    fs.rmSync(path.join(TMP, v.id + '-schnitt.txt'), { force: true });
+    if (r.code !== 0) throw new Error('Langfassung: ' + lastError(r));
+    return;
   }
-  const r = await ffmpeg([...args, '-movflags', '+faststart', '-progress', 'pipe:1', '-y', out], progressFrom(total, onP));
-  fs.rmSync(path.join(TMP, v.id + '-schnitt.txt'), { force: true });
+  // Bildgenau und flüssig: gleichmäßige Bildrate, behaltene Abschnitte auswählen, Zeitstempel neu, Grafikkarte wenn möglich
+  const fps = await probeFps(file);
+  const expr = keep.map(([a, b]) => `between(t,${a.toFixed(3)},${b.toFixed(3)})`).join('+');
+  let g = `[0:v]fps=${fps},select='${expr}',setpts=N/(${fps}*TB)[v]`;
+  if (hasAudio) g += `;[0:a:0]aselect='${expr}',asetpts=N/SR/TB[va]`;
+  if (track) g += ';' + music.mixGraph({ hasVoice: hasAudio, dur: total, track, voiceIn: 'va' });
+  else if (hasAudio) g += `;[va]${LOUDNORM}[aout]`;
+  const script = path.join(TMP, v.id + '-lang.filter');
+  fs.writeFileSync(script, g);
+  const audioMap = track || hasAudio ? ['-map', '[aout]', '-c:a', 'aac', '-b:a', '192k'] : [];
+  const r = await gpu.encodeWithFallback((venc) => ffmpeg(['-i', file, ...mInput, '-filter_complex_script', script, '-map', '[v]', ...audioMap, ...venc,
+    '-t', total.toFixed(2), '-movflags', '+faststart', '-progress', 'pipe:1', '-y', out], progressFrom(total, onP)));
+  fs.rmSync(script, { force: true });
   if (r.code !== 0) throw new Error('Langfassung: ' + lastError(r));
 }
 

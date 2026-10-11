@@ -1,5 +1,9 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.13.1', date: '11.10.2026', items: [
+    'Fehler behoben: „Diashow“/Ruckler in der Langfassung. Die Schnitte ohne Neukodieren setzten nur an Keyframes an und schleppten bis zu 10 s doppelt mit. Jetzt wird bildgenau mit gleichmäßiger Bildrate neu kodiert (Grafikkarte).',
+    'Betroffene Videos neu schneiden: Rohvideo öffnen → „So nochmal schneiden“.',
+  ] },
   { version: '1.13.0', date: '11.10.2026', items: [
     'Tipps je Video: Einstieg/Hook, Schnitt, Titel/Bild und „Nächstes Mal beim Aufnehmen“ – unter „Viral-Potenzial“ im Video.',
     '💡 Coach: Claude schaut sich deine letzten Videos je Kanal an – was gut läuft, 5 persönliche Tipps für mehr Reichweite und Ideen für neue Videos.',
