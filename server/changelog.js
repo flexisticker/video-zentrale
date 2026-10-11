@@ -1,5 +1,10 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.12.0', date: '11.10.2026', items: [
+    'Mehr Clips: bis zu 10 je Video, MichaModus jetzt standardmäßig 6, 3dbymicha 4 (je Kanal einstellbar).',
+    'Je Kanal festlegen, was Claude als Clips rausholen soll – MichaModus: Funny Moments, Ärger/Rage, Fails, Reaktionen, alles was Zuschauer bindet.',
+    '🔥 Viral-Potenzial: Claude schätzt jedes Video/jeden Clip ehrlich ein (1–10) mit Begründung und Tipp für mehr Reichweite – auf der Karte und im Video.',
+  ] },
   { version: '1.11.0', date: '11.10.2026', items: [
     '📱 „Zum Posten“: Handy-Ansicht mit allem, was du noch selbst posten musst (TikTok-Entwürfe, LinkedIn) – Text mit einem Tipp kopieren, „Gepostet“ abhaken.',
     'TikTok direkt veröffentlichen (Direct Post) mit Text, Sichtbarkeit, Kommentare/Duett/Stitch und Kennzeichnung von Werbung – nach den TikTok-Vorgaben. Einschalten unter Einstellungen → TikTok-App.',

@@ -76,9 +76,12 @@ function schema(ids, labels, pro = false) {
   return {
     type: 'object',
     additionalProperties: false,
-    required: ['summary', 'game', 'channel', 'channelReason', 'titles', 'description', 'tags', 'tiktok', 'thumbnailFrame', 'thumbnailText', 'thumbs', 'aiThumb'],
+    required: ['summary', 'game', 'channel', 'channelReason', 'titles', 'description', 'tags', 'tiktok', 'thumbnailFrame', 'thumbnailText', 'thumbs', 'aiThumb', 'viral'],
     properties: {
       summary: s('Ein Satz: was im Video passiert (für den Creator, nicht fürs Publikum).'),
+      viral: { type: 'object', additionalProperties: false, required: ['score', 'why', 'tip'], description: 'Ehrliche Einschätzung des Viral-Potenzials dieses Videos auf der Zielplattform.',
+        properties: { score: { type: 'integer', description: '1 = kaum, 10 = sehr hoch' }, why: s('Ein Satz Begründung (Hook, Emotion, Überraschung, Teilwert …)'),
+          tip: s('Ein konkreter Tipp für mehr Reichweite (z. B. anderer Einstieg, Hook-Text, Titel)') } },
       game: s('Erkanntes Spiel bzw. Produkt/Thema, leer wenn unklar.'),
       channel: { type: 'string', enum: ids, description: 'Kanal-ID, zu dem das Video am besten passt.' },
       channelReason: s('Kurze Begründung für den Kanal.'),
@@ -250,7 +253,10 @@ export async function suggest(v, extra = '') {
       text: clip(t.text, 60), side: t.side === 'left' ? 'left' : 'right' })),
     aiThumb: out.aiThumb ? { frame: frames.some((f) => f.n === out.aiThumb.frame) ? out.aiThumb.frame : frames[0].n,
       photo: clip(out.aiThumb.photo, 30), text: clip(out.aiThumb.text, 60), scene: clip(out.aiThumb.scene, 1200) } : null,
+    viral: out.viral && Number(out.viral.score) ? { score: Math.max(1, Math.min(10, Math.round(Number(out.viral.score)))),
+      why: clip(out.viral.why, 300), tip: clip(out.viral.tip, 300) } : null,
   };
+  if (v.ai.viral) v.viral = { ...v.ai.viral, by: 'Claude', at: v.ai.at };
   // Noch nichts von Hand oder per .json eingetragen → Vorschlag gleich übernehmen (bleibt änderbar).
   if (!v.editedAt && !v.metaAt) {
     const a = v.ai;
@@ -297,6 +303,10 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
       'starker Anfang in den ersten 2 Sekunden, Ende nach der Pointe. Lieber weniger, wenn nichts taugt (dann leere Liste).',
     ]),
     `Länge je Short ${c.shortMin}–${c.shortMax} Sekunden. Start/Ende dürfen bis zu 15 Sekunden um den Kandidaten verschoben werden.`,
+    profile?.clipHints ? `Worauf der Creator bei diesem Kanal Wert legt: ${profile.clipHints}` : '',
+    'Nimm ruhig viele Stellen, wenn sie taugen – jede, die Zuschauer bindet (Hook, Emotion, Pointe), ist ein eigener Clip wert.',
+    'Schätze für jeden Clip das Viral-Potenzial ehrlich ein (1 = kaum, 10 = sehr hoch): starker Hook in den ersten 2 Sekunden, Emotion,'
+      + ' Überraschung, Wiederschau- und Teilwert, Verständlichkeit ohne Kontext. Keine Gefälligkeitswerte.',
     wish ? `WICHTIG – Wunsch des Creators für diesen Schnitt: „${wish}“. Richte die Auswahl danach aus (auch wenn dadurch weniger Shorts entstehen).` : '',
     `Video: „${v.file}“, Länge ${whisper.fmtTime(v.duration)}. ${v.note ? 'Notiz: ' + v.note : ''}`,
     segs?.length ? 'Gesprochenes ist je Kandidat angegeben (automatisch erkannt, kann Fehler enthalten).' : 'Kein gesprochener Text verfügbar.',
@@ -319,7 +329,7 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
   }
   const schemaH = {
     type: 'object', additionalProperties: false, required: ['shorts'],
-    properties: { shorts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['candidate', 'start', 'end', 'title', 'reason', 'mood', 'music'],
+    properties: { shorts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['candidate', 'start', 'end', 'title', 'reason', 'mood', 'music', 'viral', 'viralWhy', 'viralTip'],
       properties: {
         candidate: { type: 'integer', description: 'Nummer des Kandidaten' },
         start: { type: 'number', description: 'Start in Sekunden ab Videoanfang' },
@@ -328,6 +338,9 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
         reason: { type: 'string', description: 'Ein Satz: warum diese Stelle' },
         mood: { type: 'string', enum: ['episch', 'lustig', 'spannend', 'chillig', 'energisch', 'fröhlich', 'traurig'], description: 'Stimmung der Stelle (für Hintergrundmusik)' },
         music: { type: 'string', description: 'English, one short phrase: fitting instrumental background music (genre, tempo, instruments), e.g. "fast hype trap beat with heavy 808s"' },
+        viral: { type: 'integer', description: 'Viral-Potenzial 1–10 (ehrlich)' },
+        viralWhy: { type: 'string', description: 'Ein Satz: warum diese Einschätzung' },
+        viralTip: { type: 'string', description: 'Ein konkreter Tipp, wie der Clip mehr Potenzial bekommt (z. B. Hook-Text, früher einsteigen)' },
       } } } },
   };
   let r;
@@ -354,7 +367,8 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
     if (end - start < Math.min(c.shortMin, 10)) continue;
     if (picked.some((p) => start < p.end && end > p.start)) continue;
     picked.push({ start: Math.round(start * 10) / 10, end: Math.round(end * 10) / 10, title: String(s.title || '').slice(0, 100), reason: String(s.reason || '').slice(0, 300),
-      mood: String(s.mood || ''), music: String(s.music || '').slice(0, 200) });
+      mood: String(s.mood || ''), music: String(s.music || '').slice(0, 200),
+      viral: Math.max(1, Math.min(10, Math.round(Number(s.viral) || 0))) || undefined, viralWhy: String(s.viralWhy || '').slice(0, 300), viralTip: String(s.viralTip || '').slice(0, 300) });
   }
   return picked;
 }

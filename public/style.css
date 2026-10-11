@@ -239,3 +239,10 @@ input[type=range] { width: 100%; accent-color: #7c5cff; }
 .ttavatar { width: 40px; height: 40px; border-radius: 50%; background: var(--panel2) center / cover no-repeat; }
 .ttprev { max-height: 320px; }
 .disc { display: grid; gap: 6px; padding: 8px 0 0 26px; }
+
+/* Viral-Potenzial */
+.chip.viral.hot { background: #ff4f3b; border-color: #ff4f3b; color: #fff; }
+.chip.viral.warm { background: #f2b33d; border-color: #f2b33d; color: #1a1a1a; }
+.chip.viral.cool { color: var(--muted); }
+.chip.viral.big { font-size: 15px; padding: 3px 10px; }
+.viralbox { border-color: rgba(255, 79, 59, .45); display: grid; gap: 4px; margin-top: 0; margin-bottom: 8px; }

@@ -18,6 +18,8 @@ export const defaultProfiles = () => [
       + 'valorant, warzone, call of duty, cod, apex, gta, fifa, ea fc, rocket league, cs2, league of legends, elden ring, '
       + 'zelda, mario, pokemon, ranked, boss',
     musicStyle: 'modern energetic gaming background music, electronic beats, punchy drums, synth bass', musicMood: 'energisch',
+    clipHints: 'Funny Moments, Stellen wo ich mich ärgere oder aufrege (Rage), laute Reaktionen, Fails, überraschende Wendungen, Clutches, '
+      + 'peinliche oder absurde Momente, lustige Sprüche – alles, was Zuschauer bindet und zum Teilen/Kommentieren anregt.', shorts: 6,
     ...emptyConnections() },
   { id: '3dbymicha', name: '3dbymicha', color: '#25c4f4', isDefault: false, category: '28', tags: '3d-druck, 3d druck, bambu lab', footer: '',
     aiStyle: 'Gewerblicher Kanal rund um 3D-Druck (Bambu Lab A1 / A1 mini) und Druck von Flexisticker (Tassen, Textilien): '
@@ -26,6 +28,7 @@ export const defaultProfiles = () => [
       + 'filament, pla, petg, tpu, slicer, druckbett, nozzle, cad, fusion 360, tinkercad, makerworld, printables, flexisticker, '
       + 'tasse, tassen, sublimation, dtf, plotter, textildruck, werkstatt',
     musicStyle: 'light upbeat corporate background music, acoustic and soft electronic, positive, modern workshop vibe', musicMood: 'fröhlich',
+    clipHints: 'Satisfying-Momente (Druck entsteht, Tasse kommt aus der Presse), Vorher/Nachher, überraschende Ergebnisse, kurze Tipps, Fehler und wie ich sie löse.', shorts: 4,
     ...emptyConnections() },
   linkedinProfile(),
 ];
@@ -118,6 +121,8 @@ function normalize(raw) {
     if (p.aiStyle === undefined) p.aiStyle = defaults[p.id]?.aiStyle || '';
     if (p.musicStyle === undefined) p.musicStyle = defaults[p.id]?.musicStyle || '';
     if (p.musicMood === undefined) p.musicMood = defaults[p.id]?.musicMood || '';
+    if (p.clipHints === undefined) p.clipHints = defaults[p.id]?.clipHints || '';
+    if (p.shorts === undefined && defaults[p.id]?.shorts != null) p.shorts = defaults[p.id].shorts;
   }
   return state;
 }

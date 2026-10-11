@@ -95,6 +95,15 @@ function channelBadge(v) {
   return b;
 }
 
+// Viral-Potenzial (Claude-Einschätzung 1–10)
+function viralChip(v, big) {
+  const x = v.viral;
+  if (!x?.score) return null;
+  const cls = x.score >= 8 ? 'hot' : x.score >= 5 ? 'warm' : 'cool';
+  return h('span', { class: `chip viral ${cls}${big ? ' big' : ''}`, title: `Viral-Potenzial ${x.score}/10 – ${x.why || ''}${x.tip ? '\nTipp: ' + x.tip : ''}` },
+    (x.score >= 8 ? '🔥 ' : x.score >= 5 ? '📈 ' : '') + x.score + '/10');
+}
+
 function stateChip(label, s) {
   const st = s?.state || 'none';
   if (st === 'none') return h('span', { class: 'chip' }, label + ': –');
@@ -327,6 +336,7 @@ function card(v) {
         v.cut?.state === 'error' ? h('span', { class: 'chip bad', title: v.cut.error }, '✂ Fehler') : null,
         v.cut?.state === 'done' ? h('span', { class: 'chip ok' }, `✂ ${v.cut.outputs?.length || 0} Videos`) : null,
         v.folder === 'eingang-profi' ? h('span', { class: 'chip li' }, 'Profi') : null,
+        viralChip(v),
         v.folder === 'papierkorb' ? h('span', { class: 'chip bad' }, '🗑 ' + fmtDate(v.trash?.at)) : null,
         ...(isPro(channelOf(v)) ? [stateChip('LinkedIn', v.li)] : [stateChip('YouTube', v.yt), stateChip('TikTok', v.tt)])),
       running ? h('div', { class: 'bar-progress' }, h('i', { style: { width: (running.progress || 0) + '%' } })) : null));
@@ -754,6 +764,14 @@ function renderGenThumbs(box, v) {
   ].filter(Boolean));
 }
 
+function renderViral(v) {
+  const x = v.viral;
+  if (!x?.score) return null;
+  return h('div', { class: 'section viralbox' }, h('div', { class: 'row' }, h('b', {}, 'Viral-Potenzial'), viralChip(v, true),
+    h('span', { class: 'hint' }, x.by === 'Schnitt' ? '(Einschätzung beim Schnitt)' : '(Einschätzung von Claude)')),
+    x.why ? h('div', {}, x.why) : null, x.tip ? h('div', { class: 'hint' }, '💡 Tipp: ' + x.tip) : null);
+}
+
 function renderAi(box, v) {
   const a = v.ai || {};
   const conf = S.settings?.ai?.configured;
@@ -814,7 +832,7 @@ function cutPlanForm(v, c) {
   const p = v.plan || {};
   const pro = isPro(channelOf(v));
   const long = h('input', { type: 'checkbox', checked: p.long !== false });
-  const shorts = h('select', {}, [0, 1, 2, 3, 4, 5].map((n) => h('option', { value: n, selected: (p.shorts ?? 3) === n }, n === 0 ? 'keine' : String(n))));
+  const shorts = h('select', {}, [0, 1, 2, 3, 4, 5, 6, 8, 10].map((n) => h('option', { value: n, selected: (p.shorts ?? 3) === n }, n === 0 ? 'keine' : String(n))));
   const summary = h('select', {}, [[0, 'keine'], [60, '1 Minute'], [120, '2 Minuten'], [180, '3 Minuten'], [300, '5 Minuten'], [480, '8 Minuten'], [600, '10 Minuten']]
     .map(([n, t]) => h('option', { value: n, selected: (p.summary || 0) === n }, t)));
   const wish = h('textarea', { rows: 2, maxlength: 500, value: p.wish || '',
@@ -903,7 +921,9 @@ function updateDetail(force) {
     Object.assign(detail.v, { ai: v.ai, suggestion: v.suggestion, hasImage: v.hasImage, imageVersion: v.imageVersion, image: v.image,
       thumbVariants: v.thumbVariants, thumbVariantsAt: v.thumbVariantsAt });
     detail.setCover(); detail.chanInfo();
-    detail.aiBox.replaceChildren(); renderAi(detail.aiBox, detail.v);
+    detail.aiBox.replaceChildren(); detail.v.viral = v.viral;
+    const vb = renderViral(detail.v); if (vb) detail.aiBox.append(vb);
+    renderAi(detail.aiBox, detail.v);
     renderGenThumbs(detail.genBox, detail.v);
   }
   // Felder nicht überschreiben, nur Status-Teile
@@ -1074,9 +1094,12 @@ async function renderSettings() {
     const mStyle = h('input', { value: p.musicStyle, placeholder: 'englisch, z. B. energetic electronic gaming beat' });
     const mMood = h('select', {}, h('option', { value: '' }, '– keine –'), (st.music?.moods || []).map((x) => h('option', { value: x, selected: p.musicMood === x }, x)));
     const proMusic = h('input', { type: 'checkbox', checked: p.music });
+    const clipHints = h('textarea', { rows: 2, value: p.clipHints || '', placeholder: 'z. B. Funny Moments, wo ich mich ärgere, Fails, Clutches …' });
+    const chShorts = h('input', { type: 'number', min: 0, max: 10, value: p.shorts ?? '', placeholder: 'Standard' });
     const save = run(() => api('PUT', '/api/profiles/' + p.id, { name: name.value, color: color.value, isDefault: def.checked || undefined,
       keywords: kw.value, aiStyle: style.value, category: cat.value, tags: tags.value, footer: footer.value,
-      musicStyle: mStyle.value, musicMood: mMood.value, ...(isPro(p) ? { music: proMusic.checked } : {}) }), 'Kanal gespeichert.');
+      musicStyle: mStyle.value, musicMood: mMood.value, clipHints: clipHints.value, shorts: chShorts.value === '' ? null : Number(chShorts.value),
+      ...(isPro(p) ? { music: proMusic.checked } : {}) }), 'Kanal gespeichert.');
 
     // YouTube
     const yp = y.pending[p.id];
@@ -1130,6 +1153,8 @@ async function renderSettings() {
       h('label', {}, 'Stichwörter für den Vorschlag (mit Komma; Titel/Dateiname zählt doppelt)'), kw,
       h('div', { class: 'two' }, h('div', {}, h('label', {}, 'YouTube-Kategorie'), cat), h('div', {}, h('label', {}, 'Standard-Tags'), tags)),
       h('label', {}, 'Text unter jeder YouTube-Beschreibung'), footer,
+      h('label', {}, '✂ Was soll Claude als Clips rausholen?'), clipHints,
+      h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Clips je Video (leer = Standard)'), chShorts), h('div', {})),
       h('div', { class: 'two' }, h('div', {}, h('label', {}, '🎵 Musikstil für KI-Musik'), mStyle), h('div', {}, h('label', {}, 'Stimmung (Langfassung)'), mMood)),
       h('p', { class: 'hint' }, `Eigene Titel: ${st.music?.counts?.[p.id] ?? 0} (Ordner musik\\${p.id} + musik)`),
       h('div', { class: 'row', style: { marginTop: '12px' } },
@@ -1205,7 +1230,7 @@ async function renderSettings() {
   const numIn = (val, attrs = {}) => h('input', { type: 'number', value: val, ...attrs });
   const cAuto = cb(c.auto), cLong = cb(c.longVersion), cPause = cb(c.cutPauses), cMove = cb(c.moveRaw);
   const cDb = numIn(c.silenceDb, { min: -70, max: -20 }), cMin = numIn(c.minPause, { min: 5, max: 600 });
-  const cShorts = numIn(c.shorts, { min: 0, max: 5 }), cSmin = numIn(c.shortMin, { min: 10, max: 170 }), cSmax = numIn(c.shortMax, { min: 10, max: 180 });
+  const cShorts = numIn(c.shorts, { min: 0, max: 10 }), cSmin = numIn(c.shortMin, { min: 10, max: 170 }), cSmax = numIn(c.shortMax, { min: 10, max: 180 });
   const wOn = cb(w.enabled);
   const capOn = cb(c.captions?.enabled), capColor = h('input', { type: 'color', value: c.captions?.color || '#FFE14D', class: 'color small' });
   const camOn = cb(c.facecam?.enabled);

@@ -32,7 +32,7 @@ export function configure(b) {
   if (typeof b.cutPauses === 'boolean') c.cutPauses = b.cutPauses;
   if (b.silenceDb != null && !isNaN(b.silenceDb)) c.silenceDb = num(b.silenceDb, -70, -20);
   if (b.minPause != null && !isNaN(b.minPause)) c.minPause = num(b.minPause, 5, 600);
-  if (b.shorts != null && !isNaN(b.shorts)) c.shorts = Math.round(num(b.shorts, 0, 5));
+  if (b.shorts != null && !isNaN(b.shorts)) c.shorts = Math.round(num(b.shorts, 0, 10));
   if (b.shortMin != null && !isNaN(b.shortMin)) c.shortMin = Math.round(num(b.shortMin, 10, 170));
   if (b.shortMax != null && !isNaN(b.shortMax)) c.shortMax = Math.round(num(b.shortMax, c.shortMin, 180));
   if (typeof b.moveRaw === 'boolean') c.moveRaw = b.moveRaw;
@@ -224,10 +224,11 @@ const SEG = 15; // Länge der Bausteine einer Kurzfassung (Sekunden)
 // Was soll geschnitten werden? Vorgaben aus den Einstellungen, je Video überschreibbar (v.cutPlan)
 export function planOf(v) {
   const c = cfg();
+  const profile = profiles.effective(v);
   const p = v.cutPlan || {};
   return {
     long: typeof p.long === 'boolean' ? p.long : c.longVersion,
-    shorts: Number.isFinite(p.shorts) ? Math.max(0, Math.min(5, p.shorts)) : c.shorts,
+    shorts: Number.isFinite(p.shorts) ? Math.max(0, Math.min(10, p.shorts)) : (Number.isFinite(profile?.shorts) ? profile.shorts : c.shorts),
     summary: Number.isFinite(p.summary) ? Math.max(0, Math.min(1800, p.summary)) : (c.summary || 0),
     wish: String(p.wish || '').slice(0, 500),
   };
@@ -309,7 +310,7 @@ async function runCut(v) {
   const keep = keepRanges(duration, cut);
   const plan = planOf(v);
   const len = Math.round((c.shortMin + c.shortMax) / 2);
-  const cands = plan.shorts > 0 ? candidates(loud, scenes, duration, cut, len, Math.max(12, plan.shorts * 3)) : [];
+  const cands = plan.shorts > 0 ? candidates(loud, scenes, duration, cut, len, Math.min(30, Math.max(12, plan.shorts * 3))) : [];
 
   const profile = profiles.effective(v);
   const pro = profiles.isPro(profile);
@@ -406,6 +407,7 @@ async function runCut(v) {
     const nv = publish(tmp, `${base} – ${pro ? 'LinkedIn-Clip' : 'Short'} ${i + 1}.mp4`, {
       source: { rawId: v.id, rawFile: v.file, kind: 'short', start: s.start, end: s.end },
       title: s.title ? s.title.slice(0, 100) : `${base} – Short ${i + 1}`,
+      viral: Number.isFinite(s.viral) ? { score: s.viral, why: s.viralWhy || '', tip: s.viralTip || '', by: 'Schnitt' } : undefined,
       note: sourceNote(s.start, s.end) + (s.reason ? ' Warum: ' + s.reason : '') + music.noteOf(track),
       music: track ? { kind: track.kind, name: track.name, mood: track.mood || '' } : null,
       transcriptText: segs ? whisper.textOf(segs, s.start, s.end) : '',

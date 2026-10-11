@@ -114,8 +114,11 @@ http.createServer(async (req, res) => {
       const texts = j.messages[0].content.filter((c) => c.type === 'text').map((c) => c.text);
       log.push({ highlights: { imgs: j.messages[0].content.filter((c) => c.type === 'image').length, cands: texts.filter((t) => t.startsWith('Kandidat')) } });
       const sec = texts.filter((t) => t.startsWith('Kandidat')).map((t) => /Sekunde (\d+)–(\d+)/.exec(t)).map((m) => [Number(m[1]), Number(m[2])]);
+      const clipHints = /Worauf der Creator bei diesem Kanal Wert legt: ([^\n]*)/.exec(texts[0])?.[1] || '';
+      if (clipHints) log.push({ clipHints: clipHints.slice(0, 60) });
       const pick = sec.slice(0, 2).map(([a, b2], i) => ({ candidate: i + 1, start: a + 1, end: b2 - 2, title: i ? 'Der Sieg 🏆' : 'Drei auf einmal?!', reason: 'lauter Moment mit Reaktion',
-        mood: i ? 'episch' : 'lustig', music: i ? 'epic orchestral hybrid with big drums' : 'quirky playful pizzicato' }));
+        mood: i ? 'episch' : 'lustig', music: i ? 'epic orchestral hybrid with big drums' : 'quirky playful pizzicato',
+        viral: i ? 6 : 9, viralWhy: i ? 'Solider Sieg-Moment, aber bekannter Ablauf.' : 'Lauter Ausraster mit Pointe – hoher Teilwert.', viralTip: 'Mit dem Ausruf direkt einsteigen.' }));
       return json(res, 200, { id: 'msg_h', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn',
         content: [{ type: 'text', text: JSON.stringify({ shorts: pick }) }], usage: { input_tokens: 9000, output_tokens: 400 } });
     }
@@ -135,6 +138,7 @@ http.createServer(async (req, res) => {
           titles: ['1v3 Clutch in letzter Sekunde 😱', 'Die krasseste Runde der Woche', 'Fortnite: Clutch mit 1 HP'],
           description: 'Diese Runde war wild.\n\nSchreib in die Kommentare, wie du gespielt hättest!', tags: ['fortnite', 'clutch', 'gaming', 'deutsch'],
           tiktok: '1 HP, 3 Gegner, 0 Plan 😅 #fortnite #clutch #gaming', thumbnailFrame: 2, thumbnailText: '1 HP CLUTCH',
+          viral: { score: 7, why: 'Knappe Clutch-Situation mit starker Reaktion.', tip: 'Titel mit „1 HP“ beginnen.' },
           aiThumb: { frame: 2, photo: 'schockiert', text: '1 HP Clutch', scene: 'The shocked streamer leans in from the right, the game fight explodes behind him in the left half, text top left.' },
           thumbs: [{ frame: 2, photo: 'schockiert', text: '1 HP?!', side: 'right' }, { frame: 4, photo: 'jubelnd', text: 'Clutch des Jahres', side: 'left' }, { frame: 5, photo: '', text: 'Wie?!', side: 'right' }] };
     return json(res, 200, { id: 'msg_1', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn',
