@@ -1128,12 +1128,26 @@ const add = (el, ...kids) => el.append(...kids.flat().filter((k) => k != null &&
 const connSig = (st) => JSON.stringify([st.profiles.map((p) => [p.youtube, p.tiktok]), st.youtube.pending, st.youtube.configured,
   st.tiktok.configured, st.ai.configured]);
 let settingsTimer = null;
+// Statuszeile des Rechenhelfers (wird während der Einstellungen alle 3 s aufgefrischt, z. B. Download-Fortschritt)
+function hpStatusText(hp) {
+  return hp.online ? `🟢 online: ${hp.name || 'PC'} · ${hp.gpu || ''}` + (hp.status && hp.status !== 'bereit' ? ` · ${hp.status}` : ' · bereit')
+    : hp.seen && hp.paused ? `🎮 ${hp.name || 'PC'} ${hp.status || 'pausiert'} – die Zentrale rechnet solange selbst.`
+    : hp.seen && hp.status ? `🟡 ${hp.name || 'PC'}: ${hp.status} – die Zentrale rechnet solange selbst.`
+    : '⚪ offline' + (hp.lastSeen ? ' – zuletzt ' + fmtDate(hp.lastSeen) : ' – noch nie verbunden');
+}
+function hpStatusEl(hp) { return h('p', { id: 'hp-status', class: hp.online ? 'ok-text' : 'hint' }, hpStatusText(hp)); }
+async function refreshHelperStatus() {
+  const el = document.getElementById('hp-status');
+  if (!el) return;
+  const hp = await api('GET', '/api/helper-config').catch(() => null);
+  if (hp?.enabled) { el.textContent = hpStatusText(hp); el.className = hp.online ? 'ok-text' : 'hint'; }
+}
 function watchSettings(sig) {
   clearTimeout(settingsTimer);
   settingsTimer = setTimeout(async () => {
     if (S.tab !== 'einstellungen' || S.openId) return;
     const st = await loadSettings().catch(() => null);
-    if (st && connSig(st) !== sig) renderSettings(); else watchSettings(sig);
+    if (st && connSig(st) !== sig) renderSettings(); else { refreshHelperStatus(); watchSettings(sig); }
   }, 3000);
 }
 
@@ -1441,10 +1455,7 @@ async function renderSettings() {
     .map(([k, n]) => h('option', { value: k, selected: (hp?.model || 'large-v3-turbo') === k }, n)));
   const helperBox = h('div', { class: 'box' }, h('h3', {}, '🖥 Rechenhelfer (dein PC)'),
     h('p', { class: 'hint' }, 'Ein PC mit NVIDIA-Grafikkarte (z. B. RTX 3070) übernimmt die Spracherkennung mit dem großen Whisper-Modell – genauer, schneller und der Server wird entlastet. Ist der PC aus, rechnet die Zentrale selbst.'),
-    hp?.enabled ? h('p', { class: hp.online ? 'ok-text' : 'hint' },
-      hp.online ? `🟢 online: ${hp.name || 'PC'} · ${hp.gpu || ''}` + (hp.status && hp.status !== 'bereit' ? ` · ${hp.status}` : ' · bereit')
-        : hp.seen && hp.paused ? `🎮 ${hp.name || 'PC'} ${hp.status || 'pausiert'} – die Zentrale rechnet solange selbst.`
-        : '⚪ offline' + (hp.lastSeen ? ' – zuletzt ' + fmtDate(hp.lastSeen) : ' – noch nie verbunden')) : null,
+    hp?.enabled ? hpStatusEl(hp) : null,
     hp?.enabled && (hp.done || hp.failed) ? h('p', { class: 'hint' }, `${hp.done} Aufträge erledigt` + (hp.failed ? `, ${hp.failed} fehlgeschlagen` : '') + (hp.lastError ? ` · letzter Fehler: ${hp.lastError}` : '')) : null,
     h('label', { class: 'check' }, hpOn, 'Rechenhelfer verwenden'),
     h('label', {}, 'Whisper-Modell auf dem PC'), hpModel,

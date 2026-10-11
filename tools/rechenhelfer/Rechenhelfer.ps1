@@ -10,7 +10,7 @@ param([switch]$Install, [switch]$Uninstall)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # macht Downloads in Windows PowerShell deutlich schneller
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$Version = '1.2'
+$Version = '1.3'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ConfigFile = Join-Path $Here 'rechenhelfer.json'
 $Home2 = if ($env:VZ_HELPER_HOME) { $env:VZ_HELPER_HOME } else { Join-Path $env:LOCALAPPDATA 'VideoZentrale-Rechenhelfer' }
@@ -48,21 +48,77 @@ $Base = $cfg.url.TrimEnd('/')
 $Headers = @{ 'X-Helper-Token' = $cfg.token }
 $Pc = if ($env:COMPUTERNAME) { $env:COMPUTERNAME } else { [Environment]::MachineName }
 
+# ---------- Download mit Fortschritt (Log + Anzeige in der Zentrale), setzt abgebrochene Downloads fort ----------
+function Get-Download($url, $file, $label) {
+  $part = "$file.part"
+  $have = if (Test-Path $part) { (Get-Item $part).Length } else { 0 }
+  $req = [Net.HttpWebRequest]::Create($url)
+  $req.UserAgent = 'video-zentrale'
+  $req.AllowAutoRedirect = $true
+  $req.Timeout = 60000; $req.ReadWriteTimeout = 120000
+  if ($have -gt 0) { $req.AddRange([long]$have) }
+  $res = $req.GetResponse()
+  try {
+    $resumed = ($have -gt 0 -and [int]$res.StatusCode -eq 206)
+    if (-not $resumed) { $have = 0 }
+    $total = if ($res.ContentLength -gt 0) { $res.ContentLength + $have } else { 0 }
+    if ($resumed) { Log ("{0}: setze fort bei {1:N0} MB" -f $label, ($have / 1MB)) }
+    $in = $res.GetResponseStream()
+    $out = [IO.File]::Open($part, $(if ($resumed) { [IO.FileMode]::Append } else { [IO.FileMode]::Create }), [IO.FileAccess]::Write)
+    try {
+      $buf = New-Object byte[] (1MB)
+      $done = $have; $lastShow = Get-Date; $lastLog = -10; $t0 = Get-Date; $start = $have
+      while (($n = $in.Read($buf, 0, $buf.Length)) -gt 0) {
+        $out.Write($buf, 0, $n); $done += $n
+        if (((Get-Date) - $lastShow).TotalSeconds -ge 5) {
+          $lastShow = Get-Date
+          $sec = [Math]::Max(1, ((Get-Date) - $t0).TotalSeconds)
+          $speed = ($done - $start) / $sec
+          if ($total -gt 0) {
+            $pct = [Math]::Floor($done * 100 / $total)
+            $rest = if ($speed -gt 0) { [TimeSpan]::FromSeconds(($total - $done) / $speed) } else { $null }
+            $txt = "{0}: {1} % ({2:N0} von {3:N0} MB, {4:N1} MB/s{5})" -f $label, $pct, ($done / 1MB), ($total / 1MB), ($speed / 1MB), $(if ($rest) { ', noch ca. ' + [Math]::Ceiling($rest.TotalMinutes) + ' Min.' } else { '' })
+            if ($pct -ge $lastLog + 10) { $lastLog = $pct - ($pct % 10); Log $txt }
+          } else { $txt = "{0}: {1:N0} MB geladen ({2:N1} MB/s)" -f $label, ($done / 1MB), ($speed / 1MB) }
+          Write-Host "`r$txt      " -NoNewline
+          Say-Hello $txt
+        }
+      }
+      Write-Host ''
+    } finally { $out.Close(); $in.Close() }
+  } finally { $res.Close() }
+  if ($total -gt 0 -and (Get-Item $part).Length -lt $total) { throw "$label unvollständig – wird beim nächsten Versuch fortgesetzt." }
+  Move-Item $part $file -Force
+  Log "$label fertig ($('{0:N0}' -f ((Get-Item $file).Length / 1MB)) MB)."
+}
+
 # ---------- whisper.cpp mit CUDA besorgen ----------
+# Dateinamen der Releases haben sich geändert: früher whisper-cublas-12.x-bin-x64.zip, seit 2026 whisper-bin-win-cuda-12.4.0-x64.zip.
+function Find-WhisperAsset {
+  $rels = Invoke-RestMethod -Uri 'https://api.github.com/repos/ggml-org/whisper.cpp/releases?per_page=10' -Headers @{ 'User-Agent' = 'video-zentrale' }
+  foreach ($rel in @($rels | Where-Object { -not $_.draft -and -not $_.prerelease })) {
+    $a = $rel.assets | Where-Object { $_.name -match '^whisper-bin-win-cuda-12[\d.]*-x64\.zip$' -or $_.name -match '^whisper-cublas-12[\d.]*-bin-x64\.zip$' } |
+      Sort-Object name -Descending | Select-Object -First 1
+    if ($a) { return @{ rel = $rel; asset = $a; cuda = $true } }
+  }
+  foreach ($rel in @($rels | Where-Object { -not $_.draft -and -not $_.prerelease })) {
+    $a = $rel.assets | Where-Object { $_.name -match '^whisper-bin-x64\.zip$' } | Select-Object -First 1
+    if ($a) { Log 'Keine CUDA-Version gefunden – nehme CPU-Version.'; return @{ rel = $rel; asset = $a; cuda = $false } }
+  }
+  $names = (@($rels)[0].assets | ForEach-Object { $_.name }) -join ', '
+  throw "Keine passende whisper.cpp-Datei gefunden (vorhanden: $names)"
+}
 function Get-WhisperExe {
   if ($env:VZ_WHISPER_EXE) { return $env:VZ_WHISPER_EXE }   # nur für Tests
   $exe = Get-ChildItem -Path (Join-Path $Home2 'whisper') -Recurse -Filter 'whisper-cli.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($exe) { return $exe.FullName }
-  Log 'Lade whisper.cpp (CUDA) von GitHub …'
-  $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest' -Headers @{ 'User-Agent' = 'video-zentrale' }
-  $asset = $rel.assets | Where-Object { $_.name -match '^whisper-cublas-12.*-bin-x64\.zip$' } | Sort-Object name -Descending | Select-Object -First 1
-  if (-not $asset) { $asset = $rel.assets | Where-Object { $_.name -match '^whisper-bin-x64\.zip$' } | Select-Object -First 1; Log 'Keine CUDA-Version gefunden – nehme CPU-Version.' }
-  if (-not $asset) { throw 'Keine passende whisper.cpp-Datei im aktuellen Release gefunden.' }
+  Log 'Suche whisper.cpp (CUDA) auf GitHub …'
+  $f = Find-WhisperAsset
   $zip = Join-Path $Home2 'whisper.zip'
-  Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip -UseBasicParsing
+  Get-Download $f.asset.browser_download_url $zip "whisper.cpp $($f.rel.tag_name)"
   Expand-Archive -Path $zip -DestinationPath (Join-Path $Home2 'whisper') -Force
   Remove-Item $zip -Force
-  Log "whisper.cpp $($rel.tag_name) ($($asset.name)) installiert."
+  Log "whisper.cpp $($f.rel.tag_name) ($($f.asset.name)) installiert."
   $exe = Get-ChildItem -Path (Join-Path $Home2 'whisper') -Recurse -Filter 'whisper-cli.exe' | Select-Object -First 1
   if (-not $exe) { throw 'whisper-cli.exe nicht im Archiv gefunden.' }
   return $exe.FullName
@@ -72,10 +128,7 @@ function Get-Model($name) {
   $file = Join-Path $Home2 "modelle\ggml-$name.bin"
   if (Test-Path $file) { return $file }
   Log "Lade Whisper-Modell „$name“ (einmalig, ca. 1,5–3 GB) …"
-  $part = "$file.part"
-  Invoke-WebRequest -Uri "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-$name.bin" -OutFile $part -UseBasicParsing
-  Move-Item $part $file -Force
-  Log 'Modell geladen.'
+  Get-Download "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-$name.bin" $file "Modell $name"
   return $file
 }
 
@@ -117,7 +170,7 @@ Say-Hello 'lädt whisper.cpp'
 $Exe = $null
 while (-not $Exe) {
   try { $Exe = Get-WhisperExe }
-  catch { Log "whisper.cpp konnte nicht geladen werden: $($_.Exception.Message) – neuer Versuch in 5 Minuten."; Say-Hello "Fehler: whisper.cpp fehlt ($($_.Exception.Message))"; Start-Sleep 300 }
+  catch { Log "whisper.cpp konnte nicht geladen werden: $($_.Exception.Message) – neuer Versuch in 2 Minuten."; Say-Hello "Fehler: whisper.cpp fehlt ($($_.Exception.Message))"; Start-Sleep 120 }
 }
 $threads = [Math]::Max(2, [Math]::Min(8, [Environment]::ProcessorCount))
 

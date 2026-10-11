@@ -30,8 +30,10 @@ export function configure(b) {
   saveNow();
 }
 
-// online = Lebenszeichen und nicht pausiert (z. B. weil gerade gezockt wird)
-export const online = () => { const c = cfg(); return !!(c.enabled && !c.paused && c.lastSeen && Date.now() - new Date(c.lastSeen).getTime() < ONLINE_MS); };
+// Helfer lädt gerade whisper.cpp/Modell oder hat einen Startfehler → noch nicht bereit für Aufträge
+const preparing = (st) => /^(lädt|startet|Fehler|Modell |whisper\.cpp )/.test(String(st || ''));
+// online = Lebenszeichen, nicht pausiert (z. B. weil gerade gezockt wird) und nicht mehr beim Vorbereiten
+export const online = () => { const c = cfg(); return !!(c.enabled && !c.paused && !preparing(c.status) && c.lastSeen && Date.now() - new Date(c.lastSeen).getTime() < ONLINE_MS); };
 
 export function checkToken(req) {
   const t = String(req.headers['x-helper-token'] || '');

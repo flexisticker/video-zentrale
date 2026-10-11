@@ -157,6 +157,10 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   Laufendes Whisper als `Start-Process` (Windows: Hidden), alle 3 s Prüfung OBS/Spiel → Kill + Fehler → Server rechnet selbst.
   hello-Antwort liefert `gaming`-Einstellungen. 1.15.1: Status/Protokoll `%LOCALAPPDATA%\VideoZentrale-Rechenhelfer\rechenhelfer.log`, Modell beim Start.
   Getestet mit pwsh unter Linux (Testspiel-Prozess, langsames Fake-Whisper). Erkennungsverzögerung bis ~25 s (Long-Poll), Abbruch ≤ 3 s.
+- 1.16.1: whisper.cpp-Releases heißen jetzt `whisper-bin-win-cuda-12.4.0-x64.zip` (vorher `whisper-cublas-12.*-bin-x64.zip`) → Helfer 1.3
+  sucht beide Muster in den letzten 10 Releases. `Get-Download` (HttpWebRequest, 1-MB-Puffer, Range-Fortsetzung über `.part`, Fortschritt alle 5 s
+  per hello-Status + Log je 10 %). Server: `helper.online()` false, solange Status „lädt/startet/Fehler/Modell …/whisper.cpp …“; Einstellungen
+  frischen die Statuszeile alle 3 s auf (`refreshHelperStatus`).
 - Beim Kunden (11.10.2026): Rechenhelfer auf dem PC (RTX 3070) eingerichtet und **online**. Echte CUDA-Spracherkennung noch nicht bestätigt.
 - Achtung `.dockerignore`: `tools` ist ausgeschlossen, nur `!tools/rechenhelfer` erlaubt (1.14.0/1.15.0-Bau schlug deshalb fehl). Neue Ordner,
   die ins Image sollen, dort freigeben.

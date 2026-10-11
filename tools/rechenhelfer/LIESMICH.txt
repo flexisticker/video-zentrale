@@ -9,6 +9,7 @@ Einrichten (einmalig)
   1. Diesen Ordner an einen festen Platz legen, z. B. C:\VideoZentrale-Rechenhelfer
   2. Doppelklick auf "Einrichten.bat"
      -> lädt beim ersten Start whisper.cpp (CUDA) und das Modell (ca. 1,5–3 GB, einmalig)
+     -> der Fortschritt steht im Fenster und in der Zentrale (Einstellungen -> Rechenhelfer)
      -> richtet den Autostart bei der Anmeldung ein
   3. In der Zentrale unter Einstellungen -> Rechenhelfer steht dann "online".
 
