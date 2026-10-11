@@ -2,6 +2,7 @@
 // oder – wenn eingeschaltet – direkt veröffentlichen ("Direct Post", Scope video.publish) mit Text und Einstellungen,
 // nach den TikTok Content Sharing Guidelines (Kontoinfo live, Sichtbarkeit ohne Vorauswahl, Kennzeichnung, Musik-Bestätigung).
 import fs from 'node:fs';
+import { chunkTimeout } from './youtube.js';
 import crypto from 'node:crypto';
 import { db, saveNow } from './store.js';
 import * as profiles from './profiles.js';
@@ -121,8 +122,10 @@ function apiErr(j, fallback) {
   return fallback;
 }
 
+const MAX_SIZE = 4 * 1024 * 1024 * 1024; // TikTok nimmt Videos bis 4 GB
 export async function upload(p, filePath, progress, direct = null) {
   const size = fs.statSync(filePath).size;
+  if (size > MAX_SIZE) throw new Error(`Video ist ${(size / 1024 ** 3).toFixed(2).replace('.', ',')} GB groß – TikTok nimmt höchstens 4 GB. Für TikTok bitte einen Short/Clip daraus verwenden.`);
   // Regeln laut TikTok Media Transfer Guide: chunk_size 5–64 MB (kleiner Rest im letzten Stück), Anzahl = abgerundet
   // video_size / chunk_size, Videos bis 64 MB als ein einziges Stück (chunk_size = video_size).
   const chunk = size <= SINGLE_MAX ? size : CHUNK;
@@ -143,24 +146,25 @@ export async function upload(p, filePath, progress, direct = null) {
   if (!r.ok || !j.data?.upload_url) throw new Error(apiErr(j, 'Upload-Start fehlgeschlagen (' + r.status + ')'));
   const { publish_id: publishId, upload_url: url } = j.data;
   const type = filePath.toLowerCase().endsWith('.webm') ? 'video/webm' : filePath.toLowerCase().endsWith('.mov') ? 'video/quicktime' : 'video/mp4';
-  const fd = fs.openSync(filePath, 'r');
+  const fh = await fs.promises.open(filePath, 'r');
   try {
     for (let i = 0; i < count; i++) {
       const start = i * chunk, end = i === count - 1 ? size : start + chunk;
       const buf = Buffer.alloc(end - start);
-      fs.readSync(fd, buf, 0, buf.length, start);
-      let ok = false;
-      for (let t = 1; t <= 4 && !ok; t++) {
-        const u = await fetch(url, { method: 'PUT', headers: { 'Content-Type': type, 'Content-Length': String(buf.length),
-          'Content-Range': `bytes ${start}-${end - 1}/${size}` }, body: buf }).catch(() => null);
+      const { bytesRead } = await fh.read(buf, 0, buf.length, start);
+      if (bytesRead !== buf.length) throw new Error(`Videodatei ließ sich bei ${(start / 1e9).toFixed(2).replace('.', ',')} GB nicht lesen.`);
+      let ok = false, why = '';
+      for (let t = 1; t <= 5 && !ok; t++) {
+        const u = await fetch(url, { method: 'PUT', signal: AbortSignal.timeout(chunkTimeout(buf.length)), headers: { 'Content-Type': type, 'Content-Length': String(buf.length),
+          'Content-Range': `bytes ${start}-${end - 1}/${size}` }, body: buf }).catch((e) => { why = e.name === 'TimeoutError' ? 'Verbindung hing' : 'Netzfehler'; return null; });
         if (u && (u.status === 201 || u.status === 206 || u.ok)) ok = true;
         else if (u && u.status >= 400 && u.status < 500 && u.status !== 408 && u.status !== 429) throw new Error('TikTok lehnt den Upload ab (' + u.status + ').');
-        else await new Promise((res) => setTimeout(res, 2000 * t));
+        else { if (u) why = 'TikTok ' + u.status; progress(start, size, `${why} – neuer Versuch ${t}/5`); await new Promise((res) => setTimeout(res, 2000 * t)); }
       }
-      if (!ok) throw new Error('Upload mehrfach abgebrochen (Netz/TikTok).');
+      if (!ok) throw new Error(`Upload mehrfach abgebrochen bei ${Math.round(start * 100 / size)} % (${why || 'Netz/TikTok'}).`);
       progress(end, size);
     }
-  } finally { fs.closeSync(fd); }
+  } finally { await fh.close(); }
   return publishId;
 }
 

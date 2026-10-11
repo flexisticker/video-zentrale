@@ -161,6 +161,11 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   sucht beide Muster in den letzten 10 Releases. `Get-Download` (HttpWebRequest, 1-MB-Puffer, Range-Fortsetzung über `.part`, Fortschritt alle 5 s
   per hello-Status + Log je 10 %). Server: `helper.online()` false, solange Status „lädt/startet/Fehler/Modell …/whisper.cpp …“; Einstellungen
   frischen die Statuszeile alle 3 s auf (`refreshHelperStatus`).
+- 1.16.2: Browser-Upload großer Videos hing bei ~70 % (4,28 GB, über NPM; kleine gingen) → `POST /api/upload/chunk?id&folder&name&offset&total`
+  (32-MB-Stücke aus dem Browser, `.upload-<id>.part` im Zielordner, falscher offset → 409 mit `size`, abgerissenes Stück wird auf offset
+  zurückgeschnitten, GET = Stand, alte Teile nach 2 Tagen weg `cleanUploadParts`). Client `uploadChunked` (10 Versuche, Fortsetzen, beforeunload).
+  YouTube/TikTok-Upload: `chunkTimeout()` (AbortSignal, mind. 120 s bzw. 150 KB/s), asynchrones Lesen, Hinweis `v.yt/tt.note`, TikTok > 4 GB → Fehler.
+  Mock: `MOCK_STALL_AT`, Test mit `UPLOAD_MIN_TIMEOUT_S=3`. **Nicht getestet:** echter Weg über NPM beim Kunden.
 - Beim Kunden (11.10.2026): Rechenhelfer auf dem PC (RTX 3070) eingerichtet und **online**. Echte CUDA-Spracherkennung noch nicht bestätigt.
 - Achtung `.dockerignore`: `tools` ist ausgeschlossen, nur `!tools/rechenhelfer` erlaubt (1.14.0/1.15.0-Bau schlug deshalb fehl). Neue Ordner,
   die ins Image sollen, dort freigeben.

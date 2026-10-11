@@ -126,6 +126,19 @@ function emptyOldTrash() {
   }
 }
 setInterval(emptyOldTrash, 3600_000).unref();
+// Abgebrochene Stück-Uploads aus dem Browser nach 2 Tagen entfernen
+function cleanUploadParts() {
+  for (const folder of ['eingang', 'geschnitten']) {
+    try {
+      for (const n of fs.readdirSync(lib.dirOf(folder))) {
+        if (!/^\.upload-[0-9a-f]+\.part$/.test(n)) continue;
+        const f = path.join(lib.dirOf(folder), n);
+        if (Date.now() - fs.statSync(f).mtimeMs > 2 * 86400_000) fs.rmSync(f, { force: true });
+      }
+    } catch { }
+  }
+}
+setInterval(cleanUploadParts, 3600_000).unref();
 setTimeout(emptyOldTrash, 60_000);
 
 function getVideo(id) {
@@ -253,6 +266,46 @@ async function api(req, res, url) {
   if (p === '/api/scan' && m === 'POST') {
     await scanAll();
     return send(res, 200, { ok: true });
+  }
+
+  // Große Videos in Stücken hochladen (der Browser schickt je Anfrage höchstens ~32 MB). So bleibt nichts im
+  // Nginx Proxy Manager hängen (Größengrenze, Zwischenspeicher auf dessen Platte), und ein Abbruch setzt an der
+  // letzten Stelle fort. Ablauf: POST /api/upload/chunk?id=&folder=&name=&offset=&total= (Body = Stück) →
+  // { size } bzw. nach dem letzten Stück { done, name, id }. Bei falschem offset 409 mit { size } = Stand auf dem Server.
+  if (p === '/api/upload/chunk' && (m === 'POST' || m === 'GET')) {
+    const uid = String(url.searchParams.get('id') || '');
+    if (!/^[0-9a-f]{16,32}$/.test(uid)) throw new HttpError(400, 'Upload-Kennung fehlt.');
+    const folder = url.searchParams.get('folder') || 'geschnitten';
+    if (!['eingang', 'geschnitten'].includes(folder)) throw new HttpError(400, 'Ordner nicht erlaubt.');
+    const name = lib.safeName(url.searchParams.get('name'));
+    if (!name || !lib.VIDEO_EXT.includes(path.extname(name).toLowerCase())) throw new HttpError(400, 'Dateityp nicht erlaubt.');
+    const total = Number(url.searchParams.get('total'));
+    if (!Number.isSafeInteger(total) || total <= 0 || total > 100 * 1024 ** 3) throw new HttpError(400, 'Größe ungültig.');
+    const tmp = path.join(lib.dirOf(folder), `.upload-${uid}.part`);
+    const have = fs.existsSync(tmp) ? fs.statSync(tmp).size : 0;
+    if (m === 'GET') return send(res, 200, { size: have });
+    const offset = Number(url.searchParams.get('offset'));
+    if (offset !== have) { req.resume(); return send(res, 409, { error: 'Stand weicht ab.', size: have }); }
+    let got = 0;
+    try {
+      await pipeline(req, async function* (src) { for await (const c of src) { got += c.length; if (got > 128 * 1024 ** 2 || offset + got > total) throw new HttpError(413, 'Stück zu groß.'); yield c; } },
+        fs.createWriteStream(tmp, { flags: have ? 'r+' : 'w', start: offset }));
+    } catch (e) {
+      // Abgebrochenes Stück wieder abschneiden, damit der nächste Versuch sauber am Stückanfang ansetzt
+      try { fs.truncateSync(tmp, offset); } catch { }
+      throw e;
+    }
+    const size = offset + got;
+    if (size < total) return send(res, 200, { size });
+    const target = lib.freeName(folder, name);
+    const final = path.join(lib.dirOf(folder), target);
+    fs.renameSync(tmp, final);   // gleicher Ordner → kein Laufwerkswechsel
+    const st = fs.statSync(final);
+    const video = lib.newVideo(folder, target);
+    Object.assign(video, { size: st.size, mtime: st.mtimeMs });
+    saveNow();
+    scanAll();
+    return send(res, 200, { done: true, size, name: target, id: video?.id || null });
   }
 
   // Dateien hochladen (Video, Titelbild, .json) – roh als Body, Name in der Adresse.

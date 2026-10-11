@@ -109,7 +109,7 @@ function stateChip(label, s) {
   const st = s?.state || 'none';
   if (st === 'none') return h('span', { class: 'chip' }, label + ': –');
   if (st === 'queued') return h('span', { class: 'chip run' }, label + ': wartet');
-  if (st === 'uploading') return h('span', { class: 'chip run' }, `${label}: ${String(s.progress || 0).replace('.', ',')} %`);
+  if (st === 'uploading') return h('span', { class: 'chip run', title: s.note || '' }, `${label}: ${String(s.progress || 0).replace('.', ',')} %` + (s.note ? ' ⚠' : ''));
   if (st === 'processing') return h('span', { class: 'chip run' }, label + ': verarbeitet');
   if (st === 'error') return h('span', { class: 'chip bad', title: s.error || '' }, label + ': Fehler');
   if (st === 'unconfirmed') return h('span', { class: 'chip bad', title: s.note || '' }, label + ': unbestätigt');
@@ -737,7 +737,7 @@ function platformBox(box, v, key, label, color) {
     kids.push(h('div', { class: 'status' }, 'Wartet auf den Upload …'),
       h('button', { class: 'btn small', onclick: async () => { try { Object.assign(v, await api('POST', `/api/videos/${v.id}/cancel/${platform}`)); updateDetail(); } catch (x) { toast(x.message, true); } } }, 'Abbrechen'));
   } else if (s.state === 'uploading') {
-    kids.push(h('div', { class: 'status' }, `Wird hochgeladen … ${String(s.progress || 0).replace('.', ',')} %`),
+    kids.push(h('div', { class: 'status' }, `Wird hochgeladen … ${String(s.progress || 0).replace('.', ',')} %` + (s.note ? ` · ⚠ ${s.note}` : '')),
       h('div', { class: 'bar-progress' }, h('i', { style: { width: (s.progress || 0) + '%' } })));
   } else if (s.state === 'processing') {
     kids.push(h('div', { class: 'status' }, 'Hochgeladen – TikTok verarbeitet das Video …'), ttStatusLine(v, s));
@@ -1062,22 +1062,64 @@ function uploadFiles(files) {
     const label = h('div', {}, file.name);
     const item = h('div', { class: 'upl' }, label, h('div', { class: 'bar-progress' }, bar));
     uploadsEl.append(item);
-    chain = chain.then(() => new Promise((resolve) => {
-      const x = new XMLHttpRequest();
-      x.open('POST', `/api/upload?folder=${folder}&name=${encodeURIComponent(file.name)}`);
-      x.setRequestHeader('X-Zentrale', '1');
-      x.upload.onprogress = (e) => { if (e.lengthComputable) bar.style.width = (e.loaded / e.total * 100) + '%'; };
-      x.onload = () => {
-        let j = {}; try { j = JSON.parse(x.responseText); } catch { }
-        if (x.status === 200) { label.textContent = '✓ ' + file.name; setTimeout(() => item.remove(), 3000); }
-        else { label.textContent = '✗ ' + file.name + ': ' + (j.error || x.status); item.style.borderColor = 'var(--bad)'; setTimeout(() => item.remove(), 10000); }
-        resolve();
-      };
-      x.onerror = () => { label.textContent = '✗ ' + file.name + ': Verbindung abgebrochen'; resolve(); };
-      x.send(file);
-    }));
+    const isVideo = /\.(mp4|mov|mkv|webm|m4v)$/i.test(file.name);
+    chain = chain.then(() => (isVideo && file.size > CHUNK_UP ? uploadChunked(file, folder, bar, label, item) : uploadWhole(file, folder, bar, label, item)));
   }
   chain.then(async () => { await api('POST', '/api/scan').catch(() => {}); await refresh(); renderMain(); updateCounts(); });
+}
+
+// Ein Stück (oder eine kleine Datei) per XHR schicken → Promise mit { status, json }
+function xhrPost(url, body, onProgress) {
+  return new Promise((resolve) => {
+    const x = new XMLHttpRequest();
+    x.open('POST', url);
+    x.setRequestHeader('X-Zentrale', '1');
+    x.timeout = 10 * 60 * 1000;   // ein Stück darf höchstens 10 Min. dauern, sonst neu versuchen
+    if (onProgress) x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded); };
+    x.onload = () => { let j = {}; try { j = JSON.parse(x.responseText); } catch { } resolve({ status: x.status, json: j }); };
+    x.onerror = () => resolve({ status: 0, json: { error: 'Verbindung abgebrochen' } });
+    x.ontimeout = () => resolve({ status: 0, json: { error: 'Zeitüberschreitung' } });
+    x.send(body);
+  });
+}
+const uploadDone = (label, item, name) => { label.textContent = '✓ ' + name; setTimeout(() => item.remove(), 3000); };
+const uploadFail = (label, item, name, msg) => { label.textContent = '✗ ' + name + ': ' + msg; item.style.borderColor = 'var(--bad)'; setTimeout(() => item.remove(), 15000); };
+async function uploadWhole(file, folder, bar, label, item) {
+  const r = await xhrPost(`/api/upload?folder=${folder}&name=${encodeURIComponent(file.name)}`, file, (n) => { bar.style.width = (n / file.size * 100) + '%'; });
+  if (r.status === 200) uploadDone(label, item, file.name); else uploadFail(label, item, file.name, r.json.error || r.status || 'Verbindung abgebrochen');
+}
+// Große Videos in 32-MB-Stücken: jedes Stück einzeln, bei Fehler bis zu 10 Versuche, Fortsetzen am Stand des Servers.
+const CHUNK_UP = 32 * 1024 * 1024;
+let uploadsRunning = 0;
+window.addEventListener('beforeunload', (e) => { if (uploadsRunning) { e.preventDefault(); e.returnValue = ''; } });
+async function uploadChunked(file, folder, bar, label, item) {
+  const id = [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const base = `/api/upload/chunk?id=${id}&folder=${folder}&name=${encodeURIComponent(file.name)}&total=${file.size}`;
+  const mb = (n) => Math.round(n / 1048576).toLocaleString('de-DE');
+  let offset = 0, tries = 0; const t0 = Date.now();
+  uploadsRunning++;
+  try {
+    while (offset < file.size) {
+      const end = Math.min(offset + CHUNK_UP, file.size);
+      const show = (n) => {
+        const done = offset + n, sec = (Date.now() - t0) / 1000, speed = done / Math.max(1, sec);
+        bar.style.width = (done / file.size * 100) + '%';
+        label.textContent = `${file.name} · ${Math.floor(done / file.size * 100)} % (${mb(done)} von ${mb(file.size)} MB` +
+          (sec > 3 ? `, ${(speed / 1048576).toFixed(1).replace('.', ',')} MB/s, noch ca. ${Math.max(1, Math.ceil((file.size - done) / speed / 60))} Min.)` : ')') +
+          (tries ? ` · Versuch ${tries + 1}` : '');
+      };
+      const r = await xhrPost(`${base}&offset=${offset}`, file.slice(offset, end), show);
+      if (r.status === 200) { offset = r.json.size; tries = 0; show(0); if (r.json.done) break; continue; }
+      if (r.status === 409 && Number.isFinite(r.json.size)) { offset = r.json.size; continue; }   // Server hat schon mehr/weniger → dort weiter
+      if (r.status >= 400 && r.status < 500) throw new Error(r.json.error || 'abgelehnt (' + r.status + ')');
+      if (++tries > 10) throw new Error((r.json.error || 'Fehler ' + r.status) + ' – nach 10 Versuchen aufgegeben bei ' + Math.floor(offset / file.size * 100) + ' %');
+      await new Promise((res) => setTimeout(res, Math.min(30000, 2000 * tries)));
+      const st = await fetch(`${base}`, { headers: { 'X-Zentrale': '1' } }).then((x) => x.json()).catch(() => null);
+      if (st && Number.isFinite(st.size)) offset = st.size;
+    }
+    uploadDone(label, item, file.name);
+  } catch (e) { uploadFail(label, item, file.name, e.message); }
+  finally { uploadsRunning--; }
 }
 
 // ---------- Einstellungen ----------

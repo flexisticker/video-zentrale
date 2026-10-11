@@ -6,6 +6,9 @@ const log = [];
 let tokenCalls = 0, ytFailOnce = true, devN = 0, falLast = null;
 const YT_NAMES = { 'dev1': 'MichaModus', 'dev2': '3D by Micha' };
 const yt = { size: 0, got: 0 }, tt = { size: 0, got: 0, chunks: 0 };
+// Hänger nachstellen: MOCK_STALL_AT=<Byte> → das Stück, das diesen Byte enthält, wird einmal angenommen, aber nie beantwortet
+let stallAt = process.env.MOCK_STALL_AT ? Number(process.env.MOCK_STALL_AT) : -1;
+const stallOnce = (s, e) => { if (stallAt >= s && stallAt <= e) { stallAt = -1; return true; } return false; };
 const body = (req) => new Promise((r) => { const c = []; req.on('data', (d) => c.push(d)); req.on('end', () => r(Buffer.concat(c))); });
 const json = (res, s, j, h = {}) => { res.writeHead(s, { 'Content-Type': 'application/json', ...h }); res.end(JSON.stringify(j)); };
 http.createServer(async (req, res) => {
@@ -43,6 +46,7 @@ http.createServer(async (req, res) => {
     const [, s, e] = /bytes (\d+)-(\d+)/.exec(cr).map(Number);
     if (s > 0 && ytFailOnce) { ytFailOnce = false; return json(res, 503, { error: { message: 'kurz weg' } }); }
     if (s !== yt.got) return json(res, 400, { error: { message: 'falscher Offset ' + s } });
+    if (stallOnce(s, e)) { log.push({ stall: 'yt', s }); return; }
     yt.got = e + 1;
     if (yt.got >= yt.size) return json(res, 200, { id: 'vid123', status: { privacyStatus: 'private' } });
     res.writeHead(308, { Range: `bytes=0-${e}` }); return res.end();
@@ -73,6 +77,7 @@ http.createServer(async (req, res) => {
   if (p === '/tt-up') {
     const [, s, e] = /bytes (\d+)-(\d+)/.exec(req.headers['content-range']).map(Number);
     if (s !== tt.got || b.length !== e - s + 1) return json(res, 400, {});
+    if (stallOnce(s, e)) { log.push({ stall: 'tt', s }); return; }
     tt.got = e + 1; tt.chunks++;
     res.writeHead(tt.got >= tt.size ? 201 : 206); return res.end();
   }

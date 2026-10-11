@@ -1,5 +1,9 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.16.2', date: '11.10.2026', items: [
+    'Fehler behoben: Große Videos (z. B. 4 GB) blieben beim Hineinziehen in den Eingang bei ca. 70 % hängen. Sie gehen jetzt in 32-MB-Stücken hoch – bei einem Abbruch geht es an derselben Stelle weiter, mit Prozent, MB/s und Restzeit.',
+    'Uploads zu YouTube und TikTok erkennen hängende Verbindungen und setzen selbst fort; der Grund steht beim Fortschritt (⚠). TikTok meldet Videos über 4 GB gleich verständlich.',
+  ] },
   { version: '1.16.1', date: '11.10.2026', items: [
     'Fehler behoben: Rechenhelfer meldete „whisper.cpp fehlt“ – whisper.cpp hat die Namen seiner Download-Dateien geändert. Der Helfer findet jetzt beide Schreibweisen.',
     'Download-Fortschritt: Prozent, MB, Geschwindigkeit und Restzeit im Fenster des Helfers und live unter Einstellungen → Rechenhelfer. Abgebrochene Downloads werden fortgesetzt.',

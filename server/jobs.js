@@ -79,9 +79,10 @@ async function next() {
     save();
     const file = fileOf(v);
     let last = 0;
-    const progress = (done, total) => {
+    const progress = (done, total, note = '') => {
       v[k].progress = total ? Math.round((done / total) * 1000) / 10 : 0;
-      if (Date.now() - last > 1000 || done === total) { last = Date.now(); save(); }
+      v[k].note = note;   // z. B. „Verbindung hing – neuer Versuch 2/8“
+      if (note || Date.now() - last > 1000 || done === total) { last = Date.now(); save(); }
     };
     if (job.platform === 'youtube') {
       let img = imagePath(v);

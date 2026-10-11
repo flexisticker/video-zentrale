@@ -10,6 +10,9 @@ const AUTH = process.env.YT_AUTH_BASE || 'https://accounts.google.com';
 const API = process.env.YT_API_BASE || 'https://www.googleapis.com';
 const SCOPE = 'https://www.googleapis.com/auth/youtube';
 const CHUNK = Number(process.env.YT_CHUNK_KB || 32768) * 1024; // Vielfaches von 256 KB
+// Ein Stück darf höchstens so lange dauern (mind. 2 Min., sonst bei 150 KB/s) – danach gilt die Verbindung als hängend,
+// wird abgebrochen und der Upload ab dem Stand fortgesetzt, den YouTube bestätigt.
+export const chunkTimeout = (len) => Math.max(Number(process.env.UPLOAD_MIN_TIMEOUT_S || 120) * 1000, Math.ceil(len / (150 * 1024)) * 1000);
 
 const access = new Map();  // Kanal-ID -> { token, until }
 const pending = new Map(); // Kanal-ID -> laufende Geräte-Anmeldung
@@ -175,17 +178,20 @@ export async function upload(v, p, filePath, imagePath, progress) {
   if (!url) throw new Error('YouTube hat keine Upload-Adresse geliefert.');
 
   let offset = 0, tries = 0, result = null;
-  const fd = fs.openSync(filePath, 'r');
+  const fh = await fs.promises.open(filePath, 'r');   // asynchron lesen: eine langsame Platte blockiert nicht die ganze Zentrale
+  const status = async () => fetch(url, { method: 'PUT', signal: AbortSignal.timeout(60_000), headers: { Authorization: 'Bearer ' + await token(),
+    'Content-Length': '0', 'Content-Range': `bytes */${size}` } }).catch(() => null);
   try {
     while (!result) {
       const end = Math.min(offset + CHUNK, size);
       const buf = Buffer.alloc(end - offset);
-      fs.readSync(fd, buf, 0, buf.length, offset);
-      let r;
+      const { bytesRead } = await fh.read(buf, 0, buf.length, offset);
+      if (bytesRead !== buf.length) throw new Error(`Videodatei ließ sich bei ${(offset / 1e9).toFixed(2).replace('.', ',')} GB nicht lesen (Datei kürzer oder Lesefehler).`);
+      let r, why = '';
       try {
-        r = await fetch(url, { method: 'PUT', headers: { Authorization: 'Bearer ' + await token(),
+        r = await fetch(url, { method: 'PUT', signal: AbortSignal.timeout(chunkTimeout(buf.length)), headers: { Authorization: 'Bearer ' + await token(),
           'Content-Length': String(buf.length), 'Content-Range': `bytes ${offset}-${end - 1}/${size}` }, body: buf });
-      } catch (e) { r = null; }
+      } catch (e) { r = null; why = e.name === 'TimeoutError' ? 'Verbindung hing' : 'Netzfehler'; }
       if (r && (r.status === 200 || r.status === 201)) { result = await r.json(); break; }
       if (r && r.status === 308) {
         const range = r.headers.get('range');
@@ -195,15 +201,17 @@ export async function upload(v, p, filePath, imagePath, progress) {
       if (r && r.status >= 400 && r.status < 500 && r.status !== 408 && r.status !== 429) {
         throw new Error(apiError(await r.json().catch(() => null), 'Upload abgelehnt (' + r.status + ')'));
       }
-      // Netzfehler/5xx: Stand abfragen und dort weitermachen.
-      if (++tries > 6) throw new Error('Upload mehrfach abgebrochen (Netz/YouTube). Später erneut versuchen.');
-      await new Promise((res) => setTimeout(res, 2000 * tries));
-      const q = await fetch(url, { method: 'PUT', headers: { Authorization: 'Bearer ' + await token(),
-        'Content-Length': '0', 'Content-Range': `bytes */${size}` } }).catch(() => null);
+      if (r) { why = 'YouTube ' + r.status; await r.body?.cancel().catch(() => {}); }
+      // Netzfehler/Hänger/5xx: Stand abfragen und dort weitermachen.
+      if (++tries > 8) throw new Error(`Upload mehrfach abgebrochen bei ${Math.round(offset * 100 / size)} % (${why}). Später erneut versuchen.`);
+      progress(offset, size, `${why} – neuer Versuch ${tries}/8`);
+      await new Promise((res) => setTimeout(res, Math.min(30_000, 2000 * tries)));
+      const q = await status();
       if (q && (q.status === 200 || q.status === 201)) { result = await q.json(); break; }
       if (q && q.status === 308) { const range = q.headers.get('range'); offset = range ? Number(range.split('-')[1]) + 1 : 0; }
+      if (q && q.status === 404) throw new Error('YouTube hat die Upload-Sitzung verworfen. Bitte „Erneut versuchen“.');
     }
-  } finally { fs.closeSync(fd); }
+  } finally { await fh.close(); }
   progress(size, size);
 
   const thumbError = imagePath && result?.id ? await setThumbnail(result.id, p, imagePath) : '';
