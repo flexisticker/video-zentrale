@@ -572,9 +572,25 @@ async function loadSettings() { S.settings = await api('GET', '/api/settings'); 
 // append ohne null/false (sonst steht „null“ im Text)
 const add = (el, ...kids) => el.append(...kids.flat().filter((k) => k != null && k !== false));
 
+// Verbindungsstand als Kennung: nur wenn sich daran etwas ändert, wird die Seite neu aufgebaut
+// (sonst gingen halb eingetippte Felder verloren).
+const connSig = (st) => JSON.stringify([st.profiles.map((p) => [p.youtube, p.tiktok]), st.youtube.pending, st.youtube.configured,
+  st.tiktok.configured, st.ai.configured]);
+let settingsTimer = null;
+function watchSettings(sig) {
+  clearTimeout(settingsTimer);
+  settingsTimer = setTimeout(async () => {
+    if (S.tab !== 'einstellungen' || S.openId) return;
+    const st = await loadSettings().catch(() => null);
+    if (st && connSig(st) !== sig) renderSettings(); else watchSettings(sig);
+  }, 3000);
+}
+
 async function renderSettings() {
+  clearTimeout(settingsTimer);
   const st = await loadSettings();
   if (S.tab !== 'einstellungen' || S.openId) return;
+  watchSettings(connSig(st)); // erkennt fertige YouTube-Anmeldung und TikTok-Rückkehr aus dem anderen Tab
   const again = () => renderSettings();
   const run = (fn, msg) => async () => { try { await fn(); if (msg) toast(msg); again(); } catch (x) { toast(x.message, true); } };
   const y = st.youtube, t = st.tiktok;
@@ -609,7 +625,6 @@ async function renderSettings() {
         h('div', { class: 'code' }, yp.code),
         h('div', { class: 'hint' }, `Dort das Google-Konto bzw. den Kanal „${p.name}“ wählen (bei Brand-Konten erscheint eine Kanalauswahl).`),
         yp.error ? h('div', { class: 'err' }, yp.error) : null);
-      setTimeout(() => { if (S.tab === 'einstellungen' && !S.openId) again(); }, 4000);
     } else {
       add(ytPart, h('button', { class: 'btn small yt', disabled: !y.configured, title: y.configured ? '' : 'Erst unten die Google-App eintragen',
         onclick: run(() => api('POST', `/api/profiles/${p.id}/youtube/connect`)) }, 'YouTube verbinden'));
