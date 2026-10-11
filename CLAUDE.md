@@ -171,7 +171,8 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   Client Typ Webanwendung, Redirect `https://videos.flexisticker.de/oauth/google`. TikTok: Entwicklerkonto per E-Mail, Domain
   `flexisticker.de` per DNS-TXT bei Alfahosting bestätigt, **Sandbox** (Key beginnt mit `sb`, eigenes Secret!), Produkte über
   „Add products“ (Login Kit mit Redirect URI unter Web, Content Posting API), Target Users michamodus + 3dbymicha.
-  **Beide Plattformen verbunden.** App-Icon `docs/app-icon-1024.png`. Prüfung (Demo-Video aus Sandbox) noch nicht eingereicht.
+  **Beide Plattformen verbunden.** App-Icon `docs/app-icon-1024.png`. Demo-Video aus der Sandbox am 11.10.2026 vom Kunden aufgenommen, Einreichung der Prüfung läuft.
+  Nach Freigabe: Production-Client-Key/Secret (anders als Sandbox!) in der Zentrale eintragen, Kanäle neu verbinden.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
   Sendeplätze je Kanal **stellt der Kunde selbst ein** (keine festen Startzeiten), „Einplanen“ auf nächsten freien Platz, Shorts
   eines Langvideos über Tage verteilen, Übersicht Heute/Woche, Lückenwarnung. YouTube `publishAt` erst nach YouTube-Audit
