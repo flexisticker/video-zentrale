@@ -1434,16 +1434,25 @@ async function renderSettings() {
   // ----- Rechenhelfer (PC) -----
   const hp = await api('GET', '/api/helper-config').catch(() => null);
   const hpOn = cb(hp?.enabled);
+  const hpGame = cb(hp?.pauseGaming !== false);
+  const hpLoad = h('input', { type: 'number', min: 5, max: 95, value: hp?.gpuLoad ?? 25 });
+  const hpGames = h('input', { value: hp?.games || '', placeholder: 'z. B. Wow, FortniteClient-Win64-Shipping, cs2 (Prozessname ohne .exe)' });
   const hpModel = h('select', {}, [['large-v3-turbo', 'large-v3-turbo – sehr gut und schnell (empfohlen)'], ['large-v3', 'large-v3 – beste Qualität, langsamer'], ['medium', 'medium'], ['small', 'small']]
     .map(([k, n]) => h('option', { value: k, selected: (hp?.model || 'large-v3-turbo') === k }, n)));
   const helperBox = h('div', { class: 'box' }, h('h3', {}, '🖥 Rechenhelfer (dein PC)'),
     h('p', { class: 'hint' }, 'Ein PC mit NVIDIA-Grafikkarte (z. B. RTX 3070) übernimmt die Spracherkennung mit dem großen Whisper-Modell – genauer, schneller und der Server wird entlastet. Ist der PC aus, rechnet die Zentrale selbst.'),
-    hp?.enabled ? h('p', { class: hp.online ? 'ok-text' : 'hint' }, hp.online ? `🟢 online: ${hp.name || 'PC'} · ${hp.gpu || ''}` + (hp.status && hp.status !== 'bereit' ? ` · ${hp.status}` : ' · bereit') : '⚪ offline' + (hp.lastSeen ? ' – zuletzt ' + fmtDate(hp.lastSeen) : ' – noch nie verbunden')) : null,
+    hp?.enabled ? h('p', { class: hp.online ? 'ok-text' : 'hint' },
+      hp.online ? `🟢 online: ${hp.name || 'PC'} · ${hp.gpu || ''}` + (hp.status && hp.status !== 'bereit' ? ` · ${hp.status}` : ' · bereit')
+        : hp.seen && hp.paused ? `🎮 ${hp.name || 'PC'} ${hp.status || 'pausiert'} – die Zentrale rechnet solange selbst.`
+        : '⚪ offline' + (hp.lastSeen ? ' – zuletzt ' + fmtDate(hp.lastSeen) : ' – noch nie verbunden')) : null,
     hp?.enabled && (hp.done || hp.failed) ? h('p', { class: 'hint' }, `${hp.done} Aufträge erledigt` + (hp.failed ? `, ${hp.failed} fehlgeschlagen` : '') + (hp.lastError ? ` · letzter Fehler: ${hp.lastError}` : '')) : null,
     h('label', { class: 'check' }, hpOn, 'Rechenhelfer verwenden'),
     h('label', {}, 'Whisper-Modell auf dem PC'), hpModel,
+    h('label', { class: 'check', style: { marginTop: '8px' } }, hpGame, '🎮 Pausieren, wenn ich zocke (OBS läuft, Spiel aus der Liste läuft oder Grafikkarte ausgelastet)'),
+    h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Grafikkarte gilt als belegt ab (%)'), hpLoad), h('div', {}, h('label', {}, 'Spiele (Prozessnamen, mit Komma)'), hpGames)),
     h('div', { class: 'row', style: { marginTop: '10px' } },
-      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/helper-config', { enabled: hpOn.checked, model: hpModel.value }), 'Gespeichert.') }, 'Speichern'),
+      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/helper-config', { enabled: hpOn.checked, model: hpModel.value,
+        pauseGaming: hpGame.checked, gpuLoad: Number(hpLoad.value), games: hpGames.value }), 'Gespeichert.') }, 'Speichern'),
       hp?.enabled ? h('a', { class: 'btn primary', href: '/api/helper-download?origin=' + encodeURIComponent(location.origin), download: '' }, '⤓ Rechenhelfer für Windows (ZIP)') : null,
       hp?.enabled ? h('button', { class: 'btn small ghost', onclick: () => confirm('Neuen Schlüssel erzeugen? Der PC muss danach das neue ZIP bekommen.') && run(() => api('POST', '/api/helper-config', { newToken: true }), 'Neuer Schlüssel – ZIP neu herunterladen.')() }, 'Neuen Schlüssel erzeugen') : null),
     hp?.enabled ? h('ol', { class: 'hint' },

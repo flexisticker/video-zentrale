@@ -10,7 +10,7 @@ param([switch]$Install, [switch]$Uninstall)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # macht Downloads in Windows PowerShell deutlich schneller
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$Version = '1.1'
+$Version = '1.2'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ConfigFile = Join-Path $Here 'rechenhelfer.json'
 $Home2 = if ($env:VZ_HELPER_HOME) { $env:VZ_HELPER_HOME } else { Join-Path $env:LOCALAPPDATA 'VideoZentrale-Rechenhelfer' }
@@ -83,9 +83,30 @@ function Send-Json($path, $obj) {
   $json = $obj | ConvertTo-Json -Depth 8 -Compress
   Invoke-RestMethod -Uri "$Base$path" -Method Post -Headers $Headers -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($json)) -TimeoutSec 30 | Out-Null
 }
-function Say-Hello($status) {
+$Gaming = @{ enabled = $true; gpuLoad = 25; games = @() }   # kommt von der Zentrale
+function Say-Hello($status, $paused = $false) {
   $script:Status = $status
-  try { Send-Json '/api/helper/hello' @{ name = $Pc; gpu = $gpu; version = $Version; status = $status } } catch { Log "Zentrale nicht erreichbar: $($_.Exception.Message)" }
+  try {
+    $r = Invoke-RestMethod -Uri "$Base/api/helper/hello" -Method Post -Headers $Headers -ContentType 'application/json; charset=utf-8' -TimeoutSec 30 `
+      -Body ([Text.Encoding]::UTF8.GetBytes((@{ name = $Pc; gpu = $gpu; version = $Version; status = $status; paused = [bool]$paused } | ConvertTo-Json -Compress)))
+    if ($r.gaming) { $script:Gaming = $r.gaming }
+  } catch { Log "Zentrale nicht erreichbar: $($_.Exception.Message)" }
+}
+
+# Wird gerade gezockt? OBS läuft, ein Spiel aus der Liste läuft oder die Grafikkarte ist (ohne uns) ausgelastet.
+$Smi = @("$env:SystemRoot\System32\nvidia-smi.exe", "$env:ProgramFiles\NVIDIA Corporation\NVSMI\nvidia-smi.exe") | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+function Get-GpuLoad {
+  if (-not $Smi) { return 0 }
+  try { return [int](& $Smi --query-gpu=utilization.gpu --format=csv,noheader,nounits | Select-Object -First 1) } catch { return 0 }
+}
+function Get-GamingReason {
+  if (-not $Gaming.enabled) { return $null }
+  $obs = Get-Process -Name 'obs64', 'obs32', 'obs' -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($obs) { return 'OBS läuft' }
+  foreach ($g in @($Gaming.games)) { if ($g -and (Get-Process -Name $g -ErrorAction SilentlyContinue)) { return "$g läuft" } }
+  $load = Get-GpuLoad
+  if ($load -ge [int]$Gaming.gpuLoad) { return "Grafikkarte zu $load % ausgelastet" }
+  return $null
 }
 
 $gpu = try { (Get-CimInstance Win32_VideoController | Where-Object { $_.Name -match 'NVIDIA' } | Select-Object -First 1).Name } catch { $null }
@@ -111,6 +132,14 @@ Log "Verbunden mit $Base – warte auf Aufträge (Fenster offen lassen bzw. mini
 
 while ($true) {
   try {
+    $why = Get-GamingReason
+    if ($why) {
+      if ($Status -notlike 'pausiert*') { Log "Pause – $why. Die Zentrale rechnet solange selbst." }
+      Say-Hello "pausiert ($why)" $true
+      Start-Sleep 15
+      continue
+    }
+    if ($Status -like 'pausiert*') { Log 'Weiter – Grafikkarte wieder frei.' }
     Say-Hello 'bereit'
     $job = Invoke-RestMethod -Uri "$Base/api/helper/next" -Headers $Headers -TimeoutSec 40
     if (-not $job -or -not $job.id) { continue }
@@ -122,8 +151,21 @@ while ($true) {
       $model = Get-Model $job.model
       Invoke-WebRequest -Uri "$Base/api/helper/job/$($job.id)/audio" -Headers $Headers -OutFile $wav -UseBasicParsing
       $sw = [Diagnostics.Stopwatch]::StartNew()
-      & $Exe -m $model -f $wav -l $job.lang -ml 1 -sow -oj -of $out -t $threads 2>&1 | Out-Null
-      if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$out.json")) { throw "whisper-cli beendet mit Code $LASTEXITCODE" }
+      $argsW = @('-m', "`"$model`"", '-f', "`"$wav`"", '-l', $job.lang, '-ml', '1', '-sow', '-oj', '-of', "`"$out`"", '-t', $threads)
+      $sp = @{ FilePath = $Exe; ArgumentList = $argsW; PassThru = $true }
+      if (-not $IsLinux) { $sp.WindowStyle = 'Hidden' }   # unter Windows ohne eigenes Fenster
+      $proc = Start-Process @sp
+      $null = $proc.Handle   # sonst liefert ExitCode in Windows PowerShell manchmal nichts
+      $stopped = $null
+      while (-not $proc.HasExited) {
+        Start-Sleep 3
+        # Während Whisper selbst rechnet, zählt nur OBS/Spieleliste (die Grafiklast kommt ja von uns)
+        $obs = Get-Process -Name 'obs64', 'obs32', 'obs' -ErrorAction SilentlyContinue | Select-Object -First 1
+        $game = @($Gaming.games) | Where-Object { $_ -and (Get-Process -Name $_ -ErrorAction SilentlyContinue) } | Select-Object -First 1
+        if ($Gaming.enabled -and ($obs -or $game)) { $stopped = if ($obs) { 'OBS gestartet' } else { "$game gestartet" }; Stop-Process -Id $proc.Id -Force; break }
+      }
+      if ($stopped) { throw "abgebrochen – $stopped (Grafikkarte freigegeben)" }
+      if ($proc.ExitCode -ne 0 -or -not (Test-Path "$out.json")) { throw "whisper-cli beendet mit Code $($proc.ExitCode)" }
       $result = Get-Content "$out.json" -Raw -Encoding UTF8 | ConvertFrom-Json
       Send-Json "/api/helper/job/$($job.id)/result" $result
       Log ("Fertig in {0:N0} s." -f $sw.Elapsed.TotalSeconds)

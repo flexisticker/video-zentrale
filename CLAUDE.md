@@ -152,6 +152,11 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   PWA: `public/manifest.webmanifest` (start_url `/?app=1#posten`), `public/sw.js` (nur Offline-Hinweis, kein Daten-Cache), Icons `public/icons/`,
   Installieren-Knopf (`beforeinstallprompt`) bzw. iOS-Hinweis im „Mehr“-Blatt. Geprüft: 360/390/768/1024 px ohne seitliches Verrutschen,
   iPhone-13- und iPad-Ansicht. Installation über https (videos.flexisticker.de) nötig.
+- 1.16.0: Rechenhelfer 1.2 pausiert beim Zocken (Kunde braucht die GPU): `Get-GamingReason` = OBS-Prozess, Spieleliste (`helper.games`,
+  Prozessnamen), `nvidia-smi` Auslastung ≥ `helper.gpuLoad` (25 %). Pausiert → hello `{paused:true}`, Server `online()` false → lokal.
+  Laufendes Whisper als `Start-Process` (Windows: Hidden), alle 3 s Prüfung OBS/Spiel → Kill + Fehler → Server rechnet selbst.
+  hello-Antwort liefert `gaming`-Einstellungen. 1.15.1: Status/Protokoll `%LOCALAPPDATA%\VideoZentrale-Rechenhelfer\rechenhelfer.log`, Modell beim Start.
+  Getestet mit pwsh unter Linux (Testspiel-Prozess, langsames Fake-Whisper). Erkennungsverzögerung bis ~25 s (Long-Poll), Abbruch ≤ 3 s.
 - Achtung `.dockerignore`: `tools` ist ausgeschlossen, nur `!tools/rechenhelfer` erlaubt (1.14.0/1.15.0-Bau schlug deshalb fehl). Neue Ordner,
   die ins Image sollen, dort freigeben.
 - Einrichtung beim Kunden (11.10.2026): Zentrale läuft über `https://videos.flexisticker.de` (NPM, Access List „Nur Heimnetz“,

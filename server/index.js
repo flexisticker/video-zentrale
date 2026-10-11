@@ -178,7 +178,7 @@ async function api(req, res, url) {
   if (p.startsWith('/api/helper/')) {
     if (!helper.checkToken(req)) throw new HttpError(401, 'Schlüssel des Rechenhelfers ungültig oder Rechenhelfer ausgeschaltet.');
     let hm;
-    if (p === '/api/helper/hello' && m === 'POST') { helper.hello(await readJson(req)); return send(res, 200, { ok: true, model: helper.status().model }); }
+    if (p === '/api/helper/hello' && m === 'POST') return send(res, 200, { ok: true, ...helper.hello(await readJson(req)) });
     if (p === '/api/helper/next' && m === 'GET') { const j = await helper.next(); return j ? send(res, 200, j) : send(res, 204, ''); }
     if ((hm = /^\/api\/helper\/job\/([0-9a-f]{16})\/(audio|result|error)$/.exec(p))) {
       const [, id, what] = hm;

@@ -1,5 +1,9 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.16.0', date: '11.10.2026', items: [
+    '🎮 Rechenhelfer pausiert beim Zocken: wenn OBS läuft, ein Spiel aus deiner Liste läuft oder die Grafikkarte ausgelastet ist. Startest du mitten in einer Spracherkennung ein Spiel, bricht er sofort ab – die Zentrale rechnet dann selbst.',
+    'Einstellbar unter Einstellungen → Rechenhelfer (Grenze für die Grafikkarten-Last, Spiele-Liste). Rechenhelfer-ZIP neu herunterladen und am PC ersetzen.',
+  ] },
   { version: '1.15.1', date: '11.10.2026', items: [
     'Rechenhelfer 1.1: meldet sich sofort in der Zentrale und zeigt, was er gerade macht (lädt whisper.cpp, lädt Modell, bereit), lädt das Modell gleich beim Start und schreibt ein Protokoll (rechenhelfer.log).',
     'Bitte das Rechenhelfer-ZIP neu herunterladen, die Dateien am PC ersetzen und „Einrichten.bat“ erneut ausführen.',

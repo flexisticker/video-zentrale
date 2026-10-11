@@ -14,7 +14,8 @@ const waiters = [];                // offene Long-Poll-Anfragen des Helfers
 export function status() {
   const c = cfg();
   return { enabled: !!c.enabled, token: c.token || '', model: c.model, online: online(), lastSeen: c.lastSeen || '', name: c.name || '',
-    gpu: c.gpu || '', version: c.version || '', status: c.status || '', done: c.done || 0, failed: c.failed || 0, lastError: c.lastError || '',
+    gpu: c.gpu || '', version: c.version || '', status: c.status || '', paused: !!c.paused, pauseGaming: c.pauseGaming !== false,
+    gpuLoad: c.gpuLoad || 25, games: (c.games || []).join(', '), seen: !!(c.lastSeen && Date.now() - new Date(c.lastSeen).getTime() < ONLINE_MS), done: c.done || 0, failed: c.failed || 0, lastError: c.lastError || '',
     open: [...jobs.values()].map((j) => ({ id: j.id, state: j.state, kind: j.kind })) };
 }
 
@@ -22,11 +23,15 @@ export function configure(b) {
   const c = cfg();
   if (typeof b.enabled === 'boolean') c.enabled = b.enabled;
   if (['large-v3-turbo', 'large-v3', 'medium', 'small'].includes(b.model)) c.model = b.model;
+  if (typeof b.pauseGaming === 'boolean') c.pauseGaming = b.pauseGaming;
+  if (b.gpuLoad != null && !isNaN(b.gpuLoad)) c.gpuLoad = Math.max(5, Math.min(95, Math.round(Number(b.gpuLoad))));
+  if (typeof b.games === 'string') c.games = b.games.split(/[,\n]/).map((x) => x.trim().replace(/\.exe$/i, '')).filter(Boolean).slice(0, 50);
   if (b.newToken || (c.enabled && !c.token)) c.token = crypto.randomBytes(24).toString('base64url');
   saveNow();
 }
 
-export const online = () => { const c = cfg(); return !!(c.enabled && c.lastSeen && Date.now() - new Date(c.lastSeen).getTime() < ONLINE_MS); };
+// online = Lebenszeichen und nicht pausiert (z. B. weil gerade gezockt wird)
+export const online = () => { const c = cfg(); return !!(c.enabled && !c.paused && c.lastSeen && Date.now() - new Date(c.lastSeen).getTime() < ONLINE_MS); };
 
 export function checkToken(req) {
   const t = String(req.headers['x-helper-token'] || '');
@@ -42,7 +47,9 @@ export function hello(b = {}) {
   if (b.gpu != null) c.gpu = String(b.gpu).slice(0, 120);
   if (b.version) c.version = String(b.version).slice(0, 20);
   if (b.status) c.status = String(b.status).slice(0, 200);
+  if (typeof b.paused === 'boolean') c.paused = b.paused;
   save();
+  return { model: c.model, gaming: { enabled: c.pauseGaming !== false, gpuLoad: c.gpuLoad || 25, games: c.games || [] } };
 }
 
 // Auftrag an den Helfer geben → Promise mit dem Whisper-JSON. Bricht ab (reject), wenn der Helfer verschwindet.
@@ -71,7 +78,7 @@ function finish(job, err, result) {
 
 // Long-Poll: wartet bis zu 25 s auf einen Auftrag
 export function next() {
-  hello();
+  cfg().lastSeen = new Date().toISOString();
   const open = [...jobs.values()].find((j) => j.state === 'open');
   const take = (j) => { j.state = 'taken'; j.takenAt = Date.now(); return { id: j.id, kind: j.kind, model: j.model, lang: 'de' }; };
   if (open) return Promise.resolve(take(open));
