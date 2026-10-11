@@ -163,6 +163,17 @@ async function boot() {
 // ---------- Version & Was ist neu ----------
 const APP_NAME = 'Micha\u2019s Video-Zentrale';
 document.title = APP_NAME;
+// Als App installierbar (Startbildschirm); Service Worker nur über https bzw. localhost
+if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; });
+const isApp = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+function installHint() {
+  if (isApp()) return null;
+  if (installPrompt) return h('button', { class: 'btn big primary', onclick: async () => { installPrompt.prompt(); await installPrompt.userChoice.catch(() => {}); installPrompt = null; } }, '📲 Als App installieren');
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  return h('p', { class: 'hint' }, ios ? '📲 Als App: unten auf „Teilen“ tippen → „Zum Home-Bildschirm“.' : '📲 Als App: im Browser-Menü (⋮) „App installieren“ bzw. „Zum Startbildschirm hinzufügen“.');
+}
 async function loadVersion() { try { S.version = await api('GET', '/api/version'); } catch { S.version = null; } }
 function versionText() {
   const v = S.version;
@@ -252,13 +263,21 @@ function render() {
   const fileInput = h('input', { type: 'file', multiple: true, accept: 'video/*,image/*,.json', class: 'hidden',
     onchange: (e) => { uploadFiles([...e.target.files]); e.target.value = ''; } });
   mainEl = h('main');
+  // Handy/Tablet hochkant: Leiste unten mit den wichtigsten Bereichen, Rest unter „Mehr“
+  const BOTTOM = [['posten', '📱', 'Posten'], ['geschnitten', '✅', 'Freigabe'], ['eingang', '📥', 'Eingang'], ['coach', '💡', 'Coach']];
+  const bottom = h('nav', { class: 'bottomnav' }, BOTTOM.map(([id, icon, label]) => {
+    const c = id === 'coach' ? null : h('span', { class: 'bcount' });
+    if (c) countEls['b-' + id] = c;
+    return h('button', { class: 'bn' + (S.tab === id && !S.openId ? ' on' : ''), onclick: () => go(id) }, h('span', { class: 'bi' }, icon, c), h('span', {}, label));
+  }), h('button', { class: 'bn' + (['hochgeladen', 'rohvideos', 'papierkorb', 'einstellungen'].includes(S.tab) && !S.openId ? ' on' : ''), onclick: () => moreSheet(fileInput) },
+    h('span', { class: 'bi' }, '☰'), h('span', {}, 'Mehr')));
   app.replaceChildren(
     h('header', { class: 'top' },
-      h('div', { class: 'brand' }, h('img', { src: 'icon.svg', alt: '' }), APP_NAME),
+      h('div', { class: 'brand' }, h('img', { src: 'icon.svg', alt: '' }), h('span', { class: 'bname' }, APP_NAME)),
       tabs, h('div', { class: 'spacer' }),
       versionChip(),
-      h('button', { class: 'btn', onclick: () => fileInput.click(), title: 'Videos, Titelbilder oder .json hochladen' }, '⤒ Hochladen'), fileInput),
-    mainEl);
+      h('button', { class: 'btn upl-btn', onclick: () => fileInput.click(), title: 'Videos, Titelbilder oder .json hochladen' }, '⤒', h('span', { class: 'lbl' }, ' Hochladen')), fileInput),
+    mainEl, bottom);
   updateCounts();
   renderMain();
   document.querySelector('.modal')?.remove();
@@ -267,9 +286,26 @@ function render() {
 }
 
 function updateCounts() {
-  for (const [id, el] of Object.entries(countEls)) {
-    el.textContent = id === 'posten' ? toPost().length : S.videos.filter((v) => inTab(v, id) && !v.missing).length;
+  for (const [key, el] of Object.entries(countEls)) {
+    const id = key.replace(/^b-/, '');
+    const n = id === 'posten' ? toPost().length : S.videos.filter((v) => inTab(v, id) && !v.missing).length;
+    el.textContent = key.startsWith('b-') ? (n ? String(n) : '') : n;
   }
+}
+
+// „Mehr“ auf dem Handy: übrige Bereiche + Hochladen
+function moreSheet(fileInput) {
+  const close = () => modal.remove();
+  const item = (id, label) => h('button', { class: 'btn big', onclick: () => { close(); go(id); } }, label);
+  const modal = h('div', { class: 'modal sheetmodal', onclick: (e) => { if (e.target === modal) close(); } },
+    h('div', { class: 'sheet narrow more' },
+      h('button', { class: 'close', onclick: close, title: 'Schließen' }, '×'),
+      h('h2', {}, 'Mehr'),
+      item('hochgeladen', '📦 Hochgeladen (Archiv)'), item('rohvideos', '🎞 Rohvideos'), item('papierkorb', '🗑 Papierkorb'), item('einstellungen', '⚙ Einstellungen'),
+      h('button', { class: 'btn big', onclick: () => { close(); fileInput.click(); } }, '⤒ Video/Bild hochladen'),
+      installHint(),
+      h('p', { class: 'hint' }, APP_NAME + ' ' + versionText())));
+  document.body.append(modal);
 }
 
 function renderMain() {
@@ -1465,8 +1501,13 @@ async function renderSettings() {
       ' · ', h('a', { href: '#', onclick: (e) => { e.preventDefault(); showChangelog(); } }, 'Was ist neu'),
       ' · ', h('a', { href: '#', onclick: async (e) => { e.preventDefault(); S.version = await api('POST', '/api/version/check'); toast(S.version.updateAvailable ? `Update ${S.version.latest.version} verfügbar – in Unraid „Check for Updates“ → „apply update“.` : S.version.latest.error ? 'Prüfung ging nicht: ' + S.version.latest.error : 'Du hast die neueste Version.', !!S.version.latest.error); render(); } }, 'Nach Updates suchen')));
 
-  mainEl.replaceChildren(
-    h('div', { class: 'bar' }, h('h2', { class: 'h2' }, 'Kanäle'), h('span', { class: 'hint' }, 'Jeder Kanal hat eigene YouTube-/TikTok-Verbindung und Vorgaben. Die Zentrale schlägt je Video den Kanal vor.'),
+  const jumps = [['s-kanaele', 'Kanäle'], ['s-claude', 'Claude'], ['s-schnitt', 'Schnitt'], ['s-musik', 'Musik'], ['s-bilder', 'Titelbilder'],
+    ['s-helfer', 'Rechenhelfer'], ['s-google', 'YouTube-App'], ['s-tiktok', 'TikTok-App'], ['s-sicherung', 'Sicherung'], ['s-allgemein', 'Allgemein']];
+  [[claudeBox, 's-claude'], [cutBox, 's-schnitt'], [musicBox, 's-musik'], [thumbBox, 's-bilder'], [helperBox, 's-helfer'], [googleBox, 's-google'],
+    [tiktokBox, 's-tiktok'], [backupBox, 's-sicherung'], [account, 's-allgemein']].forEach(([el, id]) => { el.id = id; el.style.scrollMarginTop = '110px'; });
+  const jumpBar = h('div', { class: 'setjump' }, jumps.map(([id, label]) => h('button', { class: 'btn small', onclick: () => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, label)));
+  mainEl.replaceChildren(jumpBar,
+    h('div', { class: 'bar', id: 's-kanaele', style: { scrollMarginTop: '110px' } }, h('h2', { class: 'h2' }, 'Kanäle'), h('span', { class: 'hint' }, 'Jeder Kanal hat eigene YouTube-/TikTok-Verbindung und Vorgaben. Die Zentrale schlägt je Video den Kanal vor.'),
       h('div', { style: { flex: '1' } }),
       h('button', { class: 'btn small', onclick: () => { const n = prompt('Name des neuen Kanals:'); if (n) run(() => api('POST', '/api/profiles', { name: n }), 'Kanal angelegt.')(); } }, '+ Kanal')),
     h('div', { class: 'settings' }, st.profiles.map(channelBox)),

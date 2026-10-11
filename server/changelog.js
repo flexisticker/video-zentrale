@@ -1,5 +1,9 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.15.0', date: '11.10.2026', items: [
+    '📱 Handy & Tablet: Leiste unten (Posten, Freigabe, Eingang, Coach, Mehr), Videos im Vollbild, größere Knöpfe, Sprungleiste in den Einstellungen.',
+    'Als App installierbar: eigenes Symbol auf dem Startbildschirm, startet ohne Browserleiste direkt in „Zum Posten“ (iPhone: Teilen → Zum Home-Bildschirm, Android: Menü → App installieren).',
+  ] },
   { version: '1.14.0', date: '11.10.2026', items: [
     '🖥 Rechenhelfer: Dein PC mit NVIDIA-Grafikkarte übernimmt die Spracherkennung (großes Whisper-Modell) – genauer, schneller, der Server wird entlastet.',
     'Einrichten: Einstellungen → Rechenhelfer → einschalten → ZIP herunterladen → auf dem PC „Einrichten.bat“. Ist der PC aus, rechnet die Zentrale selbst.',

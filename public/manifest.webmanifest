@@ -1,0 +1,17 @@
+{
+  "name": "Micha’s Video-Zentrale",
+  "short_name": "Video-Zentrale",
+  "description": "Videos schneiden, prüfen und auf YouTube, TikTok und LinkedIn bringen.",
+  "lang": "de",
+  "start_url": "/?app=1#posten",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0e0f14",
+  "theme_color": "#0e0f14",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

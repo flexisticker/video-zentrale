@@ -147,6 +147,11 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   mit `rechenhelfer.json` (url, token). Dockerfile kopiert `tools/rechenhelfer`. Getestet mit pwsh 7 unter Linux (Testschalter `VZ_HELPER_HOME`,
   `VZ_WHISPER_EXE`) + fake-whisper: online, Auftrag, Ergebnis. **Nicht getestet:** echtes Windows/PowerShell 5.1, CUDA-Download (Asset-Name
   `whisper-cublas-12.*-bin-x64.zip` per GitHub-API gesucht), Aufgabenplanung. Kunden-PC: RTX 3070, 64 GB.
+- 1.15.0: Handy/Tablet: ≤ 900 px `.bottomnav` (Posten, Freigabe, Eingang, Coach, Mehr → `moreSheet()`), Reiter oben aus; ≤ 600 px Detail als
+  Vollbild, Karten 2-spaltig; `(pointer: coarse)` größere Knöpfe/16-px-Eingaben; Einstellungen mit Sprungleiste `.setjump` (IDs `s-…`).
+  PWA: `public/manifest.webmanifest` (start_url `/?app=1#posten`), `public/sw.js` (nur Offline-Hinweis, kein Daten-Cache), Icons `public/icons/`,
+  Installieren-Knopf (`beforeinstallprompt`) bzw. iOS-Hinweis im „Mehr“-Blatt. Geprüft: 360/390/768/1024 px ohne seitliches Verrutschen,
+  iPhone-13- und iPad-Ansicht. Installation über https (videos.flexisticker.de) nötig.
 - Einrichtung beim Kunden (11.10.2026): Zentrale läuft über `https://videos.flexisticker.de` (NPM, Access List „Nur Heimnetz“,
   lokaler UniFi-DNS-Eintrag → 192.168.1.111). Browser zeigte trotzdem 403: Chrome/Edge „Sicheres DNS“ fragte Google/Cloudflare
   (öffentliche IP) → ausschalten bzw. „aktueller Dienstanbieter“, `net-internals/#dns` leeren. Prüfung: `curl -I` am PC.
