@@ -109,6 +109,8 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   auch Standbilder/Varianten/Transkript, `settings.trashDays` 30). Getestet (Mock + Playwright): eingang-profi → 2 Clips 1080×1350 ohne Musik,
   Untertitel-Bild, Plan mit Wunsch → 1 Short + Kurzfassung, Papierkorb komplett, LinkedIn-Kasten (Kopieren, gepostet → Archiv).
   **Nicht getestet:** echte Claude-Texte für LinkedIn, Kurzfassung mit echtem langem Gameplay.
+- 1.9.1: TikTok „The chunk size is invalid“ bei 5–10-MB-Videos (chunk_size 10 MB > Videogröße). Jetzt bis 64 MB ein Stück
+  (`chunk_size = video_size`), darüber 10-MiB-Stücke, Anzahl abgerundet, Rest im letzten Stück (Media Transfer Guide). Mit Mock geprüft (7 MB, 70 MB).
 - Einrichtung beim Kunden (11.10.2026): Zentrale läuft über `https://videos.flexisticker.de` (NPM, Access List „Nur Heimnetz“,
   lokaler UniFi-DNS-Eintrag → 192.168.1.111). Browser zeigte trotzdem 403: Chrome/Edge „Sicheres DNS“ fragte Google/Cloudflare
   (öffentliche IP) → ausschalten bzw. „aktueller Dienstanbieter“, `net-internals/#dns` leeren. Prüfung: `curl -I` am PC.

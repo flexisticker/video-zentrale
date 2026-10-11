@@ -8,7 +8,8 @@ import * as profiles from './profiles.js';
 const AUTH = process.env.TT_AUTH_BASE || 'https://www.tiktok.com';
 const API = process.env.TT_API_BASE || 'https://open.tiktokapis.com';
 const SCOPE = 'user.info.basic,video.upload';
-const CHUNK = 10 * 1024 * 1024; // 5–64 MB, letzter Teil darf größer sein
+const CHUNK = 10 * 1024 * 1024; // 5–64 MB, letzter Teil darf größer sein (bis 128 MB)
+const SINGLE_MAX = 64 * 1000 * 1000; // bis hierhin in einem Stück (TikTok: chunk_size darf nie größer als das Video sein)
 
 const access = new Map(); // Kanal-ID -> { token, until }
 const states = new Map(); // state -> { until, profileId }
@@ -120,7 +121,9 @@ function apiErr(j, fallback) {
 
 export async function upload(p, filePath, progress) {
   const size = fs.statSync(filePath).size;
-  const chunk = size < 5 * 1024 * 1024 ? size : CHUNK;
+  // Regeln laut TikTok Media Transfer Guide: chunk_size 5–64 MB (kleiner Rest im letzten Stück), Anzahl = abgerundet
+  // video_size / chunk_size, Videos bis 64 MB als ein einziges Stück (chunk_size = video_size).
+  const chunk = size <= SINGLE_MAX ? size : CHUNK;
   const count = Math.max(1, Math.floor(size / chunk));
   const r = await fetch(API + '/v2/post/publish/inbox/video/init/', { method: 'POST',
     headers: { Authorization: 'Bearer ' + await token(p), 'Content-Type': 'application/json; charset=UTF-8' },

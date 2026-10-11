@@ -1,5 +1,8 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.9.1', date: '11.10.2026', items: [
+    'Fehler behoben: TikTok-Upload brach bei Videos zwischen 5 und 10 MB mit „The chunk size is invalid“ ab. Videos bis 64 MB gehen jetzt in einem Stück. Einfach „Erneut versuchen“ klicken.',
+  ] },
   { version: '1.9.0', date: '11.10.2026', items: [
     'LinkedIn: neuer Kanal „LinkedIn“ (als Person, Ich-Form). Videos aus dem Ordner „eingang-profi“ landen automatisch dort.',
     'Profi-Schnitt für LinkedIn: Clips im Format 4:5 (oder 1:1/16:9), ruhige Untertitel, keine Musik, Claude wählt Kernaussagen statt Gags.',
