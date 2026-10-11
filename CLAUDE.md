@@ -87,6 +87,14 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   Label-Abruf auf ghcr.io (Blob-Download in der Sandbox gesperrt, Token + Manifest gingen).
 - Netzwerk Kunde: `videos.flexisticker.de` braucht wie `studio` einen lokalen UniFi-DNS-Eintrag → 192.168.1.111 (NPM), sonst kommt
   die Anfrage über die öffentliche IP (Hairpin-NAT) und die Access List „Nur Heimnetz“ antwortet 403.
+- Einrichtung beim Kunden (11.10.2026): Zentrale läuft über `https://videos.flexisticker.de` (NPM, Access List „Nur Heimnetz“,
+  lokaler UniFi-DNS-Eintrag → 192.168.1.111). Browser zeigte trotzdem 403: Chrome/Edge „Sicheres DNS“ fragte Google/Cloudflare
+  (öffentliche IP) → ausschalten bzw. „aktueller Dienstanbieter“, `net-internals/#dns` leeren. Prüfung: `curl -I` am PC.
+  Google: Projekt „Video Zentrale“, Google Auth Platform (Branding braucht Datenschutz-/AGB-Link → `www.flexisticker.de/…`),
+  Client Typ Webanwendung, Redirect `https://videos.flexisticker.de/oauth/google`. TikTok: Entwicklerkonto per E-Mail, Domain
+  `flexisticker.de` per DNS-TXT bei Alfahosting bestätigt, **Sandbox** (Key beginnt mit `sb`, eigenes Secret!), Produkte über
+  „Add products“ (Login Kit mit Redirect URI unter Web, Content Posting API), Target Users michamodus + 3dbymicha.
+  **Beide Plattformen verbunden.** App-Icon `docs/app-icon-1024.png`. Prüfung (Demo-Video aus Sandbox) noch nicht eingereicht.
 - Ideen: KI-B-Roll per fal.ai (Video-Modelle), Viralitäts-Bewertung, Hook-Einblendung, Zeitplan.
 - Entscheidung Kunde: Auslieferungen immer direkt auf `main` pushen.
 - Ideen: Zeitplan (publishAt), Shorts automatisch aus langen Videos, Titelbild-Vorlagen, Untertitel (whisper).
