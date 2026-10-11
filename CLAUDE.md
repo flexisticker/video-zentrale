@@ -95,6 +95,10 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   `flexisticker.de` per DNS-TXT bei Alfahosting bestätigt, **Sandbox** (Key beginnt mit `sb`, eigenes Secret!), Produkte über
   „Add products“ (Login Kit mit Redirect URI unter Web, Content Posting API), Target Users michamodus + 3dbymicha.
   **Beide Plattformen verbunden.** App-Icon `docs/app-icon-1024.png`. Prüfung (Demo-Video aus Sandbox) noch nicht eingereicht.
+- **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
+  Sendeplätze je Kanal **stellt der Kunde selbst ein** (keine festen Startzeiten), „Einplanen“ auf nächsten freien Platz, Shorts
+  eines Langvideos über Tage verteilen, Übersicht Heute/Woche, Lückenwarnung. YouTube `publishAt` erst nach YouTube-Audit
+  (bis dahin Erinnerung „jetzt öffentlich stellen“), TikTok zur geplanten Zeit als Entwurf (Direct Post erst nach TikTok-Prüfung).
 - Ideen: KI-B-Roll per fal.ai (Video-Modelle), Viralitäts-Bewertung, Hook-Einblendung, Zeitplan.
 - Entscheidung Kunde: Auslieferungen immer direkt auf `main` pushen.
 - Ideen: Zeitplan (publishAt), Shorts automatisch aus langen Videos, Titelbild-Vorlagen, Untertitel (whisper).
