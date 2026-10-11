@@ -57,6 +57,15 @@ http.createServer(async (req, res) => {
     const who = String(req.headers.authorization).replace('Bearer tt-', '');
     return json(res, 200, { data: { user: { display_name: who, open_id: 'o-' + who } }, error: { code: 'ok' } });
   }
+  if (p === '/v2/post/publish/creator_info/query/') {
+    return json(res, 200, { data: { creator_avatar_url: '', creator_username: 'michamodus', creator_nickname: 'MichaModus',
+      privacy_level_options: ['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS', 'SELF_ONLY'], comment_disabled: false, duet_disabled: true, stitch_disabled: false,
+      max_video_post_duration_sec: 600 }, error: { code: 'ok' } });
+  }
+  if (p === '/v2/post/publish/video/init/') {
+    const j = JSON.parse(b.toString()); tt.direct = j.post_info; tt.init = j.source_info; tt.size = j.source_info.video_size; tt.got = 0; tt.chunks = 0;
+    return json(res, 200, { data: { publish_id: 'pubD', upload_url: 'http://127.0.0.1:9300/tt-up' }, error: { code: 'ok' } });
+  }
   if (p === '/v2/post/publish/inbox/video/init/') {
     const j = JSON.parse(b.toString()); tt.init = j.source_info; tt.auth = req.headers.authorization; tt.size = j.source_info.video_size; tt.got = 0; tt.chunks = 0;
     return json(res, 200, { data: { publish_id: 'pub1', upload_url: 'http://127.0.0.1:9300/tt-up' }, error: { code: 'ok' } });

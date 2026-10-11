@@ -123,6 +123,13 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
 - 1.10.1: TikTok-Inbox-Upload funktioniert in der Sandbox (Kunde: Benachrichtigung „Dein Video von Zentrale ist bereit“ im Posteingang,
   nicht unter Entwürfe). Statuszeile `ttStatusLine()` mit `v.tt.tikStatus/tikReason/checkedAt`, `POST /api/videos/:id/tiktok-status`,
   Zeitüberschreitung → `state: 'unconfirmed'` statt „done“.
+- 1.11.0: Kunde will TikTok-Prüfung („die App richtig machen“, nimmt das Demo-Video selbst auf). **Direct Post** (`tiktok.directPost`,
+  Scope `video.publish` nur wenn an, `creatorInfo()` = `/v2/post/publish/creator_info/query/`, `upload(…, direct)` → `/v2/post/publish/video/init/`
+  mit post_info title/privacy_level/disable_*/brand_*), Dialog `tiktokPostDialog()` nach Content Sharing Guidelines (Kontoinfo, Vorschau, keine
+  Vorauswahl, gesperrte Interaktionen aus creator_info, Offenlegung mit „Werbeinhalt“/„Bezahlte Partnerschaft“, Markeninhalt nicht SELF_ONLY,
+  Musik-/Markeninhalt-Zustimmung mit Links, max. Dauer). Serverprüfung im Upload-Route. Store übernimmt `tiktok.directPost` (Fehler gefunden!).
+  **Zum Posten** (`renderPosting`, `toPost()`, `v.tt.posted` via `/tiktok-posted`). Getestet mit Mock + Playwright (Pixel 7).
+  Offen: Demo-Video aufnehmen (Sandbox, Direct Post + Upload zeigen), Prüfung einreichen. Richtlinien-Details teils aus Sekundärquellen.
 - Einrichtung beim Kunden (11.10.2026): Zentrale läuft über `https://videos.flexisticker.de` (NPM, Access List „Nur Heimnetz“,
   lokaler UniFi-DNS-Eintrag → 192.168.1.111). Browser zeigte trotzdem 403: Chrome/Edge „Sicheres DNS“ fragte Google/Cloudflare
   (öffentliche IP) → ausschalten bzw. „aktueller Dienstanbieter“, `net-internals/#dns` leeren. Prüfung: `curl -I` am PC.

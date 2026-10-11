@@ -24,7 +24,7 @@ export function init() {
   saveNow();
 }
 
-export function enqueue(v, platform) {
+export function enqueue(v, platform, direct = null) {
   const k = platform === 'youtube' ? 'yt' : 'tt';
   if (['queued', 'uploading', 'processing'].includes(v[k]?.state)) throw new Error('Läuft bereits.');
   if (v.missing) throw new Error('Videodatei nicht gefunden.');
@@ -32,7 +32,8 @@ export function enqueue(v, platform) {
   if (!p) throw new Error('Kein Kanal gewählt.');
   if (!p[platform].refreshToken) throw new Error(`${platform === 'youtube' ? 'YouTube' : 'TikTok'} ist für „${p.name}“ nicht verbunden (Einstellungen).`);
   // Ziel beim Freigeben festhalten – spätere Kanal-Änderungen wirken nicht auf einen laufenden Upload.
-  v[k] = { state: 'queued', progress: 0, at: new Date().toISOString(), profileId: p.id, profileName: p.name, history: v[k]?.history || [] };
+  v[k] = { state: 'queued', progress: 0, at: new Date().toISOString(), profileId: p.id, profileName: p.name, history: v[k]?.history || [],
+    ...(direct ? { mode: 'direct', direct } : { mode: 'inbox' }) };
   queue.push({ id: v.id, platform });
   saveNow();
   next();
@@ -98,7 +99,7 @@ async function next() {
         channelTitle: p.youtube.channel?.title || '', channelId: p.youtube.channel?.id || '',
         history: [...(v.yt.history || []), { id: r.id, profileId: p.id, at: new Date().toISOString() }] };
     } else {
-      const publishId = await tiktok.upload(p, file, progress);
+      const publishId = await tiktok.upload(p, file, progress, v.tt.mode === 'direct' ? v.tt.direct : null);
       v.tt = { ...v.tt, state: 'processing', progress: 100, publishId, error: '', at: new Date().toISOString() };
       watchTikTok(v.id);
     }

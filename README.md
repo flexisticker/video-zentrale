@@ -48,6 +48,12 @@ Video-Zentrale (Browser) ── prüfen, freigeben ──▶ YouTube (privat) / 
   aus oder Nachtbetrieb an, dann bleibt Zeit, den Plan vorher einzustellen.
 - **Papierkorb:** „🗑 Löschen“ im Video (mit Abfrage) → Ordner `papierkorb`, dort wiederherstellen oder endgültig löschen, „Papierkorb leeren“;
   automatisch nach 30 Tagen (Einstellungen → Allgemein, 0 = nie).
+- **📱 Zum Posten:** Reiter für das Handy – alles, was noch von Hand gepostet werden muss (TikTok-Entwürfe ohne Text, LinkedIn), mit
+  „Text kopieren“ und „Gepostet“.
+- **TikTok direkt veröffentlichen (Direct Post):** Einstellungen → TikTok-App → „Direkt veröffentlichen erlauben“ (in der TikTok-App Direct Post +
+  Scope `video.publish` freischalten, Kanäle neu verbinden). Im Video „▶ Direkt auf TikTok posten …“: Kontoinfo live, Vorschau, Titel, Sichtbarkeit
+  ohne Vorauswahl, Kommentare/Duett/Stitch, Offenlegung (Deine Marke / Markeninhalt, Markeninhalt nicht privat), Zustimmung Musiknutzung.
+  Ohne TikTok-Prüfung nur „Nur ich“.
 - **Sicherung:** Einstellungen → 💾 Sicherung. Täglich automatisch (Standard 03:30, 14 aufheben) nach `/data/sicherung`
   (= `/mnt/user/appdata/video-zentrale/sicherung`), „Jetzt sichern“, „Sicherung herunterladen“ (ZIP), Wiederherstellen aus Datei oder
   Server-Liste (vorher automatische Sicherung „vor-wiederherstellung“). Enthält Kanäle, Verbindungen/Schlüssel, Einstellungen,

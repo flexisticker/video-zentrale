@@ -1,5 +1,10 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.11.0', date: '11.10.2026', items: [
+    '📱 „Zum Posten“: Handy-Ansicht mit allem, was du noch selbst posten musst (TikTok-Entwürfe, LinkedIn) – Text mit einem Tipp kopieren, „Gepostet“ abhaken.',
+    'TikTok direkt veröffentlichen (Direct Post) mit Text, Sichtbarkeit, Kommentare/Duett/Stitch und Kennzeichnung von Werbung – nach den TikTok-Vorgaben. Einschalten unter Einstellungen → TikTok-App.',
+    'Ohne TikTok-Prüfung sind direkt gepostete Videos nur für dich sichtbar – das ist die Grundlage für das Demo-Video zur Prüfung.',
+  ] },
   { version: '1.10.1', date: '11.10.2026', items: [
     'TikTok: Die Zentrale zeigt, was TikTok zum Upload meldet (z. B. „an deinen Posteingang zugestellt“), mit Knopf „TikTok-Status abfragen“.',
     'Ohne Bestätigung von TikTok steht jetzt „unbestätigt“ statt eines Häkchens. Das Video findest du in der TikTok-App unter Posteingang → Benachrichtigungen („Dein Video von Zentrale ist bereit“).',

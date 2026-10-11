@@ -157,7 +157,7 @@ function sendFile(req, res, file, type, downloadName) {
 const TYPES = { '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm',
   '.mkv': 'video/x-matroska', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp',
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.json': 'application/json' };
+  '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
 
 function imageExt(buf) {
   if (buf[0] === 0xff && buf[1] === 0xd8) return '.jpg';
@@ -273,6 +273,18 @@ async function api(req, res, url) {
     const sub = r[2] || '';
     if (sub === '/file' && (m === 'GET' || m === 'HEAD')) return sendFile(req, res, lib.fileOf(v), TYPES[path.extname(v.file).toLowerCase()] || 'application/octet-stream',
       url.searchParams.get('download') ? v.file : '');
+    if (sub === '/tiktok-creator' && m === 'GET') {
+      const prof = profiles.effective(v);
+      if (!prof?.tiktok?.refreshToken) throw new HttpError(409, 'TikTok ist für diesen Kanal nicht verbunden.');
+      try { return send(res, 200, await tiktok.creatorInfo(prof)); } catch (e) { throw new HttpError(502, e.message); }
+    }
+    if (sub === '/tiktok-posted' && m === 'POST') {
+      const b = await readJson(req);
+      if (!v.tt || v.tt.state === 'none') throw new HttpError(409, 'Nicht an TikTok gesendet.');
+      v.tt = { ...v.tt, posted: b.undo ? '' : new Date().toISOString() };
+      saveNow();
+      return send(res, 200, publicVideo(v));
+    }
     if (sub === '/tiktok-status' && m === 'POST') {
       if (!v.tt?.publishId) throw new HttpError(409, 'Kein TikTok-Upload bekannt.');
       const prof = profiles.get(v.tt.profileId);
@@ -410,7 +422,24 @@ async function api(req, res, url) {
     let a;
     if ((a = /^\/(upload|cancel|done)\/(youtube|tiktok)$/.exec(sub)) && m === 'POST') {
       const [, action, platform] = a;
-      if (action === 'upload') jobs.enqueue(v, platform);
+      if (action === 'upload') {
+        const b = await readJson(req);
+        let direct = null;
+        if (platform === 'tiktok' && b.direct) {
+          if (!db().tiktok.directPost) throw new HttpError(409, 'Direkt veröffentlichen ist ausgeschaltet (Einstellungen → TikTok-App).');
+          const d = b.direct;
+          const prof = profiles.effective(v);
+          const info = await tiktok.creatorInfo(prof).catch((e) => { throw new HttpError(502, e.message); });
+          if (!info.privacyOptions.includes(d.privacy)) throw new HttpError(400, 'Bitte eine Sichtbarkeit wählen.');
+          if (d.brandContent && d.privacy === 'SELF_ONLY') throw new HttpError(400, 'Markeninhalte können nicht privat („Nur ich“) gepostet werden.');
+          if (d.disclose && !d.brandOrganic && !d.brandContent) throw new HttpError(400, 'Bitte angeben, ob du für dich selbst, für Dritte oder beides wirbst.');
+          if (info.maxDuration && v.duration > info.maxDuration) throw new HttpError(400, `Video ist länger als bei diesem Konto erlaubt (${info.maxDuration} s).`);
+          direct = { title: String(d.title || '').slice(0, 2200), privacy: d.privacy,
+            allowComment: !!d.allowComment && !info.commentDisabled, allowDuet: !!d.allowDuet && !info.duetDisabled, allowStitch: !!d.allowStitch && !info.stitchDisabled,
+            brandOrganic: !!(d.disclose && d.brandOrganic), brandContent: !!(d.disclose && d.brandContent) };
+        }
+        jobs.enqueue(v, platform, direct);
+      }
       else if (action === 'cancel') { if (!jobs.cancel(v, platform)) throw new HttpError(409, 'Läuft schon – nicht mehr abbrechbar.'); }
       else { const b = await readJson(req); const u = String(b.url || ''); jobs.markDone(v, platform, /^https:\/\//.test(u) ? u : ''); }
       return send(res, 200, publicVideo(v));

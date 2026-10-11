@@ -5,6 +5,7 @@ const CATEGORIES = [['20', 'Gaming'], ['24', 'Unterhaltung'], ['22', 'Menschen &
   ['26', 'Praktische Tipps & Styling'], ['27', 'Bildung'], ['28', 'Wissenschaft & Technik'], ['17', 'Sport'],
   ['10', 'Musik'], ['1', 'Film & Animation'], ['2', 'Autos & Fahrzeuge'], ['19', 'Reisen & Events']];
 const TABS = [
+  ['posten', '📱 Zum Posten'],
   ['geschnitten', 'Zur Freigabe'],
   ['eingang', 'Eingang (roh)'],
   ['hochgeladen', 'Hochgeladen'],
@@ -257,13 +258,14 @@ function render() {
 
 function updateCounts() {
   for (const [id, el] of Object.entries(countEls)) {
-    el.textContent = S.videos.filter((v) => inTab(v, id) && !v.missing).length;
+    el.textContent = id === 'posten' ? toPost().length : S.videos.filter((v) => inTab(v, id) && !v.missing).length;
   }
 }
 
 function renderMain() {
   if (!mainEl) return;
   if (S.tab === 'einstellungen') return renderSettings();
+  if (S.tab === 'posten') return renderPosting();
   const q = S.search.toLowerCase();
   const list = S.videos.filter((v) => inTab(v, S.tab) && (!q || (v.title + ' ' + v.file + ' ' + v.tags).toLowerCase().includes(q))
     && (!S.channel || channelOf(v)?.id === S.channel));
@@ -328,6 +330,51 @@ function card(v) {
         v.folder === 'papierkorb' ? h('span', { class: 'chip bad' }, '🗑 ' + fmtDate(v.trash?.at)) : null,
         ...(isPro(channelOf(v)) ? [stateChip('LinkedIn', v.li)] : [stateChip('YouTube', v.yt), stateChip('TikTok', v.tt)])),
       running ? h('div', { class: 'bar-progress' }, h('i', { style: { width: (running.progress || 0) + '%' } })) : null));
+}
+
+// ---------- Zum Posten (Handy) ----------
+// Was noch von Hand gepostet werden muss: TikTok-Entwürfe (Text fehlt, TikTok nimmt ihn nicht an) und LinkedIn-Videos.
+const ttText = (v) => (v.tiktok || ((v.title || '') + ' ' + hashtags(v.tags || '')).trim()).trim();
+const liText = (v) => { const t = hashtags(v.tags || ''); return ((v.description || '').trim() + (t ? '\n\n' + t : '')).trim(); };
+function toPost() {
+  return S.videos.filter((v) => !v.missing && v.folder !== 'papierkorb' && (
+    (['done', 'unconfirmed', 'processing'].includes(v.tt?.state) && !v.tt.manual && !v.tt.posted && v.tt.mode !== 'direct')
+    || (isPro(channelOf(v)) && v.folder === 'geschnitten' && v.li?.state !== 'done')))
+    .sort((a, b) => String(b.tt?.at || b.mtime || '').localeCompare(String(a.tt?.at || a.mtime || '')));
+}
+function renderPosting() {
+  const list = toPost();
+  const item = (v) => {
+    const pro = isPro(channelOf(v));
+    const ch = channelOf(v);
+    const thumb = h('div', { class: 'pthumb' + (isVertical(v) ? ' vert' : '') });
+    if (v.hasImage) thumb.style.backgroundImage = `url("${imgUrl(v)}")`;
+    const done = async (path, body, msg) => {
+      try { await api('POST', `/api/videos/${v.id}/${path}`, body); await refresh(); renderMain(); updateCounts(); toast(msg); } catch (x) { toast(x.message, true); }
+    };
+    const steps = pro
+      ? [h('a', { class: 'btn big', href: `/api/videos/${v.id}/file?download=1`, download: '' }, '⤓ 1. Video speichern'),
+         h('button', { class: 'btn big primary', onclick: () => copy(liText(v)) }, '⧉ 2. Beitrag kopieren'),
+         h('a', { class: 'btn big', href: 'https://www.linkedin.com/feed/?shareActive=true', target: '_blank', rel: 'noopener' }, '↗ 3. LinkedIn öffnen'),
+         h('button', { class: 'btn big ok', onclick: () => done('linkedin', { url: '' }, 'Als gepostet markiert.') }, '✓ Gepostet')]
+      : [h('button', { class: 'btn big primary', onclick: () => copy(ttText(v)) }, '⧉ 1. TikTok-Text kopieren'),
+         h('div', { class: 'hint' }, '2. TikTok-App → Posteingang → „Dein Video von Zentrale ist bereit“ → Text einfügen → posten.'),
+         h('button', { class: 'btn big ok', onclick: () => done('tiktok-posted', {}, 'Als gepostet markiert.') }, '✓ Gepostet')];
+    const txt = pro ? liText(v) : ttText(v);
+    return h('div', { class: 'post' },
+      h('div', { class: 'phead' }, thumb, h('div', {},
+        h('div', { class: 'ptitle' }, v.title || v.file),
+        h('div', { class: 'chips' }, h('span', { class: 'chip', style: { borderColor: ch?.color || '' } }, (pro ? 'LinkedIn' : 'TikTok') + ' · ' + (ch?.name || '')),
+          !pro && v.tt?.state === 'processing' ? h('span', { class: 'chip run' }, 'TikTok verarbeitet noch') : null,
+          !pro && v.tt?.state === 'unconfirmed' ? h('span', { class: 'chip bad' }, 'Zustellung unbestätigt') : null))),
+      h('div', { class: 'ptext' }, txt || h('i', {}, 'Noch kein Text – im Video eintragen.')),
+      h('div', { class: 'psteps' }, steps),
+      h('a', { class: 'hint', href: '#video/' + v.id }, 'Video öffnen / Text ändern'));
+  };
+  mainEl.replaceChildren(h('div', { class: 'posting' },
+    h('h2', { class: 'h2' }, '📱 Zum Posten'),
+    h('p', { class: 'hint' }, 'Hier steht, was du noch selbst posten musst: TikTok-Entwürfe (TikTok übernimmt den Text nicht) und LinkedIn-Videos. Tipp: Die Zentrale als App auf den Handy-Startbildschirm legen.'),
+    list.length ? list.map(item) : h('div', { class: 'empty' }, h('b', {}, 'Alles gepostet. 🎉'), 'Neue Videos erscheinen hier, sobald du sie an TikTok sendest oder für LinkedIn freigibst.')));
 }
 
 // ---------- Detailansicht ----------
@@ -509,6 +556,79 @@ function ttStatusLine(v, s) {
     s.checkedAt ? ' · ' + fmtDate(s.checkedAt) : '', ' ', btn);
 }
 
+// Direkt auf TikTok posten – Aufbau nach den TikTok Content Sharing Guidelines:
+// Kontoinfo live, Vorschau, Titel bearbeitbar, Sichtbarkeit ohne Vorauswahl, Interaktionen (aus, gesperrte deaktiviert),
+// Kennzeichnung kommerzieller Inhalte, Zustimmung zur Musiknutzung, Hinweis zur Verarbeitungszeit.
+const PRIVACY_NAMES = { PUBLIC_TO_EVERYONE: 'Öffentlich (alle)', MUTUAL_FOLLOW_FRIENDS: 'Freunde', FOLLOWER_OF_CREATOR: 'Follower', SELF_ONLY: 'Nur ich' };
+async function tiktokPostDialog(v) {
+  let info;
+  try { info = await api('GET', `/api/videos/${v.id}/tiktok-creator`); } catch (x) { return toast(x.message, true); }
+  const close = () => modal.remove();
+  const tooLong = info.maxDuration && v.duration > info.maxDuration;
+  const title = h('textarea', { rows: 4, maxlength: 2200, value: ttText(v) });
+  const privacy = h('select', {}, h('option', { value: '', disabled: true, selected: true }, 'Bitte wählen …'),
+    info.privacyOptions.map((o) => h('option', { value: o }, PRIVACY_NAMES[o] || o)));
+  const tog = (disabled) => h('input', { type: 'checkbox', disabled: !!disabled });
+  const cComment = tog(info.commentDisabled), cDuet = tog(info.duetDisabled), cStitch = tog(info.stitchDisabled);
+  const disclose = h('input', { type: 'checkbox' }), own = h('input', { type: 'checkbox' }), branded = h('input', { type: 'checkbox' });
+  const discloseBox = h('div', { class: 'disc' });
+  const declaration = h('p', { class: 'hint' });
+  const label = h('p', { class: 'hint' });
+  const btn = h('button', { class: 'btn primary big' }, 'Auf TikTok posten');
+  const why = h('div', { class: 'hint err' });
+  const update = () => {
+    discloseBox.style.display = disclose.checked ? '' : 'none';
+    const bc = disclose.checked && branded.checked, bo = disclose.checked && own.checked;
+    // Markeninhalte dürfen nicht privat sein
+    for (const o of privacy.options) if (o.value === 'SELF_ONLY') { o.disabled = bc; o.title = bc ? 'Markeninhalte können nicht privat sein.' : ''; }
+    if (bc && privacy.value === 'SELF_ONLY') privacy.value = '';
+    label.textContent = bc ? 'Dein Video wird als „Bezahlte Partnerschaft“ gekennzeichnet.' : bo ? 'Dein Video wird als „Werbeinhalt“ gekennzeichnet.' : '';
+    declaration.replaceChildren('Mit dem Posten stimmst du ',
+      ...(bc ? [h('a', { href: 'https://www.tiktok.com/legal/page/global/bc-policy/en', target: '_blank', rel: 'noopener' }, 'TikToks Richtlinie für Markeninhalte'), ' und '] : []),
+      h('a', { href: 'https://www.tiktok.com/legal/page/global/music-usage-confirmation/en', target: '_blank', rel: 'noopener' }, 'TikToks Bestätigung zur Musiknutzung'), ' zu.');
+    const problem = tooLong ? `Das Video ist länger als bei diesem Konto erlaubt (${info.maxDuration} s).`
+      : !privacy.value ? 'Bitte eine Sichtbarkeit wählen.'
+      : disclose.checked && !own.checked && !branded.checked ? 'Du musst angeben, ob dein Inhalt für dich selbst, für Dritte oder für beides wirbt.' : '';
+    btn.disabled = !!problem; why.textContent = problem;
+  };
+  for (const el of [privacy, disclose, own, branded]) el.addEventListener('change', update);
+  btn.onclick = async () => {
+    btn.disabled = true; btn.textContent = 'Wird gesendet …';
+    try {
+      Object.assign(v, await api('POST', `/api/videos/${v.id}/upload/tiktok`, { direct: { title: title.value, privacy: privacy.value,
+        allowComment: cComment.checked, allowDuet: cDuet.checked, allowStitch: cStitch.checked,
+        disclose: disclose.checked, brandOrganic: own.checked, brandContent: branded.checked } }));
+      close(); S.busy = true; updateDetail(); startPolling();
+      toast('Wird hochgeladen. Nach dem Hochladen kann es ein paar Minuten dauern, bis das Video auf deinem Profil erscheint.');
+    } catch (x) { toast(x.message, true); btn.textContent = 'Auf TikTok posten'; update(); }
+  };
+  const preview = h('video', { src: `/api/videos/${v.id}/file`, controls: true, preload: 'metadata', playsinline: true, class: 'ttprev' });
+  const avatar = h('div', { class: 'ttavatar' }); if (info.avatar) avatar.style.backgroundImage = `url("${info.avatar}")`;
+  const modal = h('div', { class: 'modal', onclick: (e) => { if (e.target === modal) close(); } },
+    h('div', { class: 'sheet narrow' },
+      h('button', { class: 'close', onclick: close, title: 'Schließen' }, '×'),
+      h('h2', {}, 'Auf TikTok posten'),
+      h('div', { class: 'ttwho' }, avatar, h('div', {}, h('b', {}, info.nickname || info.username), h('div', { class: 'hint' }, 'Wird gepostet auf: @' + info.username))),
+      preview,
+      tooLong ? h('div', { class: 'status err' }, `Dieses Konto erlaubt höchstens ${info.maxDuration} Sekunden.`) : null,
+      h('label', {}, 'Titel'), title,
+      h('label', {}, 'Wer darf das Video sehen?'), privacy,
+      h('label', {}, 'Erlauben'),
+      h('div', { class: 'row' },
+        h('label', { class: 'check', title: info.commentDisabled ? 'In deiner TikTok-App ausgeschaltet' : '' }, cComment, 'Kommentare'),
+        h('label', { class: 'check', title: info.duetDisabled ? 'In deiner TikTok-App ausgeschaltet' : '' }, cDuet, 'Duett'),
+        h('label', { class: 'check', title: info.stitchDisabled ? 'In deiner TikTok-App ausgeschaltet' : '' }, cStitch, 'Stitch')),
+      h('label', { class: 'check', style: { marginTop: '10px' } }, disclose, 'Inhalt offenlegen (Werbung / kommerzieller Inhalt)'),
+      h('p', { class: 'hint' }, 'Einschalten, wenn das Video für dich selbst, eine Marke, ein Produkt oder eine Dienstleistung wirbt.'),
+      discloseBox,
+      label, declaration, why, btn));
+  discloseBox.append(
+    h('label', { class: 'check' }, own, 'Deine Marke – du wirbst für dich selbst oder dein eigenes Unternehmen'),
+    h('label', { class: 'check' }, branded, 'Markeninhalt – du wirbst für eine andere Marke oder einen Dritten'));
+  document.body.append(modal);
+  update();
+}
+
 function platformBox(box, v, key, label, color) {
   const s = v[key] || { state: 'none' };
   const platform = key === 'yt' ? 'youtube' : 'tiktok';
@@ -571,8 +691,10 @@ function platformBox(box, v, key, label, color) {
         s.url ? h('a', { class: 'btn small ghost', href: s.url, target: '_blank', rel: 'noopener' }, 'Ansehen') : null),
         s.studio && chName ? h('div', { class: 'hint' }, `Zeigt Studio „Ein Fehler ist aufgetreten“? Dann ist dort ein anderer Kanal aktiv: oben rechts aufs Profilbild → „Konto wechseln“ → „${chName}“ wählen und den Link erneut öffnen.`) : null);
     } else {
-      kids.push(h('div', { class: 'status ok-text' }, s.manual ? '✓ Als erledigt markiert ' : '✓ Im TikTok-Posteingang ', s.profileName ? 'von „' + s.profileName + '“ ' : '', fmtDate(s.at)),
-        s.manual ? null : h('div', { class: 'status' }, s.note || 'Öffne die TikTok-App → Posteingang → Benachrichtigungen → Meldung antippen → Text einfügen → Posten.'),
+      const direct = s.mode === 'direct';
+      kids.push(h('div', { class: 'status ok-text' }, s.manual ? '✓ Als erledigt markiert ' : direct ? '✓ Auf TikTok veröffentlicht ' : '✓ Im TikTok-Posteingang ', s.profileName ? 'von „' + s.profileName + '“ ' : '', fmtDate(s.at)),
+        s.manual || direct ? null : h('div', { class: 'status' }, s.note || 'Öffne die TikTok-App → Posteingang → Benachrichtigungen → Meldung antippen → Text einfügen → Posten.'),
+        direct ? h('div', { class: 'hint' }, 'Es kann ein paar Minuten dauern, bis das Video auf deinem Profil erscheint.') : null,
         s.manual ? null : ttStatusLine(v, s),
         s.url ? h('a', { class: 'btn small ghost', href: s.url, target: '_blank', rel: 'noopener' }, 'Ansehen') : null);
     }
@@ -580,7 +702,10 @@ function platformBox(box, v, key, label, color) {
   const actions = h('div', { class: 'row', style: { marginTop: '8px' } });
   if (['none', 'error', 'done'].includes(s.state)) {
     if (!conn) actions.append(h('span', { class: 'hint' }, `${label} ist für „${target?.name || '–'}“ nicht verbunden – `), h('a', { href: '#einstellungen' }, 'Einstellungen'));
-    else actions.append(h('button', { class: btnClass, onclick: doUpload }, s.state === 'done' ? upLabel.replace('▲', '↻ Erneut:') : s.state === 'error' ? '↻ Erneut versuchen' : upLabel));
+    else {
+      actions.append(h('button', { class: btnClass, onclick: doUpload }, s.state === 'done' ? upLabel.replace('▲', '↻ Erneut:') : s.state === 'error' ? '↻ Erneut versuchen' : upLabel));
+      if (key === 'tt' && S.settings?.tiktok?.directPost) actions.append(h('button', { class: 'btn small primary', onclick: async () => { await detail.ensureSaved().catch(() => {}); tiktokPostDialog(v); } }, '▶ Direkt auf TikTok posten …'));
+    }
     if (s.state !== 'done') actions.append(h('button', { class: 'btn small ghost', onclick: markDone }, 'Schon erledigt'));
   }
   if (key === 'tt' && isVertical(v) === false && v.width) kids.push(h('div', { class: 'hint' }, 'Hinweis: Querformat – auf TikTok wirkt Hochformat (9:16) besser.'));
@@ -1040,6 +1165,7 @@ async function renderSettings() {
   const tKey = h('input', { value: t.clientKey, placeholder: 'Client Key' });
   const tSecret = h('input', { type: 'password', placeholder: t.hasSecret ? '•••••• gespeichert' : 'Client Secret', autocomplete: 'off' });
   const tRedirect = h('input', { value: t.redirectUri || suggest, placeholder: 'https://…/oauth/tiktok' });
+  const tDirect = h('input', { type: 'checkbox', checked: !!t.directPost });
   const tiktokBox = h('div', { class: 'box' }, h('h3', {}, h('span', { class: 'dot', style: { background: 'var(--tt)' } }), ' TikTok-App (für alle TikTok-Konten)'),
     t.configured ? h('p', { class: 'ok-text' }, '✓ eingerichtet') : null,
     h('ol', { class: 'steps' },
@@ -1049,8 +1175,11 @@ async function renderSettings() {
         ? h('li', {}, 'Redirect URI bei TikTok und hier: ', h('code', {}, location.origin + '/oauth/tiktok'), ' ', h('button', { class: 'btn small', onclick: () => copy(location.origin + '/oauth/tiktok') }, '⧉'))
         : h('li', {}, 'Redirect URI muss https sein: Zentrale über Nginx Proxy Manager per https öffnen (dann wird sie hier vorgeschlagen).')),
     h('label', {}, 'Client Key'), tKey, h('label', {}, 'Client Secret'), tSecret, h('label', {}, 'Redirect URI'), tRedirect,
+    h('label', { class: 'check', style: { marginTop: '10px' } }, tDirect, 'Direkt veröffentlichen erlauben (Direct Post, Text geht mit)'),
+    h('p', { class: 'hint' }, 'Dafür in der TikTok-App bei „Content Posting API“ Direct Post einschalten und den Scope video.publish hinzufügen, hier speichern und danach jeden Kanal unter „TikTok“ einmal trennen und neu verbinden. '
+      + 'Solange TikTok die App nicht geprüft hat, sind direkt gepostete Videos nur für dich sichtbar („Nur ich“).'),
     h('div', { class: 'row', style: { marginTop: '12px' } },
-      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/tiktok/config', { clientKey: tKey.value, clientSecret: tSecret.value, redirectUri: tRedirect.value }), 'Gespeichert.') }, 'Speichern')));
+      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/tiktok/config', { clientKey: tKey.value, clientSecret: tSecret.value, redirectUri: tRedirect.value, directPost: tDirect.checked }), 'Gespeichert.') }, 'Speichern')));
 
   // ----- Claude -----
   const a = st.ai;

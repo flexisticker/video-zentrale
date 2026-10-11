@@ -1,5 +1,6 @@
-// TikTok Content Posting API: Video als Entwurf in den TikTok-Posteingang ("Upload"-Weg, Scope video.upload).
-// Veröffentlichen (Text, Sichtbarkeit) macht man danach in der TikTok-App.
+// TikTok Content Posting API: Video als Entwurf in den TikTok-Posteingang ("Upload"-Weg, Scope video.upload)
+// oder – wenn eingeschaltet – direkt veröffentlichen ("Direct Post", Scope video.publish) mit Text und Einstellungen,
+// nach den TikTok Content Sharing Guidelines (Kontoinfo live, Sichtbarkeit ohne Vorauswahl, Kennzeichnung, Musik-Bestätigung).
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { db, saveNow } from './store.js';
@@ -7,7 +8,7 @@ import * as profiles from './profiles.js';
 
 const AUTH = process.env.TT_AUTH_BASE || 'https://www.tiktok.com';
 const API = process.env.TT_API_BASE || 'https://open.tiktokapis.com';
-const SCOPE = 'user.info.basic,video.upload';
+const scope = () => 'user.info.basic,video.upload' + (cfg().directPost ? ',video.publish' : '');
 const CHUNK = 10 * 1024 * 1024; // 5–64 MB, letzter Teil darf größer sein (bis 128 MB)
 const SINGLE_MAX = 64 * 1000 * 1000; // bis hierhin in einem Stück (TikTok: chunk_size darf nie größer als das Video sein)
 
@@ -20,11 +21,12 @@ const conn = (p) => p.tiktok;
 export function status() {
   const c = cfg();
   return { configured: !!(c.clientKey && c.clientSecret && c.redirectUri), clientKey: c.clientKey,
-    hasSecret: !!c.clientSecret, redirectUri: c.redirectUri };
+    hasSecret: !!c.clientSecret, redirectUri: c.redirectUri, directPost: !!c.directPost };
 }
 
-export function configure({ clientKey, clientSecret, redirectUri }) {
+export function configure({ clientKey, clientSecret, redirectUri, directPost }) {
   const c = cfg();
+  if (typeof directPost === 'boolean') c.directPost = directPost;
   if (typeof clientKey === 'string') c.clientKey = clientKey.trim();
   if (typeof clientSecret === 'string' && clientSecret.trim()) c.clientSecret = clientSecret.trim();
   if (typeof redirectUri === 'string') {
@@ -46,7 +48,7 @@ export function authUrl(p) {
   if (!c.clientKey || !c.clientSecret || !c.redirectUri) throw new Error('Erst Client Key, Client Secret und Redirect URI eintragen.');
   const state = crypto.randomBytes(16).toString('hex');
   states.set(state, { until: Date.now() + 15 * 60_000, profileId: p.id });
-  const q = new URLSearchParams({ client_key: c.clientKey, scope: SCOPE, response_type: 'code',
+  const q = new URLSearchParams({ client_key: c.clientKey, scope: scope(), response_type: 'code',
     redirect_uri: c.redirectUri, state });
   return AUTH + '/v2/auth/authorize/?' + q;
 }
@@ -119,15 +121,24 @@ function apiErr(j, fallback) {
   return fallback;
 }
 
-export async function upload(p, filePath, progress) {
+export async function upload(p, filePath, progress, direct = null) {
   const size = fs.statSync(filePath).size;
   // Regeln laut TikTok Media Transfer Guide: chunk_size 5–64 MB (kleiner Rest im letzten Stück), Anzahl = abgerundet
   // video_size / chunk_size, Videos bis 64 MB als ein einziges Stück (chunk_size = video_size).
   const chunk = size <= SINGLE_MAX ? size : CHUNK;
   const count = Math.max(1, Math.floor(size / chunk));
-  const r = await fetch(API + '/v2/post/publish/inbox/video/init/', { method: 'POST',
-    headers: { Authorization: 'Bearer ' + await token(p), 'Content-Type': 'application/json; charset=UTF-8' },
-    body: JSON.stringify({ source_info: { source: 'FILE_UPLOAD', video_size: size, chunk_size: chunk, total_chunk_count: count } }) });
+  const source_info = { source: 'FILE_UPLOAD', video_size: size, chunk_size: chunk, total_chunk_count: count };
+  const r = direct
+    ? await fetch(API + '/v2/post/publish/video/init/', { method: 'POST',
+      headers: { Authorization: 'Bearer ' + await token(p), 'Content-Type': 'application/json; charset=UTF-8' },
+      body: JSON.stringify({ post_info: {
+        title: String(direct.title || '').slice(0, 2200), privacy_level: direct.privacy,
+        disable_comment: !direct.allowComment, disable_duet: !direct.allowDuet, disable_stitch: !direct.allowStitch,
+        brand_organic_toggle: !!direct.brandOrganic, brand_content_toggle: !!direct.brandContent,
+      }, source_info }) })
+    : await fetch(API + '/v2/post/publish/inbox/video/init/', { method: 'POST',
+      headers: { Authorization: 'Bearer ' + await token(p), 'Content-Type': 'application/json; charset=UTF-8' },
+      body: JSON.stringify({ source_info }) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || !j.data?.upload_url) throw new Error(apiErr(j, 'Upload-Start fehlgeschlagen (' + r.status + ')'));
   const { publish_id: publishId, upload_url: url } = j.data;
@@ -153,7 +164,20 @@ export async function upload(p, filePath, progress) {
   return publishId;
 }
 
-// PROCESSING_UPLOAD → SEND_TO_USER_INBOX (fertig, Hinweis in der App) | FAILED
+// Kontoinfo direkt vor dem Posten (Pflicht laut TikTok): Name, Bild, erlaubte Sichtbarkeiten, gesperrte Interaktionen, max. Länge
+export async function creatorInfo(p) {
+  const r = await fetch(API + '/v2/post/publish/creator_info/query/', { method: 'POST',
+    headers: { Authorization: 'Bearer ' + await token(p), 'Content-Type': 'application/json; charset=UTF-8' } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || (j.error?.code && j.error.code !== 'ok')) throw new Error(apiErr(j, 'Kontoinfo nicht abrufbar (' + r.status + ')'));
+  const d = j.data || {};
+  return { avatar: d.creator_avatar_url || '', username: d.creator_username || '', nickname: d.creator_nickname || '',
+    privacyOptions: Array.isArray(d.privacy_level_options) ? d.privacy_level_options : [],
+    commentDisabled: !!d.comment_disabled, duetDisabled: !!d.duet_disabled, stitchDisabled: !!d.stitch_disabled,
+    maxDuration: Number(d.max_video_post_duration_sec) || 0 };
+}
+
+// PROCESSING_UPLOAD → SEND_TO_USER_INBOX (Entwurf zugestellt) bzw. PUBLISH_COMPLETE (veröffentlicht) | FAILED
 export async function checkStatus(p, publishId) {
   const r = await fetch(API + '/v2/post/publish/status/fetch/', { method: 'POST',
     headers: { Authorization: 'Bearer ' + await token(p), 'Content-Type': 'application/json; charset=UTF-8' },

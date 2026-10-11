@@ -216,3 +216,26 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .cutplan textarea { width: 100%; }
 
 input[type=range] { width: 100%; accent-color: #7c5cff; }
+
+/* Zum Posten (Handy) */
+.posting { max-width: 680px; margin: 0 auto; display: grid; gap: 14px; }
+.post { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: grid; gap: 10px; }
+.phead { display: flex; gap: 12px; align-items: center; }
+.pthumb { width: 96px; aspect-ratio: 16 / 9; flex: 0 0 auto; border-radius: 8px; background: #000 center / cover no-repeat; }
+.pthumb.vert { width: 54px; aspect-ratio: 9 / 16; }
+.ptitle { font-weight: 600; margin-bottom: 4px; }
+.ptext { white-space: pre-wrap; font-size: 14px; background: var(--panel2); border-radius: 10px; padding: 10px; max-height: 160px; overflow: auto; }
+.psteps { display: grid; gap: 8px; }
+.btn.big { padding: 14px 16px; font-size: 16px; justify-content: center; text-align: center; width: 100%; }
+.btn.ok { background: #1f7a4a; border-color: #1f7a4a; color: #fff; }
+@media (max-width: 860px) {
+  .tabs { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+  .tabs .tab { flex: 0 0 auto; }
+}
+@media (display-mode: standalone) { body { padding-top: env(safe-area-inset-top); } }
+
+/* TikTok direkt posten */
+.ttwho { display: flex; gap: 10px; align-items: center; margin: 8px 0; }
+.ttavatar { width: 40px; height: 40px; border-radius: 50%; background: var(--panel2) center / cover no-repeat; }
+.ttprev { max-height: 320px; }
+.disc { display: grid; gap: 6px; padding: 8px 0 0 26px; }

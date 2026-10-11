@@ -97,7 +97,7 @@ function normalize(raw) {
     if (raw.tiktok?.refreshToken) p.tiktok = { refreshToken: raw.tiktok.refreshToken, refreshExpires: raw.tiktok.refreshExpires || 0, user: raw.tiktok.user || null };
   }
   state.youtube = { clientId: raw.youtube?.clientId || '', clientSecret: raw.youtube?.clientSecret || '' };
-  state.tiktok = { clientKey: raw.tiktok?.clientKey || '', clientSecret: raw.tiktok?.clientSecret || '', redirectUri: raw.tiktok?.redirectUri || '' };
+  state.tiktok = { clientKey: raw.tiktok?.clientKey || '', clientSecret: raw.tiktok?.clientSecret || '', redirectUri: raw.tiktok?.redirectUri || '', directPost: !!raw.tiktok?.directPost };
   state.ai = { ...base.ai, ...raw.ai };
   state.fal = { ...base.fal, ...raw.fal };
   state.music = { ...base.music, ...raw.music };
