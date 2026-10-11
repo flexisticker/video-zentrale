@@ -1,0 +1,52 @@
+// Nachbau der Google-/YouTube- und TikTok-Schnittstellen für lokale Tests.
+import http from 'node:http';
+const log = [];
+let tokenCalls = 0, ytFailOnce = true;
+const yt = { size: 0, got: 0 }, tt = { size: 0, got: 0, chunks: 0 };
+const body = (req) => new Promise((r) => { const c = []; req.on('data', (d) => c.push(d)); req.on('end', () => r(Buffer.concat(c))); });
+const json = (res, s, j, h = {}) => { res.writeHead(s, { 'Content-Type': 'application/json', ...h }); res.end(JSON.stringify(j)); };
+http.createServer(async (req, res) => {
+  const u = new URL(req.url, 'http://x'); const b = await body(req);
+  const p = u.pathname;
+  log.push({ m: req.method, p, range: req.headers['content-range'], len: b.length });
+  if (p === '/_log') return json(res, 200, { log, yt, tt });
+  if (p === '/device/code') return json(res, 200, { device_code: 'dev1', user_code: 'ABCD-EFGH', verification_url: 'https://www.google.com/device', interval: 1, expires_in: 600 });
+  if (p === '/token') {
+    const f = new URLSearchParams(b.toString());
+    if (f.get('grant_type').includes('device_code')) {
+      if (++tokenCalls < 2) return json(res, 428, { error: 'authorization_pending' });
+      return json(res, 200, { access_token: 'at1', refresh_token: 'rt1', expires_in: 3600 });
+    }
+    return json(res, 200, { access_token: 'at2', expires_in: 3600 });
+  }
+  if (p === '/youtube/v3/channels') return json(res, 200, { items: [{ id: 'UC1', snippet: { title: 'Testkanal' } }] });
+  if (p === '/upload/youtube/v3/videos') {
+    yt.meta = JSON.parse(b.toString()); yt.size = Number(req.headers['x-upload-content-length']); yt.got = 0;
+    res.writeHead(200, { Location: 'http://127.0.0.1:9300/yt-session' }); return res.end();
+  }
+  if (p === '/yt-session') {
+    const cr = req.headers['content-range'];
+    if (cr.startsWith('bytes */')) { res.writeHead(308, yt.got ? { Range: `bytes=0-${yt.got - 1}` } : {}); return res.end(); }
+    const [, s, e] = /bytes (\d+)-(\d+)/.exec(cr).map(Number);
+    if (s > 0 && ytFailOnce) { ytFailOnce = false; return json(res, 503, { error: { message: 'kurz weg' } }); }
+    if (s !== yt.got) return json(res, 400, { error: { message: 'falscher Offset ' + s } });
+    yt.got = e + 1;
+    if (yt.got >= yt.size) return json(res, 200, { id: 'vid123', status: { privacyStatus: 'private' } });
+    res.writeHead(308, { Range: `bytes=0-${e}` }); return res.end();
+  }
+  if (p === '/upload/youtube/v3/thumbnails/set') { yt.thumb = { len: b.length, type: req.headers['content-type'] }; return json(res, 200, {}); }
+  if (p === '/v2/oauth/token/') return json(res, 200, { access_token: 'tt-at', refresh_token: 'tt-rt', expires_in: 86400, refresh_expires_in: 31536000, open_id: 'o1' });
+  if (p === '/v2/user/info/') return json(res, 200, { data: { user: { display_name: 'TestTok' } }, error: { code: 'ok' } });
+  if (p === '/v2/post/publish/inbox/video/init/') {
+    const j = JSON.parse(b.toString()); tt.init = j.source_info; tt.size = j.source_info.video_size; tt.got = 0; tt.chunks = 0;
+    return json(res, 200, { data: { publish_id: 'pub1', upload_url: 'http://127.0.0.1:9300/tt-up' }, error: { code: 'ok' } });
+  }
+  if (p === '/tt-up') {
+    const [, s, e] = /bytes (\d+)-(\d+)/.exec(req.headers['content-range']).map(Number);
+    if (s !== tt.got || b.length !== e - s + 1) return json(res, 400, {});
+    tt.got = e + 1; tt.chunks++;
+    res.writeHead(tt.got >= tt.size ? 201 : 206); return res.end();
+  }
+  if (p === '/v2/post/publish/status/fetch/') return json(res, 200, { data: { status: tt.got >= tt.size ? 'SEND_TO_USER_INBOX' : 'PROCESSING_UPLOAD' }, error: { code: 'ok' } });
+  json(res, 404, { error: 'mock 404 ' + p });
+}).listen(9300, () => console.log('mock 9300'));
