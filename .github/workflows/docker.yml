@@ -38,6 +38,7 @@ jobs:
           labels: |
             de.flexisticker.version=${{ steps.ver.outputs.version }}
             de.flexisticker.build=${{ github.run_number }}
+            org.opencontainers.image.title=Micha's Video-Zentrale
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -45,5 +46,9 @@ jobs:
           platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_NUMBER=${{ github.run_number }}
+            GIT_COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

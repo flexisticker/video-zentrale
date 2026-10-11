@@ -32,6 +32,11 @@ RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY server ./server
 COPY public ./public
 COPY fonts ./fonts
+# Versionierung: setzt die GitHub Action (Build-Nummer, Commit, Datum)
+ARG BUILD_NUMBER=""
+ARG GIT_COMMIT=""
+ARG BUILD_DATE=""
+ENV BUILD_NUMBER=$BUILD_NUMBER GIT_COMMIT=$GIT_COMMIT BUILD_DATE=$BUILD_DATE
 # Unraid: Eintrag „WebUI“ im Container-Menü
 LABEL net.unraid.docker.webui="http://[IP]:[PORT:8090]/"
 EXPOSE 8090

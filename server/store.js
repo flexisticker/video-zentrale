@@ -17,6 +17,7 @@ export const defaultProfiles = () => [
     keywords: 'gaming, gameplay, lets play, letsplay, zocken, clutch, stream, twitch, ps5, xbox, controller, fortnite, minecraft, '
       + 'valorant, warzone, call of duty, cod, apex, gta, fifa, ea fc, rocket league, cs2, league of legends, elden ring, '
       + 'zelda, mario, pokemon, ranked, boss',
+    musicStyle: 'modern energetic gaming background music, electronic beats, punchy drums, synth bass', musicMood: 'energisch',
     ...emptyConnections() },
   { id: '3dbymicha', name: '3dbymicha', color: '#25c4f4', isDefault: false, category: '28', tags: '3d-druck, 3d druck, bambu lab', footer: '',
     aiStyle: 'Gewerblicher Kanal rund um 3D-Druck (Bambu Lab A1 / A1 mini) und Druck von Flexisticker (Tassen, Textilien): '
@@ -24,6 +25,7 @@ export const defaultProfiles = () => [
     keywords: '3d, 3d-druck, 3d druck, 3ddruck, 3d print, 3d printing, 3d-drucker, drucker, bambu, bambulab, a1 mini, ams, '
       + 'filament, pla, petg, tpu, slicer, druckbett, nozzle, cad, fusion 360, tinkercad, makerworld, printables, flexisticker, '
       + 'tasse, tassen, sublimation, dtf, plotter, textildruck, werkstatt',
+    musicStyle: 'light upbeat corporate background music, acoustic and soft electronic, positive, modern workshop vibe', musicMood: 'fröhlich',
     ...emptyConnections() },
 ];
 
@@ -38,6 +40,8 @@ const empty = () => ({
   ai: { apiKey: '', auto: true, hints: '', spent: 0, count: 0 },  // Claude (Anthropic-API)
   fal: { key: '', count: 0, model: 'fal-ai/flux-pro/kontext', boosts: 0,     // fal.ai: Freistellen + KI-Aufwertung
     genModel: 'fal-ai/nano-banana/edit', autoThumb: true, generated: 0 },     //   + KI-Titelbild aus Foto & Standbild
+  music: { enabled: true, shorts: true, long: false, source: 'mixed', level: 'mittel', duck: true, longMax: 180,  // Hintergrundmusik
+    model: 'sonilo/v1.1/text-to-music', generated: 0, spent: 0, recent: [] },
   photos: [],                                                      // Fotos des Creators für Titelbilder
   cut: { auto: true, longVersion: true, cutPauses: true, silenceDb: -45, minPause: 20, shorts: 3, shortMin: 30, shortMax: 45,
     moveRaw: true, whisper: { enabled: true, model: 'small', threads: 4, gpu: true },
@@ -71,6 +75,7 @@ export function load() {
   state.tiktok = { clientKey: raw.tiktok?.clientKey || '', clientSecret: raw.tiktok?.clientSecret || '', redirectUri: raw.tiktok?.redirectUri || '' };
   state.ai = { ...base.ai, ...raw.ai };
   state.fal = { ...base.fal, ...raw.fal };
+  state.music = { ...base.music, ...raw.music };
   state.photos = Array.isArray(raw.photos) ? raw.photos : [];
   state.cut = { ...base.cut, ...raw.cut, whisper: { ...base.cut.whisper, ...raw.cut?.whisper },
     captions: { ...base.cut.captions, ...raw.cut?.captions }, facecam: { ...base.cut.facecam, ...raw.cut?.facecam },
@@ -82,6 +87,8 @@ export function load() {
     p.youtube = { ...c.youtube, ...p.youtube };
     p.tiktok = { ...c.tiktok, ...p.tiktok };
     if (p.aiStyle === undefined) p.aiStyle = defaults[p.id]?.aiStyle || '';
+    if (p.musicStyle === undefined) p.musicStyle = defaults[p.id]?.musicStyle || '';
+    if (p.musicMood === undefined) p.musicMood = defaults[p.id]?.musicMood || '';
   }
   return state;
 }

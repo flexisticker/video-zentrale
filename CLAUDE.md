@@ -1,4 +1,7 @@
-# Video-Zentrale – Projektgedächtnis
+# Micha’s Video-Zentrale – Projektgedächtnis
+
+Name in der Oberfläche seit 1.6.0: **Micha’s Video-Zentrale** (`APP_NAME` in `server/version.js` und `public/app.js`).
+Repo/Image-Name bleibt `video-zentrale`.
 
 Keine Passwörter, Tokens oder API-Schlüssel hier eintragen. Kommunikation mit dem Kunden auf **Deutsch, Du-Form**
 (gleicher Kunde wie Flex-Studio / `flexisticker/tassenanimierer`, Unraid-Server `PowerServer` 192.168.1.10).
@@ -16,7 +19,8 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
 
 - Image `ghcr.io/flexisticker/video-zentrale:latest` (GitHub Action bei Push auf `main`), Unraid Host-Port 8094 → 8090,
   `/videos` → `/mnt/user/videos`, `/data` → `/mnt/user/appdata/video-zentrale`.
-- Versionierung: `package.json` erhöhen (Funktion = Nebenversion, Fehler = Korrektur), danach Push auf `main`.
+- Versionierung: `package.json` erhöhen (Funktion = Nebenversion, Fehler = Korrektur) **und oben in `server/changelog.js` eintragen**,
+  danach Push auf `main`. Build-Nummer/Commit/Datum kommen per build-args aus der Action (`BUILD_NUMBER`, `GIT_COMMIT`, `BUILD_DATE`).
 - Ende jeder Aufgabe: Docker-Update in Unraid erwähnen („Check for Updates“ → „apply update“).
 
 ## Technik
@@ -71,8 +75,18 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   **KI-Titelbild** (Claude-Schema `aiThumb {frame, photo, text, scene}`, `thumbs.generateAi()` → `fal-ai/nano-banana/edit`
   mit Foto + Standbild, 16:9, 0,04 $ → Variante 5, `fal.autoThumb`, `fal.genModel`). Workflow schafft vor dem Build Platz.
   **Nicht getestet:** CUDA-Whisper auf der echten GTX 1050 Ti, Nano Banana mit echten Fotos des Kunden.
-- Musik/Sound: Epidemic Sound hat keine API für uns → Kunde lädt Titel selbst herunter. KI-Alternative (angeboten, nicht gebaut):
-  Sonilo (fal, „commercial-use-safe“) video-to-music 0,009 $/s, text-to-music 0,0025 $/s, Sound-Effekte 0,0018–0,009 $/s.
+- 1.6.0 (11.10.2026): **Hintergrundmusik** (`server/music.js`, `db().music`): Ordner `/videos/musik` (+ `<kanal-id>/`, Stimmungsordner
+  `MOODS`), sonst KI-Musik `sonilo/v1.1/text-to-music` (fal, Eingabe prompt/duration/num_samples → `audio.url` m4a, 0,0025 $/s, mind. 10 s;
+  Schema am 11.10. per Connector geprüft) → `musik/ki/` + `.txt`-Nachweis. Claude liefert je Short `mood` + `music` (englisch).
+  `mixGraph()`: Musik loudnorm auf −28 LUFS (leise −32/laut −24), `sidechaincompress` mit der Stimme, amix, alimiter; Langfassung mit
+  `-stream_loop -1` und `-c:v copy`. Fehler beim Mischen → Clip ohne Musik + Warnung. Profil: `musicStyle`, `musicMood`.
+  **Versionierung** (`server/version.js`, `server/changelog.js`, `/api/version`, `/api/version/check`): Chip oben rechts, „Was ist neu“
+  einmal je Browser (`localStorage vz-version`), Update-Prüfung über anonymen ghcr-Token → Manifest → Config-Labels.
+  **Name** „Micha’s Video-Zentrale“. Getestet (Mock-fal + Playwright): KI-Musik je Short, eigene Titel nach Stimmung/Kanal, Langfassung
+  mit Schleife, Ducking ca. −18 dB, Was ist neu, Einstellungen. **Nicht getestet:** echte Sonilo-Musik, echte Epidemic-Dateien,
+  Label-Abruf auf ghcr.io (Blob-Download in der Sandbox gesperrt, Token + Manifest gingen).
+- Netzwerk Kunde: `videos.flexisticker.de` braucht wie `studio` einen lokalen UniFi-DNS-Eintrag → 192.168.1.111 (NPM), sonst kommt
+  die Anfrage über die öffentliche IP (Hairpin-NAT) und die Access List „Nur Heimnetz“ antwortet 403.
 - Ideen: KI-B-Roll per fal.ai (Video-Modelle), Viralitäts-Bewertung, Hook-Einblendung, Zeitplan.
 - Entscheidung Kunde: Auslieferungen immer direkt auf `main` pushen.
 - Ideen: Zeitplan (publishAt), Shorts automatisch aus langen Videos, Titelbild-Vorlagen, Untertitel (whisper).

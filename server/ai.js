@@ -258,13 +258,15 @@ export async function chooseHighlights(v, cands, segs, c) {
   }
   const schemaH = {
     type: 'object', additionalProperties: false, required: ['shorts'],
-    properties: { shorts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['candidate', 'start', 'end', 'title', 'reason'],
+    properties: { shorts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['candidate', 'start', 'end', 'title', 'reason', 'mood', 'music'],
       properties: {
         candidate: { type: 'integer', description: 'Nummer des Kandidaten' },
         start: { type: 'number', description: 'Start in Sekunden ab Videoanfang' },
         end: { type: 'number', description: 'Ende in Sekunden ab Videoanfang' },
         title: { type: 'string', description: 'Kurzer, packender Titel für den Short (höchstens 70 Zeichen)' },
         reason: { type: 'string', description: 'Ein Satz: warum diese Stelle' },
+        mood: { type: 'string', enum: ['episch', 'lustig', 'spannend', 'chillig', 'energisch', 'fröhlich', 'traurig'], description: 'Stimmung der Stelle (für Hintergrundmusik)' },
+        music: { type: 'string', description: 'English, one short phrase: fitting instrumental background music (genre, tempo, instruments), e.g. "fast hype trap beat with heavy 808s"' },
       } } } },
   };
   let r;
@@ -290,7 +292,8 @@ export async function chooseHighlights(v, cands, segs, c) {
     if (end - start > c.shortMax) end = start + c.shortMax;
     if (end - start < Math.min(c.shortMin, 10)) continue;
     if (picked.some((p) => start < p.end && end > p.start)) continue;
-    picked.push({ start: Math.round(start * 10) / 10, end: Math.round(end * 10) / 10, title: String(s.title || '').slice(0, 100), reason: String(s.reason || '').slice(0, 300) });
+    picked.push({ start: Math.round(start * 10) / 10, end: Math.round(end * 10) / 10, title: String(s.title || '').slice(0, 100), reason: String(s.reason || '').slice(0, 300),
+      mood: String(s.mood || ''), music: String(s.music || '').slice(0, 200) });
   }
   return picked;
 }

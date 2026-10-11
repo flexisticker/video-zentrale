@@ -1,0 +1,23 @@
+// Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
+export const CHANGELOG = [
+  { version: '1.6.0', date: '11.10.2026', items: [
+    'Neuer Name: Micha’s Video-Zentrale.',
+    'Hintergrundmusik: eigene Titel aus dem Ordner „musik“ (z. B. Epidemic Sound, je Kanal und Stimmung) oder KI-Musik über fal.ai (Sonilo, kommerziell nutzbar).',
+    'Musik wird unter die Stimme gemischt und automatisch leiser, sobald du sprichst. Claude wählt je Short Stimmung und Musikstil.',
+    'Versionierung: Version und Build oben rechts und in den Einstellungen, „Was ist neu“ nach jedem Update, Hinweis wenn ein neues Update bereitsteht.',
+  ] },
+  { version: '1.5.0', date: '11.10.2026', items: [
+    'Whisper (Sprache → Text) läuft auf der Grafikkarte, sonst automatisch auf dem Prozessor.',
+    'Nachtbetrieb: neue Aufnahmen nur in einem Zeitfenster schneiden (z. B. 01:00–07:00).',
+    'KI-Titelbild: aus deinem Foto, einem Standbild und Claudes Idee malt die KI ein komplettes Titelbild.',
+  ] },
+  { version: '1.4.1', date: '11.10.2026', items: ['Freigestellte Fotos werden in den Einstellungen sofort ohne Hintergrund angezeigt.'] },
+  { version: '1.4.0', date: '11.10.2026', items: [
+    'Kodieren auf der Grafikkarte (NVENC), animierte Untertitel in Shorts, Facecam-Layout.',
+    'Titelbilder mit deinen Fotos (fal.ai freistellen), KI-Aufwertung.',
+  ] },
+  { version: '1.3.0', date: '11.10.2026', items: ['Automatischer Schnitt (Langfassung + Shorts), Whisper-Transkript, Anmeldung bei YouTube/TikTok mit einem Klick (https).'] },
+  { version: '1.2.0', date: '11.10.2026', items: ['Claude schlägt Titel, Beschreibung, Tags, Kanal und Titelbild vor.'] },
+  { version: '1.1.0', date: '11.10.2026', items: ['Zwei Kanäle (MichaModus, 3dbymicha) mit eigenen YouTube-/TikTok-Verbindungen und Kanalvorschlag.'] },
+  { version: '1.0.0', date: '11.10.2026', items: ['Erste Version: Videos prüfen, Texte/Titelbild anpassen, für YouTube (privat) und TikTok (Entwurf) freigeben.'] },
+];

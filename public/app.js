@@ -121,7 +121,7 @@ async function start() {
   };
   app.replaceChildren(h('form', { class: 'login', onsubmit: submit },
     h('img', { src: 'icon.svg', width: 44, height: 44, alt: '' }),
-    h('h1', {}, 'Video-Zentrale'),
+    h('h1', {}, APP_NAME),
     h('p', { class: 'hint' }, s.setup ? 'Erster Start: lege ein Passwort fest (mind. 8 Zeichen).' : 'Bitte anmelden.'),
     pw, pw2 && h('div', { style: { height: '8px' } }), pw2,
     h('div', { style: { height: '12px' } }),
@@ -137,10 +137,57 @@ async function boot() {
     if (r === 'ok') toast('TikTok verbunden' + (q.get('kanal') ? ' für „' + q.get('kanal') + '“.' : '.')); else toast('TikTok: ' + r, true);
   }
   readHash();
-  await Promise.all([refresh(), loadSettings()]);
+  await Promise.all([refresh(), loadSettings(), loadVersion()]);
   render();
+  maybeShowChangelog();
   startPolling();
   bindDrop();
+}
+
+// ---------- Version & Was ist neu ----------
+const APP_NAME = 'Micha\u2019s Video-Zentrale';
+document.title = APP_NAME;
+async function loadVersion() { try { S.version = await api('GET', '/api/version'); } catch { S.version = null; } }
+function versionText() {
+  const v = S.version;
+  if (!v) return '';
+  return 'v' + v.version + (v.build ? ' · Build ' + v.build : '') + (v.date ? ' · ' + new Date(v.date).toLocaleDateString('de-DE') : '');
+}
+function versionChip() {
+  const v = S.version;
+  if (!v) return null;
+  const upd = v.updateAvailable;
+  return h('button', { class: 'vchip' + (upd ? ' upd' : ''), onclick: () => showChangelog(),
+    title: upd ? `Update ${v.latest.version} verfügbar – in Unraid: Docker → „Check for Updates“ → „apply update“` : versionText() + (v.commit ? ' · ' + v.commit : '') },
+    upd ? '⬆ Update ' + v.latest.version : 'v' + v.version);
+}
+function showChangelog(since) {
+  const v = S.version;
+  if (!v) return;
+  const list = since ? v.changelog.filter((c) => newerVersion(c.version, since)) : v.changelog;
+  const modal = h('div', { class: 'modal', onclick: (e) => { if (e.target === modal) modal.remove(); } },
+    h('div', { class: 'sheet narrow' },
+      h('button', { class: 'close', onclick: () => modal.remove(), title: 'Schließen' }, '×'),
+      h('h2', {}, since ? '🎉 Was ist neu' : 'Versionen'),
+      h('p', { class: 'hint' }, APP_NAME + ' ' + versionText() + (v.commit ? ' · ' + v.commit : '')),
+      v.updateAvailable ? h('p', { class: 'upd-text' }, `⬆ Version ${v.latest.version} ist verfügbar. In Unraid: Docker → „Check for Updates“ → „apply update“.`) : null,
+      ...list.map((c) => h('div', { class: 'cl' }, h('b', {}, 'Version ' + c.version), h('span', { class: 'hint' }, ' · ' + c.date),
+        h('ul', {}, c.items.map((i) => h('li', {}, i))))),
+      h('div', { class: 'row', style: { marginTop: '12px' } }, h('button', { class: 'btn primary', onclick: () => modal.remove() }, 'OK'))));
+  document.body.append(modal);
+}
+function newerVersion(a, b) {
+  const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+  return false;
+}
+// Nach einem Update einmal zeigen, was neu ist (je Browser gemerkt)
+function maybeShowChangelog() {
+  const v = S.version;
+  if (!v) return;
+  let seen = '';
+  try { seen = localStorage.getItem('vz-version') || ''; localStorage.setItem('vz-version', v.version); } catch { return; }
+  if (seen && newerVersion(v.version, seen)) showChangelog(seen);
 }
 
 // ---------- Navigation ----------
@@ -191,8 +238,9 @@ function render() {
   mainEl = h('main');
   app.replaceChildren(
     h('header', { class: 'top' },
-      h('div', { class: 'brand' }, h('img', { src: 'icon.svg', alt: '' }), 'Video-Zentrale'),
+      h('div', { class: 'brand' }, h('img', { src: 'icon.svg', alt: '' }), APP_NAME),
       tabs, h('div', { class: 'spacer' }),
+      versionChip(),
       h('button', { class: 'btn', onclick: () => fileInput.click(), title: 'Videos, Titelbilder oder .json hochladen' }, '⤒ Hochladen'), fileInput),
     mainEl);
   updateCounts();
@@ -728,8 +776,11 @@ async function renderSettings() {
     const cat = h('select', {}, CATEGORIES.map(([id, n]) => h('option', { value: id, selected: p.category === id }, n)));
     const tags = h('input', { value: p.tags });
     const footer = h('textarea', { rows: 3, value: p.footer, placeholder: 'z. B. Links zu Discord/Shop, „Musik: Epidemic Sound“' });
+    const mStyle = h('input', { value: p.musicStyle, placeholder: 'englisch, z. B. energetic electronic gaming beat' });
+    const mMood = h('select', {}, h('option', { value: '' }, '– keine –'), (st.music?.moods || []).map((x) => h('option', { value: x, selected: p.musicMood === x }, x)));
     const save = run(() => api('PUT', '/api/profiles/' + p.id, { name: name.value, color: color.value, isDefault: def.checked || undefined,
-      keywords: kw.value, aiStyle: style.value, category: cat.value, tags: tags.value, footer: footer.value }), 'Kanal gespeichert.');
+      keywords: kw.value, aiStyle: style.value, category: cat.value, tags: tags.value, footer: footer.value,
+      musicStyle: mStyle.value, musicMood: mMood.value }), 'Kanal gespeichert.');
 
     // YouTube
     const yp = y.pending[p.id];
@@ -783,6 +834,8 @@ async function renderSettings() {
       h('label', {}, 'Stichwörter für den Vorschlag (mit Komma; Titel/Dateiname zählt doppelt)'), kw,
       h('div', { class: 'two' }, h('div', {}, h('label', {}, 'YouTube-Kategorie'), cat), h('div', {}, h('label', {}, 'Standard-Tags'), tags)),
       h('label', {}, 'Text unter jeder YouTube-Beschreibung'), footer,
+      h('div', { class: 'two' }, h('div', {}, h('label', {}, '🎵 Musikstil für KI-Musik'), mStyle), h('div', {}, h('label', {}, 'Stimmung (Langfassung)'), mMood)),
+      h('p', { class: 'hint' }, `Eigene Titel: ${st.music?.counts?.[p.id] ?? 0} (Ordner musik\\${p.id} + musik)`),
       h('div', { class: 'row', style: { marginTop: '12px' } },
         h('button', { class: 'btn primary', onclick: save }, 'Speichern'),
         st.profiles.length > 1 ? h('button', { class: 'btn ghost danger', onclick: () => confirm(`Kanal „${p.name}“ löschen?`) && run(() => api('DELETE', '/api/profiles/' + p.id), 'Kanal gelöscht.')() }, 'Löschen') : null),
@@ -896,6 +949,29 @@ async function renderSettings() {
         window: { enabled: wnOn.checked, from: wnFrom.value, to: wnTo.value },
         captions: { enabled: capOn.checked, color: capColor.value }, facecam: { enabled: camOn.checked, x: cam.x, y: cam.y, w: cam.w, h: cam.h } }), 'Gespeichert.') }, 'Speichern')));
 
+  // ----- Musik -----
+  const mu = st.music || {};
+  const muOn = cb(mu.enabled), muShorts = cb(mu.shorts), muLong = cb(mu.long), muDuck = cb(mu.duck);
+  const muSrc = h('select', {}, [['mixed', 'Eigene Titel zuerst, sonst KI-Musik'], ['library', 'Nur eigene Titel (Ordner)'], ['ai', 'Immer KI-Musik']]
+    .map(([k, n]) => h('option', { value: k, selected: mu.source === k }, n)));
+  const muLevel = h('select', {}, (mu.levels || []).map((k) => h('option', { value: k, selected: mu.level === k }, k)));
+  const muLongMax = numIn(mu.longMax, { min: 30, max: 600 });
+  const muModel = h('input', { value: mu.model || '' });
+  const musicBox = h('div', { class: 'box' }, h('h3', {}, '🎵 Hintergrundmusik'),
+    h('p', { class: 'hint' }, `Eigene Titel (z. B. von Epidemic Sound) in ${mu.folder || 'musik'} legen – je Kanal in den Unterordner mit der Kanal-ID, nach Stimmung in Unterordner wie „episch“, „lustig“, „chillig“. Sonst erzeugt fal.ai passende KI-Musik (Sonilo, laut Anbieter kommerziell nutzbar, ca. ${String(mu.pricePerMinute ?? 0.15).replace('.', ',')} $ je Minute). Musik wird unter die Stimme gemischt und leiser, sobald du sprichst.`),
+    h('label', { class: 'check' }, muOn, 'Hintergrundmusik einmischen'),
+    h('label', { class: 'check' }, muShorts, 'in Shorts'),
+    h('label', { class: 'check' }, muLong, 'in der Langfassung (Titel wird wiederholt)'),
+    h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Quelle'), muSrc), h('div', {}, h('label', {}, 'Lautstärke'), muLevel)),
+    h('label', { class: 'check' }, muDuck, 'Musik leiser, wenn gesprochen wird (Ducking)'),
+    h('div', { class: 'two' }, h('div', {}, h('label', {}, 'KI-Titel Langfassung max. (s)'), muLongMax), h('div', {}, h('label', {}, 'KI-Modell (fal.ai)'), muModel)),
+    h('p', { class: 'hint' }, `Allgemeiner Ordner: ${mu.common ?? 0} Titel · KI-Musik bisher: ${mu.generated || 0} Titel, ca. ${(mu.spent || 0).toFixed(2).replace('.', ',')} $`
+      + (mu.falConfigured ? '' : ' · ⚠ fal.ai-Schlüssel fehlt (unten bei Titelbilder)')),
+    h('p', { class: 'hint' }, 'Epidemic Sound: deine Kanäle müssen in deinem Epidemic-Konto verknüpft sein, sonst meldet YouTube Urheberrechtsansprüche.'),
+    h('div', { class: 'row', style: { marginTop: '12px' } },
+      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/music/config', { enabled: muOn.checked, shorts: muShorts.checked, long: muLong.checked,
+        duck: muDuck.checked, source: muSrc.value, level: muLevel.value, longMax: Number(muLongMax.value), model: muModel.value }), 'Gespeichert.') }, 'Speichern')));
+
   // ----- Titelbilder & Fotos -----
   const fl = st.fal;
   const fKey = h('input', { type: 'password', autocomplete: 'off', placeholder: fl.configured ? 'gespeichert (' + fl.keyHint + ') – zum Ändern neu eintragen' : 'fal.ai API-Schlüssel' });
@@ -952,7 +1028,9 @@ async function renderSettings() {
     h('div', { class: 'row', style: { marginTop: '12px' } },
       h('button', { class: 'btn', onclick: async () => { try { await api('POST', '/api/password', { old: old.value, password: neu.value }); old.value = neu.value = ''; toast('Passwort geändert.'); } catch (x) { toast(x.message, true); } } }, 'Passwort ändern'),
       h('button', { class: 'btn ghost', onclick: async () => { await api('POST', '/api/logout'); start(); } }, 'Abmelden')),
-    h('p', { class: 'hint', style: { marginTop: '14px' } }, 'Video-Zentrale ' + (st.version || '')));
+    h('p', { class: 'hint', style: { marginTop: '14px' } }, APP_NAME + ' ' + versionText(),
+      ' · ', h('a', { href: '#', onclick: (e) => { e.preventDefault(); showChangelog(); } }, 'Was ist neu'),
+      ' · ', h('a', { href: '#', onclick: async (e) => { e.preventDefault(); S.version = await api('POST', '/api/version/check'); toast(S.version.updateAvailable ? `Update ${S.version.latest.version} verfügbar – in Unraid „Check for Updates“ → „apply update“.` : S.version.latest.error ? 'Prüfung ging nicht: ' + S.version.latest.error : 'Du hast die neueste Version.', !!S.version.latest.error); render(); } }, 'Nach Updates suchen')));
 
   mainEl.replaceChildren(
     h('div', { class: 'bar' }, h('h2', { class: 'h2' }, 'Kanäle'), h('span', { class: 'hint' }, 'Jeder Kanal hat eigene YouTube-/TikTok-Verbindung und Vorgaben. Die Zentrale schlägt je Video den Kanal vor.'),
@@ -960,7 +1038,7 @@ async function renderSettings() {
       h('button', { class: 'btn small', onclick: () => { const n = prompt('Name des neuen Kanals:'); if (n) run(() => api('POST', '/api/profiles', { name: n }), 'Kanal angelegt.')(); } }, '+ Kanal')),
     h('div', { class: 'settings' }, st.profiles.map(channelBox)),
     h('h2', { class: 'h2', style: { marginTop: '24px' } }, 'Apps & Zugang'),
-    h('div', { class: 'settings' }, claudeBox, cutBox, thumbBox, googleBox, tiktokBox, account));
+    h('div', { class: 'settings' }, claudeBox, cutBox, musicBox, thumbBox, googleBox, tiktokBox, account));
 }
 
 start();

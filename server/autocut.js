@@ -9,6 +9,8 @@ import * as lib from './library.js';
 import * as whisper from './whisper.js';
 import * as ai from './ai.js';
 import * as gpu from './gpu.js';
+import * as music from './music.js';
+import * as profiles from './profiles.js';
 import { buildAss } from './captions.js';
 import { fileURLToPath } from 'node:url';
 
@@ -154,17 +156,19 @@ function concatList(file, ranges) {
 
 const LOUDNORM = 'loudnorm=I=-14:TP=-1.5:LRA=11';
 
-async function renderLong(v, file, keep, hasAudio, out, onP) {
+async function renderLong(v, file, keep, hasAudio, out, onP, track) {
   const total = keep.reduce((s, [a, b]) => s + b - a, 0);
-  const audio = hasAudio ? ['-map', '0:a:0', '-af', LOUDNORM, '-c:a', 'aac', '-b:a', '192k'] : [];
+  const mInput = track ? ['-stream_loop', '-1', '-i', track.file] : [];
+  const audio = track ? ['-filter_complex', music.mixGraph({ hasVoice: hasAudio, dur: total }), '-map', '[aout]', '-c:a', 'aac', '-b:a', '192k', '-t', total.toFixed(2)]
+    : hasAudio ? ['-map', '0:a:0', '-af', LOUDNORM, '-c:a', 'aac', '-b:a', '192k'] : [];
   let args;
   if (keep.length === 1 && keep[0][0] === 0) {
-    args = ['-i', file, '-map', '0:v:0', ...audio, '-c:v', 'copy'];
+    args = ['-i', file, ...mInput, '-map', '0:v:0', ...audio, '-c:v', 'copy'];
   } else {
     // Schnitte ohne Neukodieren des Bildes: setzt an Keyframes an (± 1–2 s), dafür schnell.
     const list = path.join(TMP, v.id + '-schnitt.txt');
     fs.writeFileSync(list, concatList(file, keep));
-    args = ['-f', 'concat', '-safe', '0', '-i', list, '-map', '0:v:0', ...audio, '-c:v', 'copy'];
+    args = ['-f', 'concat', '-safe', '0', '-i', list, ...mInput, '-map', '0:v:0', ...audio, '-c:v', 'copy'];
   }
   const r = await ffmpeg([...args, '-movflags', '+faststart', '-progress', 'pipe:1', '-y', out], progressFrom(total, onP));
   fs.rmSync(path.join(TMP, v.id + '-schnitt.txt'), { force: true });
@@ -172,7 +176,7 @@ async function renderLong(v, file, keep, hasAudio, out, onP) {
 }
 
 // Short im Hochformat: Bildmitte oder Facecam oben + Spiel unten, animierte Untertitel, Grafikkarte wenn vorhanden.
-async function renderShort(v, file, s, hasAudio, out, onP, words) {
+async function renderShort(v, file, s, hasAudio, out, onP, words, track) {
   const c = cfg();
   const vertical = v.height > v.width;
   const fc = c.facecam;
@@ -191,8 +195,14 @@ async function renderShort(v, file, s, hasAudio, out, onP, words) {
     fs.writeFileSync(ass, buildAss(clipWords, { color: c.captions.color, posY: useCam ? 0.74 : 0.7 }));
     graph += `;[base]ass=${ass}:fontsdir=${FONTS},fps=30[v]`;
   } else graph += ';[base]fps=30[v]';
-  const audio = hasAudio ? ['-map', '0:a:0', '-af', LOUDNORM, '-c:a', 'aac', '-b:a', '160k'] : [];
-  const r = await gpu.encodeWithFallback((venc) => ffmpeg(['-ss', s.start.toFixed(2), '-i', file, '-t', (s.end - s.start).toFixed(2),
+  let audio = hasAudio ? ['-map', '0:a:0', '-af', LOUDNORM, '-c:a', 'aac', '-b:a', '160k'] : [];
+  if (track) {
+    graph += ';' + music.mixGraph({ hasVoice: hasAudio, dur: s.end - s.start });
+    audio = ['-map', '[aout]', '-c:a', 'aac', '-b:a', '160k'];
+  }
+  const mInput = track ? ['-stream_loop', '-1', '-i', track.file] : [];
+  // Musik-Eingang vor -t, damit -t für die Ausgabe gilt
+  const r = await gpu.encodeWithFallback((venc) => ffmpeg(['-ss', s.start.toFixed(2), '-i', file, ...mInput, '-t', (s.end - s.start).toFixed(2),
     '-filter_complex', graph, '-map', '[v]', ...audio, ...venc,
     '-movflags', '+faststart', '-progress', 'pipe:1', '-y', out], progressFrom(s.end - s.start, onP)));
   if (ass) fs.rmSync(ass, { force: true });
@@ -261,14 +271,31 @@ async function runCut(v) {
   const outputs = [];
   const sourceNote = (a, b) => `Aus „${v.file}“${a != null ? ` (${whisper.fmtTime(a)}–${whisper.fmtTime(b)})` : ''}.`;
 
+  const profile = profiles.effective(v);
+  const getTrack = async (kind, seconds, idea, label) => {
+    try {
+      const t = await music.trackFor({ profile, kind, seconds, idea });
+      if (t) step(label + (t.kind === 'ai' ? ' (mit KI-Musik)' : ' (mit Musik)'));
+      return t;
+    } catch (e) { v.cut.warning = 'Musik: ' + e.message + ' – ohne Musik geschnitten.'; return null; }
+  };
+
   if (c.longVersion) {
     step('Langfassung schneiden', 0);
     const tmp = path.join(TMP, v.id + '-lang.mp4');
-    await renderLong(v, file, keep, hasAudio, tmp, (p) => step('Langfassung schneiden', (done + p / 100) / jobs * 100));
+    const total = keep.reduce((s, [a, b]) => s + b - a, 0);
+    const track = await getTrack('long', total, {}, 'Langfassung schneiden');
+    try { await renderLong(v, file, keep, hasAudio, tmp, (p) => step('Langfassung schneiden', (done + p / 100) / jobs * 100), track); }
+    catch (e) {
+      if (!track) throw e;
+      v.cut.warning = 'Mischen mit Musik ging nicht – Langfassung ohne Musik.';
+      await renderLong(v, file, keep, hasAudio, tmp, (p) => step('Langfassung schneiden', (done + p / 100) / jobs * 100), null);
+    }
     const removed = Math.round(cut.reduce((s, [a, b]) => s + b - a, 0));
     const nv = publish(tmp, `${base} – Langfassung.mp4`, {
       source: { rawId: v.id, rawFile: v.file, kind: 'long', removed },
-      note: sourceNote() + (removed ? ` ${whisper.fmtTime(removed)} ruhige Abschnitte entfernt.` : ''),
+      note: sourceNote() + (removed ? ` ${whisper.fmtTime(removed)} ruhige Abschnitte entfernt.` : '') + music.noteOf(track),
+      music: track ? { kind: track.kind, name: track.name, mood: track.mood || '' } : null,
       transcriptText: segs ? whisper.textOf(segs).slice(0, 20000) : '',
     });
     outputs.push(nv.id); done++;
@@ -277,11 +304,19 @@ async function runCut(v) {
     const s = shorts[i];
     step(`Short ${i + 1} von ${shorts.length} schneiden`);
     const tmp = path.join(TMP, `${v.id}-short${i + 1}.mp4`);
-    await renderShort(v, file, s, hasAudio, tmp, (p) => step(`Short ${i + 1} von ${shorts.length} schneiden`, (done + p / 100) / jobs * 100), words);
+    const label = `Short ${i + 1} von ${shorts.length} schneiden`;
+    const track = await getTrack('short', s.end - s.start, { mood: s.mood, music: s.music }, label);
+    try { await renderShort(v, file, s, hasAudio, tmp, (p) => step(label, (done + p / 100) / jobs * 100), words, track); }
+    catch (e) {
+      if (!track) throw e;
+      v.cut.warning = 'Mischen mit Musik ging nicht – Short ohne Musik.';
+      await renderShort(v, file, s, hasAudio, tmp, (p) => step(label, (done + p / 100) / jobs * 100), words, null);
+    }
     const nv = publish(tmp, `${base} – Short ${i + 1}.mp4`, {
       source: { rawId: v.id, rawFile: v.file, kind: 'short', start: s.start, end: s.end },
       title: s.title ? s.title.slice(0, 100) : `${base} – Short ${i + 1}`,
-      note: sourceNote(s.start, s.end) + (s.reason ? ' Warum: ' + s.reason : ''),
+      note: sourceNote(s.start, s.end) + (s.reason ? ' Warum: ' + s.reason : '') + music.noteOf(track),
+      music: track ? { kind: track.kind, name: track.name, mood: track.mood || '' } : null,
       transcriptText: segs ? whisper.textOf(segs, s.start, s.end) : '',
     });
     outputs.push(nv.id); done++;
@@ -362,6 +397,7 @@ export function autoQueue() {
 }
 
 export function init() {
+  music.ensureDirs();
   gpu.check().then((g) => console.log('Grafikkarte:', g.nvenc ? 'NVENC aktiv' : 'nicht genutzt (' + g.error + ')'));
   for (const v of Object.values(db().videos)) {
     if (['queued', 'running'].includes(v.cut?.state)) { v.cut = { ...v.cut, state: 'queued' }; queue.push(v.id); }

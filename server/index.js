@@ -1,4 +1,4 @@
-// Video-Zentrale – Server (nur Node-Bordmittel, kein npm-Paket nötig)
+// Micha’s Video-Zentrale – Server (nur Node-Bordmittel, kein npm-Paket nötig)
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,11 +16,13 @@ import * as ai from './ai.js';
 import * as autocut from './autocut.js';
 import * as whisper from './whisper.js';
 import * as thumbs from './thumbs.js';
+import * as music from './music.js';
+import * as ver from './version.js';
 import * as ai2 from './ai.js';
 
 const PORT = Number(process.env.PORT || 8090);
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
-const VERSION = JSON.parse(fs.readFileSync(path.join(PUBLIC, '..', 'package.json'), 'utf8')).version;
+const VERSION = ver.VERSION;
 const SESSION_DAYS = 30;
 
 load();
@@ -29,6 +31,7 @@ jobs.init();
 youtube.init();
 ai.init();
 autocut.init();
+ver.init();
 const scanAll = () => lib.scan().then(() => { ai.autoQueue(); autocut.autoQueue(); });
 autocut.onDone(() => scanAll().catch(() => {}));
 
@@ -164,7 +167,7 @@ async function api(req, res, url) {
   if (m !== 'GET' && m !== 'HEAD' && req.headers['x-zentrale'] !== '1') throw new HttpError(403, 'Anfrage abgelehnt.');
 
   if (p === '/api/session') {
-    return send(res, 200, { setup: !db().auth, loggedIn: !!currentSession(req), version: VERSION });
+    return send(res, 200, { setup: !db().auth, loggedIn: !!currentSession(req), version: VERSION, name: ver.APP_NAME });
   }
   if (p === '/api/setup' && m === 'POST') {
     if (db().auth) throw new HttpError(409, 'Passwort ist schon gesetzt.');
@@ -335,7 +338,7 @@ async function api(req, res, url) {
   }
 
   if (p === '/api/settings' && m === 'GET') {
-    return send(res, 200, { settings: db().settings, youtube: youtube.status(), tiktok: tiktok.status(), ai: ai.status(), cut: autocut.status(), fal: thumbs.falStatus(),
+    return send(res, 200, { settings: db().settings, youtube: youtube.status(), tiktok: tiktok.status(), ai: ai.status(), cut: autocut.status(), fal: thumbs.falStatus(), music: music.status(),
       profiles: profiles.list().map(profiles.publicProfile), version: VERSION });
   }
   if (p === '/api/settings' && m === 'PUT') {
@@ -377,6 +380,9 @@ async function api(req, res, url) {
     if (!ph[2] && m === 'PUT') return send(res, 200, thumbs.updatePhoto(photo.id, await readJson(req)));
     if (!ph[2] && m === 'DELETE') { thumbs.removePhoto(photo.id); return send(res, 200, { ok: true }); }
   }
+  if (p === '/api/version' && m === 'GET') return send(res, 200, ver.info());
+  if (p === '/api/version/check' && m === 'POST') { await ver.checkUpdate(true); return send(res, 200, ver.info()); }
+  if (p === '/api/music/config' && m === 'POST') { music.configure(await readJson(req)); return send(res, 200, music.status()); }
   if (p === '/api/cut/config' && m === 'POST') { autocut.configure(await readJson(req)); return send(res, 200, autocut.status()); }
   if (p === '/api/ai/config' && m === 'POST') { ai.configure(await readJson(req)); return send(res, 200, ai.status()); }
   if (p === '/api/profiles' && m === 'POST') return send(res, 200, profiles.publicProfile(profiles.create(await readJson(req))));
@@ -435,7 +441,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.requestTimeout = 0; // große Uploads
-server.listen(PORT, () => console.log(`Video-Zentrale ${VERSION} läuft auf Port ${PORT}`));
+server.listen(PORT, () => console.log(`${ver.APP_NAME} ${VERSION}${ver.BUILD.build ? ' (Build ' + ver.BUILD.build + ')' : ''} läuft auf Port ${PORT}`));
 
 scanAll();
 setInterval(() => scanAll().catch((e) => console.error('Scan:', e.message)), 60_000);

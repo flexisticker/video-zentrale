@@ -78,6 +78,15 @@ http.createServer(async (req, res) => {
     if (p === '/fal-ai/birefnet') return json(res, 200, { image: { url: 'http://127.0.0.1:9300/falimg/cut.png' } });
     return json(res, 200, { images: [{ url: 'http://127.0.0.1:9300/falimg/last' }] });
   }
+  // fal.ai: KI-Musik (Sonilo) → Testton aus TEST_MUSIC
+  if (p.startsWith('/sonilo/')) {
+    if (req.headers.authorization !== 'Key fal-test') return json(res, 401, { detail: 'Unauthorized' });
+    const j = JSON.parse(b.toString());
+    log.push({ music: { model: p, prompt: j.prompt, duration: j.duration } });
+    const a = { url: 'http://127.0.0.1:9300/falaudio/musik.m4a', content_type: 'audio/mp4' };
+    return json(res, 200, { audio: a, audios: [a] });
+  }
+  if (p === '/falaudio/musik.m4a') { res.writeHead(200, { 'Content-Type': 'audio/mp4' }); return res.end(require('fs').readFileSync(process.env.TEST_MUSIC)); }
   if (p === '/falimg/cut.png') { res.writeHead(200, { 'Content-Type': 'image/png' }); return res.end(require('fs').readFileSync(process.env.TEST_PERSON)); }
   if (p === '/falimg/last') { res.writeHead(200, { 'Content-Type': 'image/jpeg' }); return res.end(falLast); }
   if (p.startsWith('/whisper/')) { res.writeHead(200, { 'Content-Length': 2048 }); return res.end(Buffer.alloc(2048)); }
@@ -87,7 +96,8 @@ http.createServer(async (req, res) => {
       const texts = j.messages[0].content.filter((c) => c.type === 'text').map((c) => c.text);
       log.push({ highlights: { imgs: j.messages[0].content.filter((c) => c.type === 'image').length, cands: texts.filter((t) => t.startsWith('Kandidat')) } });
       const sec = texts.filter((t) => t.startsWith('Kandidat')).map((t) => /Sekunde (\d+)–(\d+)/.exec(t)).map((m) => [Number(m[1]), Number(m[2])]);
-      const pick = sec.slice(0, 2).map(([a, b2], i) => ({ candidate: i + 1, start: a + 1, end: b2 - 2, title: i ? 'Der Sieg 🏆' : 'Drei auf einmal?!', reason: 'lauter Moment mit Reaktion' }));
+      const pick = sec.slice(0, 2).map(([a, b2], i) => ({ candidate: i + 1, start: a + 1, end: b2 - 2, title: i ? 'Der Sieg 🏆' : 'Drei auf einmal?!', reason: 'lauter Moment mit Reaktion',
+        mood: i ? 'episch' : 'lustig', music: i ? 'epic orchestral hybrid with big drums' : 'quirky playful pizzicato' }));
       return json(res, 200, { id: 'msg_h', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn',
         content: [{ type: 'text', text: JSON.stringify({ shorts: pick }) }], usage: { input_tokens: 9000, output_tokens: 400 } });
     }

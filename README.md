@@ -1,4 +1,4 @@
-# Video-Zentrale
+# Micha’s Video-Zentrale
 
 Geschnittene Videos mit Titelbild ansehen, Titel/Texte anpassen und für **YouTube** (als privat) und **TikTok**
 (als Entwurf im Posteingang) freigeben. Läuft als Docker-Container auf Unraid.
@@ -33,6 +33,15 @@ Video-Zentrale (Browser) ── prüfen, freigeben ──▶ YouTube (privat) / 
 - **KI-Titelbild:** Claude beschreibt zu jedem Video eine passende Szene + Bildtext; Nano Banana (fal.ai, ca. 4 Cent) malt daraus
   mit deinem Foto und einem Standbild ein komplettes Titelbild (Variante 5, wird bevorzugt als Titelbild gesetzt). Automatisch
   (abschaltbar unter Einstellungen → fal.ai) oder per Knopf „✨ KI-Titelbild erzeugen“ im Detail.
+- **Hintergrundmusik:** eigene Titel (z. B. von Epidemic Sound) nach `\\PowerServer\videos\musik` legen – für alle Kanäle direkt
+  dort, nur für einen Kanal in `musik\<kanal-id>` (z. B. `musik\michamodus`), nach Stimmung in Unterordnern `episch`, `lustig`,
+  `spannend`, `chillig`, `energisch`, `fröhlich`, `traurig`. Claude wählt je Short Stimmung + Musikstil. Gibt es keinen passenden
+  Titel, erzeugt fal.ai **KI-Musik** (Sonilo text-to-music, laut Anbieter kommerziell nutzbar, 0,0025 $/s ≈ 0,15 $/min; Datei +
+  Nachweis mit Prompt in `musik\ki`). Gemischt unter die Stimme (Musik ca. −28 LUFS, Stimme −14 LUFS) mit Ducking. Standard: in Shorts
+  an, Langfassung aus. Einstellungen → Hintergrundmusik; Musikstil je Kanal in den Kanaleinstellungen.
+- **Versionierung:** Version oben rechts (Klick = Versionen / Was ist neu), Build-Nummer/Commit/Datum setzt die GitHub Action.
+  Nach einem Update zeigt die Zentrale einmal „Was ist neu“. Alle 6 Std. wird auf ghcr.io nachgesehen, ob ein neueres Image da ist
+  (Label `de.flexisticker.version`) – dann leuchtet „⬆ Update“.
 - **Sprache → Text (Whisper):** whisper.cpp im Container, Modell (Standard „small“, ~470 MB) wird beim ersten Mal von
   huggingface.co nach `/data/whisper` geladen. Läuft auf der **Grafikkarte** (CUDA, gleiche Unraid-Einstellungen wie NVENC),
   sonst automatisch auf dem Prozessor. Transkript im Detail aufklappbar (Klick auf Zeit springt im Video), geht an Claude.
