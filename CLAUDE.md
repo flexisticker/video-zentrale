@@ -62,6 +62,9 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   `boost()` FLUX Kontext → Variante 4). fal-Schemas/Preise am 11.10. per fal-Connector geprüft (birefnet: image_url → image.url,
   data-URI geht; kontext: prompt+image_url → images[].url, 0,04 $/Bild). Kunde hat 25 € fal-Guthaben.
   **Nicht getestet:** echte GPU (NVENC) auf Unraid, echtes Whisper, KI-Aufwertung mit echtem Bild.
+- 1.4.1: Freigestellte Fotos erschienen in den Einstellungen weiter mit Hintergrund – Browser-Zwischenspeicher (gleiche Bild-URL).
+  Jetzt `photo.rev` in der URL, Schachbrett hinter Fotos, Status „✓ freigestellt“, Knopf zeigt „wird freigestellt …“.
+  fal-Anfrageverlauf (Connector `search_request_history`) zeigte: Freistellen beim Kunden lief erfolgreich (200).
 - Ideen: KI-B-Roll per fal.ai (Video-Modelle), Viralitäts-Bewertung, Hook-Einblendung, Zeitplan.
 - Entscheidung Kunde: Auslieferungen immer direkt auf `main` pushen.
 - Ideen: Zeitplan (publishAt), Shorts automatisch aus langen Videos, Titelbild-Vorlagen, Untertitel (whisper).

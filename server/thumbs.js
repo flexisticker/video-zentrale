@@ -65,7 +65,7 @@ export async function addPhoto(buf, { label, channel }) {
   const ext = isPng(out) ? '.png' : isJpg(out) ? '.jpg' : '.webp';
   fs.writeFileSync(path.join(PHOTO_DIR, id + ext), out);
   const p = { id, file: id + ext, label: LABELS.includes(label) ? label : 'sonstiges', channel: profiles.get(channel) ? channel : '',
-    cut, note, at: new Date().toISOString() };
+    cut, note, at: new Date().toISOString(), rev: Date.now() };
   photos().push(p);
   saveNow();
   return p;
@@ -79,6 +79,7 @@ export async function recut(id) {
   const out = await removeBackground(buf, isPng(buf) ? 'image/png' : isJpg(buf) ? 'image/jpeg' : 'image/webp');
   fs.rmSync(photoPath(p), { force: true });
   p.file = p.id + '.png'; p.cut = true; p.note = '';
+  p.rev = Date.now(); // neue Bildadresse, sonst zeigt der Browser das alte Bild aus dem Zwischenspeicher
   fs.writeFileSync(photoPath(p), out);
   saveNow();
   return p;

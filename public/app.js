@@ -897,9 +897,15 @@ async function renderSettings() {
     const lab = h('select', { onchange: () => api('PUT', '/api/photos/' + p.id, { label: lab.value }).then(() => toast('Gespeichert.')) }, fl.labels.map((l) => h('option', { value: l, selected: p.label === l }, l)));
     const chs = h('select', { onchange: () => api('PUT', '/api/photos/' + p.id, { channel: chs.value }).then(() => toast('Gespeichert.')) },
       h('option', { value: '' }, 'alle Kanäle'), st.profiles.map((x) => h('option', { value: x.id, selected: p.channel === x.id }, x.name)));
-    const img = h('div', { class: 'photo' + (p.cut ? '' : ' uncut') }); img.style.backgroundImage = `url("/api/photos/${p.id}/image?t=${encodeURIComponent(p.at)}")`;
+    const pic = h('div', { class: 'photo-img' }); pic.style.backgroundImage = `url("/api/photos/${p.id}/image?v=${p.rev || encodeURIComponent(p.at)}")`;
+    const img = h('div', { class: 'photo' + (p.cut ? '' : ' uncut') }, pic);
     return h('div', { class: 'phcard' }, img, lab, chs,
-      p.cut ? null : h('div', { class: 'hint' }, 'nicht freigestellt', fl.configured ? h('button', { class: 'btn small', onclick: run(() => api('POST', `/api/photos/${p.id}/recut`), 'Freigestellt.') }, 'freistellen') : null),
+      p.cut ? h('div', { class: 'hint ok-text' }, '✓ freigestellt') : h('div', { class: 'hint' }, 'nicht freigestellt', p.note ? h('div', { class: 'err' }, p.note) : null,
+        fl.configured ? h('button', { class: 'btn small', onclick: async (e) => {
+          e.target.disabled = true; e.target.textContent = 'wird freigestellt …';
+          try { await api('POST', `/api/photos/${p.id}/recut`); toast('Freigestellt.'); again(); }
+          catch (x) { toast(x.message, true); e.target.disabled = false; e.target.textContent = 'freistellen'; }
+        } }, 'freistellen') : null),
       h('button', { class: 'btn small ghost danger', onclick: () => confirm('Foto löschen?') && run(() => api('DELETE', '/api/photos/' + p.id), 'Gelöscht.')() }, 'Löschen'));
   }));
   const thumbBox = h('div', { class: 'box wide' }, h('h3', {}, '🖼 Titelbilder & Fotos von dir'),
