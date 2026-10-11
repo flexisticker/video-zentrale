@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { db, save, DATA_DIR } from './store.js';
+import * as helper from './helper.js';
 
 const BIN = process.env.WHISPER_BIN || 'whisper-cli';
 // Variante mit NVIDIA-CUDA (eigener Build im Image); CUDA-Bibliotheken liegen daneben, der Treiber kommt vom Host.
@@ -21,7 +22,7 @@ let download = null; // { model, done, total, error }
 
 export function status() {
   const c = cfg();
-  return { enabled: c.enabled, model: c.model, threads: c.threads, models: MODELS, useGpu: c.gpu !== false,
+  return { enabled: c.enabled, model: c.model, threads: c.threads, models: MODELS, useGpu: c.gpu !== false, lastEngine, helperOnline: helper.online(),
     gpu: { available: fs.existsSync(BIN_GPU), ...gpuState },
     installed: Object.keys(MODELS).filter((m) => fs.existsSync(modelFile(m))),
     download: download && { ...download } };
@@ -86,6 +87,16 @@ async function doTranscribe(videoFile, key, onProgress) {
     // -ml 1 -sow: ein Segment je Wort → Zeitmarken pro Wort
     const args = ['-m', model, '-f', wav, '-l', 'de', '-ml', '1', '-sow', '-oj', '-of', base, '-pp'];
     const prog = (l) => { const m = /progress\s*=\s*(\d+)%/.exec(l); if (m) onProgress(Number(m[1])); };
+    // Rechenhelfer-PC online? Dann rechnet der (großes Modell, starke Grafikkarte). Klappt das nicht, rechnet der Server.
+    if (helper.online()) {
+      const secs = fs.statSync(wav).size / 32000;
+      try {
+        onProgress(1);
+        const j = await helper.transcribe(wav, { timeoutMs: Math.max(10 * 60_000, secs * 1000) });
+        lastEngine = 'Rechenhelfer (' + (db().helper.name || 'PC') + ')';
+        return toWords(j);
+      } catch (e) { console.error('Rechenhelfer:', e.message, '– rechne selbst.'); }
+    }
     let r = null;
     // Grafikkarte zuerst (wenn eingebaut, erlaubt und nicht schon gescheitert)
     if (c.gpu !== false && fs.existsSync(BIN_GPU) && !(gpuState.tried && !gpuState.ok)) {
@@ -96,14 +107,17 @@ async function doTranscribe(videoFile, key, onProgress) {
     }
     if (!r) r = await run(BIN, [...args, '-t', String(c.threads || 4)], prog);
     if (r.code !== 0) throw new Error('Whisper-Fehler: ' + (r.err.trim().split('\n').pop() || r.code));
-    const j = JSON.parse(fs.readFileSync(base + '.json', 'utf8'));
-    return (j.transcription || []).map((x) => ({ s: (x.offsets?.from || 0) / 1000, e: (x.offsets?.to || 0) / 1000, t: String(x.text || '').trim() }))
-      .filter((x) => x.t && !/^\[.*\]$|^\(.*\)$/.test(x.t)); // [Musik], (Lachen) o. Ä. weglassen
+    lastEngine = gpuState.ok && gpuState.tried ? 'Server-Grafikkarte' : 'Server-Prozessor';
+    return toWords(JSON.parse(fs.readFileSync(base + '.json', 'utf8')));
   } finally {
     fs.rmSync(wav, { force: true });
     fs.rmSync(base + '.json', { force: true });
   }
 }
+
+let lastEngine = '';
+const toWords = (j) => (j.transcription || []).map((x) => ({ s: (x.offsets?.from || 0) / 1000, e: (x.offsets?.to || 0) / 1000, t: String(x.text || '').trim() }))
+  .filter((x) => x.t && !/^\[.*\]$|^\(.*\)$/.test(x.t)); // [Musik], (Lachen) o. Ä. weglassen
 
 // Wörter zu Sätzen/Zeilen gruppieren (Anzeige, Text für Claude)
 export function sentences(words) {

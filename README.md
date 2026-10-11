@@ -54,6 +54,10 @@ Video-Zentrale (Browser) ── prüfen, freigeben ──▶ YouTube (privat) / 
   Scope `video.publish` freischalten, Kanäle neu verbinden). Im Video „▶ Direkt auf TikTok posten …“: Kontoinfo live, Vorschau, Titel, Sichtbarkeit
   ohne Vorauswahl, Kommentare/Duett/Stitch, Offenlegung (Deine Marke / Markeninhalt, Markeninhalt nicht privat), Zustimmung Musiknutzung.
   Ohne TikTok-Prüfung nur „Nur ich“.
+- **🖥 Rechenhelfer (PC):** Einstellungen → Rechenhelfer → einschalten, Modell wählen (Standard large-v3-turbo) → „Rechenhelfer für Windows (ZIP)“
+  (Adresse + Schlüssel schon drin) → auf dem PC entpacken → `Einrichten.bat` (lädt whisper.cpp CUDA aus den GitHub-Releases + Modell von
+  huggingface nach `%LOCALAPPDATA%\VideoZentrale-Rechenhelfer`, Autostart über die Aufgabenplanung). Online-Anzeige in den Einstellungen.
+  Fällt der Helfer aus (nicht abgeholt in 2 Min. bzw. Zeitüberschreitung), rechnet der Server.
 - **Sicherung:** Einstellungen → 💾 Sicherung. Täglich automatisch (Standard 03:30, 14 aufheben) nach `/data/sicherung`
   (= `/mnt/user/appdata/video-zentrale/sicherung`), „Jetzt sichern“, „Sicherung herunterladen“ (ZIP), Wiederherstellen aus Datei oder
   Server-Liste (vorher automatische Sicherung „vor-wiederherstellung“). Enthält Kanäle, Verbindungen/Schlüssel, Einstellungen,

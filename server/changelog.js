@@ -1,5 +1,9 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.14.0', date: '11.10.2026', items: [
+    '🖥 Rechenhelfer: Dein PC mit NVIDIA-Grafikkarte übernimmt die Spracherkennung (großes Whisper-Modell) – genauer, schneller, der Server wird entlastet.',
+    'Einrichten: Einstellungen → Rechenhelfer → einschalten → ZIP herunterladen → auf dem PC „Einrichten.bat“. Ist der PC aus, rechnet die Zentrale selbst.',
+  ] },
   { version: '1.13.1', date: '11.10.2026', items: [
     'Fehler behoben: „Diashow“/Ruckler in der Langfassung. Die Schnitte ohne Neukodieren setzten nur an Keyframes an und schleppten bis zu 10 s doppelt mit. Jetzt wird bildgenau mit gleichmäßiger Bildrate neu kodiert (Grafikkarte).',
     'Betroffene Videos neu schneiden: Rohvideo öffnen → „So nochmal schneiden“.',

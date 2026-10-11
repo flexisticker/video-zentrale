@@ -1,0 +1,22 @@
+﻿Rechenhelfer für Micha's Video-Zentrale
+=======================================
+
+Was macht er?
+  Dein PC (z. B. mit RTX 3070) übernimmt die Spracherkennung (Whisper, großes Modell) für die Zentrale.
+  Das ist genauer und schneller und entlastet den Unraid-Server. Ist der PC aus, rechnet die Zentrale selbst.
+
+Einrichten (einmalig)
+  1. Diesen Ordner an einen festen Platz legen, z. B. C:\VideoZentrale-Rechenhelfer
+  2. Doppelklick auf "Einrichten.bat"
+     -> lädt beim ersten Start whisper.cpp (CUDA) und das Modell (ca. 1,5–3 GB, einmalig)
+     -> richtet den Autostart bei der Anmeldung ein
+  3. In der Zentrale unter Einstellungen -> Rechenhelfer steht dann "online".
+
+Starten von Hand:   "Starten.bat"
+Autostart entfernen: "Autostart entfernen.bat"
+
+Hinweise
+  - rechenhelfer.json enthält die Adresse der Zentrale und den Schlüssel – nicht weitergeben.
+    Neuer Schlüssel: in der Zentrale "Neuen Schlüssel erzeugen" und das ZIP neu herunterladen.
+  - Der NVIDIA-Treiber sollte aktuell sein (CUDA 12).
+  - Programme liegen unter %LOCALAPPDATA%\VideoZentrale-Rechenhelfer

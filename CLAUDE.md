@@ -140,6 +140,13 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   zwischen Keyframes (OBS: Keyframe-Abstand groß) → Material ab vorherigem Keyframe doppelt (Test: 8190 statt 7020 Bilder). Jetzt
   `fps=<Quelle>,select='between(t,a,b)+…',setpts=N/(fps*TB)` + `aselect/asetpts` per `-filter_complex_script`, NVENC/x264 (`probeFps`).
   Alter Weg nur noch bei `cut.longCopy` oder ganz ohne Schnitt. Kunde bietet PC mit RTX 3070/64 GB als Rechenhelfer an (nicht gebaut).
+- 1.14.0: **Rechenhelfer** (`server/helper.js`, `db().helper {enabled, token, model}`): Routen `/api/helper/*` mit Kopf `X-Helper-Token`
+  (vor Login/CSRF), Long-Poll `next` (25 s), `job/:id/audio|result|error`, `hello` (online = Lebenszeichen < 90 s). `whisper.js`: ist der Helfer
+  online → `helper.transcribe(wav)` (nicht abgeholt in 2 Min. oder Zeitüberschreitung → lokal), `lastEngine`. Windows-Teil `tools/rechenhelfer/`
+  (Rechenhelfer.ps1 UTF-8-BOM + CRLF für PowerShell 5.1, Einrichten/Starten/Autostart-entfernen.bat, LIESMICH), ZIP per `/api/helper-download?origin=`
+  mit `rechenhelfer.json` (url, token). Dockerfile kopiert `tools/rechenhelfer`. Getestet mit pwsh 7 unter Linux (Testschalter `VZ_HELPER_HOME`,
+  `VZ_WHISPER_EXE`) + fake-whisper: online, Auftrag, Ergebnis. **Nicht getestet:** echtes Windows/PowerShell 5.1, CUDA-Download (Asset-Name
+  `whisper-cublas-12.*-bin-x64.zip` per GitHub-API gesucht), Aufgabenplanung. Kunden-PC: RTX 3070, 64 GB.
 - Einrichtung beim Kunden (11.10.2026): Zentrale läuft über `https://videos.flexisticker.de` (NPM, Access List „Nur Heimnetz“,
   lokaler UniFi-DNS-Eintrag → 192.168.1.111). Browser zeigte trotzdem 403: Chrome/Edge „Sicheres DNS“ fragte Google/Cloudflare
   (öffentliche IP) → ausschalten bzw. „aktueller Dienstanbieter“, `net-internals/#dns` leeren. Prüfung: `curl -I` am PC.

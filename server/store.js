@@ -55,6 +55,7 @@ const empty = () => ({
     genModel: 'fal-ai/nano-banana/edit', autoThumb: true, generated: 0 },     //   + KI-Titelbild aus Foto & Standbild
   music: { enabled: true, shorts: true, long: false, source: 'mixed', level: 'mittel', lufs: -30, duck: true, duckLevel: 'leicht', longMax: 180,  // Hintergrundmusik
     model: 'sonilo/v1.1/text-to-music', generated: 0, spent: 0, recent: [] },
+  helper: { enabled: false, token: '', model: 'large-v3-turbo', lastSeen: '', name: '', gpu: '', done: 0, failed: 0 },   // Rechenhelfer-PC
   backup: { auto: true, time: '03:30', keep: 14, lastAt: '', lastFile: '', lastError: '' },        // Sicherung
   photos: [],                                                      // Fotos des Creators für Titelbilder
   cut: { auto: true, longVersion: true, longCopy: false, summary: 0, cutPauses: true, silenceDb: -45, minPause: 20, shorts: 3, shortMin: 30, shortMax: 45,
@@ -105,6 +106,7 @@ function normalize(raw) {
   state.fal = { ...base.fal, ...raw.fal };
   state.music = { ...base.music, ...raw.music };
   state.backup = { ...base.backup, ...raw.backup };
+  state.helper = { ...base.helper, ...raw.helper };
   state.photos = Array.isArray(raw.photos) ? raw.photos : [];
   state.cut = { ...base.cut, ...raw.cut, whisper: { ...base.cut.whisper, ...raw.cut?.whisper },
     captions: { ...base.cut.captions, ...raw.cut?.captions }, facecam: { ...base.cut.facecam, ...raw.cut?.facecam },

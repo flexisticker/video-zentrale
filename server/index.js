@@ -19,6 +19,7 @@ import * as thumbs from './thumbs.js';
 import * as music from './music.js';
 import * as ver from './version.js';
 import * as backup from './backup.js';
+import * as helper from './helper.js';
 import * as ai2 from './ai.js';
 
 const PORT = Number(process.env.PORT || 8090);
@@ -172,6 +173,21 @@ async function api(req, res, url) {
   const ip = req.socket.remoteAddress || '';
 
   if (p === '/api/health') return send(res, 200, { ok: true, version: VERSION });
+
+  // Rechenhelfer (PC im Heimnetz): eigener Schlüssel statt Anmeldung
+  if (p.startsWith('/api/helper/')) {
+    if (!helper.checkToken(req)) throw new HttpError(401, 'Schlüssel des Rechenhelfers ungültig oder Rechenhelfer ausgeschaltet.');
+    let hm;
+    if (p === '/api/helper/hello' && m === 'POST') { helper.hello(await readJson(req)); return send(res, 200, { ok: true, model: helper.status().model }); }
+    if (p === '/api/helper/next' && m === 'GET') { const j = await helper.next(); return j ? send(res, 200, j) : send(res, 204, ''); }
+    if ((hm = /^\/api\/helper\/job\/([0-9a-f]{16})\/(audio|result|error)$/.exec(p))) {
+      const [, id, what] = hm;
+      if (what === 'audio' && m === 'GET') { const f = helper.audioPath(id); if (!f) throw new HttpError(404, 'Auftrag unbekannt.'); return sendFile(req, res, f, 'audio/wav'); }
+      if (what === 'result' && m === 'POST') { const ok = helper.result(id, await readJson(req, 64 * 1024 * 1024)); return send(res, ok ? 200 : 404, { ok }); }
+      if (what === 'error' && m === 'POST') { const b = await readJson(req); return send(res, 200, { ok: helper.fail(id, b.message) }); }
+    }
+    throw new HttpError(404, 'Unbekannt.');
+  }
 
   // Google/TikTok leiten nach der Freigabe hierher zurück (ohne Sitzungs-Cookie, abgesichert über "state").
   // Danach: kleine Seite, die das Popup schließt.
@@ -510,6 +526,18 @@ async function api(req, res, url) {
     try { return send(res, 200, { ...backup.restore(buf), status: backup.status() }); }
     catch (e) { throw new HttpError(400, e.message); }
   }
+  if (p === '/api/helper-config' && m === 'GET') return send(res, 200, helper.status());
+  if (p === '/api/helper-download' && m === 'GET') {
+    const st = helper.status();
+    if (!st.enabled || !st.token) throw new HttpError(409, 'Erst den Rechenhelfer einschalten.');
+    const origin = String(url.searchParams.get('origin') || '');
+    if (!/^https?:\/\/[\w.\-:[\]]+$/.test(origin)) throw new HttpError(400, 'Adresse der Zentrale fehlt.');
+    const dir = path.join(PUBLIC, '..', 'tools', 'rechenhelfer');
+    const entries = fs.readdirSync(dir).filter((f) => !f.startsWith('.')).map((f) => ({ name: 'Rechenhelfer/' + f, data: fs.readFileSync(path.join(dir, f)) }));
+    entries.push({ name: 'Rechenhelfer/rechenhelfer.json', data: Buffer.from(JSON.stringify({ url: origin, token: st.token }, null, 2)) });
+    return send(res, 200, backup.zip(entries), { 'Content-Type': 'application/zip', 'Content-Disposition': 'attachment; filename="Rechenhelfer.zip"' });
+  }
+  if (p === '/api/helper-config' && m === 'POST') { helper.configure(await readJson(req)); return send(res, 200, helper.status()); }
   if (p === '/api/coach' && m === 'GET') return send(res, 200, db().coach || {});
   if (p === '/api/coach' && m === 'POST') {
     const b = await readJson(req);
