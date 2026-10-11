@@ -1,5 +1,9 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.15.1', date: '11.10.2026', items: [
+    'Rechenhelfer 1.1: meldet sich sofort in der Zentrale und zeigt, was er gerade macht (lädt whisper.cpp, lädt Modell, bereit), lädt das Modell gleich beim Start und schreibt ein Protokoll (rechenhelfer.log).',
+    'Bitte das Rechenhelfer-ZIP neu herunterladen, die Dateien am PC ersetzen und „Einrichten.bat“ erneut ausführen.',
+  ] },
   { version: '1.15.0', date: '11.10.2026', items: [
     '📱 Handy & Tablet: Leiste unten (Posten, Freigabe, Eingang, Coach, Mehr), Videos im Vollbild, größere Knöpfe, Sprungleiste in den Einstellungen.',
     'Als App installierbar: eigenes Symbol auf dem Startbildschirm, startet ohne Browserleiste direkt in „Zum Posten“ (iPhone: Teilen → Zum Home-Bildschirm, Android: Menü → App installieren).',

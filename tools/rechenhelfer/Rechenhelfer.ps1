@@ -10,14 +10,20 @@ param([switch]$Install, [switch]$Uninstall)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # macht Downloads in Windows PowerShell deutlich schneller
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$Version = '1.0'
+$Version = '1.1'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ConfigFile = Join-Path $Here 'rechenhelfer.json'
 $Home2 = if ($env:VZ_HELPER_HOME) { $env:VZ_HELPER_HOME } else { Join-Path $env:LOCALAPPDATA 'VideoZentrale-Rechenhelfer' }
 $TaskName = 'Video-Zentrale Rechenhelfer'
 New-Item -ItemType Directory -Force -Path $Home2, (Join-Path $Home2 'modelle'), (Join-Path $Home2 'tmp') | Out-Null
 
-function Log($t) { Write-Host ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $t) }
+$LogFile = Join-Path $Home2 'rechenhelfer.log'
+function Log($t) {
+  $line = "[{0}] {1}" -f (Get-Date -Format 'dd.MM. HH:mm:ss'), $t
+  Write-Host $line
+  try { Add-Content -Path $LogFile -Value $line -Encoding UTF8; if ((Get-Item $LogFile).Length -gt 1MB) { Move-Item $LogFile "$LogFile.alt" -Force } } catch { }
+}
+$Status = 'startet'
 
 # ---------- Autostart ----------
 if ($Uninstall) {
@@ -73,22 +79,39 @@ function Get-Model($name) {
   return $file
 }
 
-$gpu = try { (Get-CimInstance Win32_VideoController | Where-Object { $_.Name -match 'NVIDIA' } | Select-Object -First 1).Name } catch { $null }
-if (-not $gpu) { $gpu = 'keine NVIDIA-Grafikkarte gefunden (rechnet auf dem Prozessor)' }
-$Exe = Get-WhisperExe
-$threads = [Math]::Max(2, [Math]::Min(8, [Environment]::ProcessorCount))
-
 function Send-Json($path, $obj) {
   $json = $obj | ConvertTo-Json -Depth 8 -Compress
-  Invoke-RestMethod -Uri "$Base$path" -Method Post -Headers $Headers -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($json)) | Out-Null
+  Invoke-RestMethod -Uri "$Base$path" -Method Post -Headers $Headers -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($json)) -TimeoutSec 30 | Out-Null
+}
+function Say-Hello($status) {
+  $script:Status = $status
+  try { Send-Json '/api/helper/hello' @{ name = $Pc; gpu = $gpu; version = $Version; status = $status } } catch { Log "Zentrale nicht erreichbar: $($_.Exception.Message)" }
 }
 
-Log "Rechenhelfer $Version · $Pc · $gpu"
+$gpu = try { (Get-CimInstance Win32_VideoController | Where-Object { $_.Name -match 'NVIDIA' } | Select-Object -First 1).Name } catch { $null }
+if (-not $gpu) { $gpu = 'keine NVIDIA-Grafikkarte gefunden (rechnet auf dem Prozessor)' }
+Log "Rechenhelfer $Version startet · $Pc · $gpu"
+Log "Protokoll: $LogFile"
+Say-Hello 'lädt whisper.cpp'
+$Exe = $null
+while (-not $Exe) {
+  try { $Exe = Get-WhisperExe }
+  catch { Log "whisper.cpp konnte nicht geladen werden: $($_.Exception.Message) – neuer Versuch in 5 Minuten."; Say-Hello "Fehler: whisper.cpp fehlt ($($_.Exception.Message))"; Start-Sleep 300 }
+}
+$threads = [Math]::Max(2, [Math]::Min(8, [Environment]::ProcessorCount))
+
+
+# Modell gleich beim Start laden (sonst wartet der erste Auftrag)
+try {
+  $hi = Invoke-RestMethod -Uri "$Base/api/helper/hello" -Method Post -Headers $Headers -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes('{"status":"startet"}')) -TimeoutSec 30
+  if ($hi.model) { Say-Hello "lädt Modell $($hi.model)"; [void](Get-Model $hi.model) }
+} catch { Log "Modell vorab laden ging nicht: $($_.Exception.Message)" }
+Say-Hello 'bereit'
 Log "Verbunden mit $Base – warte auf Aufträge (Fenster offen lassen bzw. minimieren)."
 
 while ($true) {
   try {
-    Send-Json '/api/helper/hello' @{ name = $Pc; gpu = $gpu; version = $Version }
+    Say-Hello 'bereit'
     $job = Invoke-RestMethod -Uri "$Base/api/helper/next" -Headers $Headers -TimeoutSec 40
     if (-not $job -or -not $job.id) { continue }
     Log "Auftrag $($job.id): Spracherkennung mit Modell $($job.model) …"

@@ -14,7 +14,7 @@ const waiters = [];                // offene Long-Poll-Anfragen des Helfers
 export function status() {
   const c = cfg();
   return { enabled: !!c.enabled, token: c.token || '', model: c.model, online: online(), lastSeen: c.lastSeen || '', name: c.name || '',
-    gpu: c.gpu || '', version: c.version || '', done: c.done || 0, failed: c.failed || 0, lastError: c.lastError || '',
+    gpu: c.gpu || '', version: c.version || '', status: c.status || '', done: c.done || 0, failed: c.failed || 0, lastError: c.lastError || '',
     open: [...jobs.values()].map((j) => ({ id: j.id, state: j.state, kind: j.kind })) };
 }
 
@@ -41,6 +41,7 @@ export function hello(b = {}) {
   if (b.name) c.name = String(b.name).slice(0, 80);
   if (b.gpu != null) c.gpu = String(b.gpu).slice(0, 120);
   if (b.version) c.version = String(b.version).slice(0, 20);
+  if (b.status) c.status = String(b.status).slice(0, 200);
   save();
 }
 

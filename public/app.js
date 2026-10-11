@@ -1438,7 +1438,7 @@ async function renderSettings() {
     .map(([k, n]) => h('option', { value: k, selected: (hp?.model || 'large-v3-turbo') === k }, n)));
   const helperBox = h('div', { class: 'box' }, h('h3', {}, '🖥 Rechenhelfer (dein PC)'),
     h('p', { class: 'hint' }, 'Ein PC mit NVIDIA-Grafikkarte (z. B. RTX 3070) übernimmt die Spracherkennung mit dem großen Whisper-Modell – genauer, schneller und der Server wird entlastet. Ist der PC aus, rechnet die Zentrale selbst.'),
-    hp?.enabled ? h('p', { class: hp.online ? 'ok-text' : 'hint' }, hp.online ? `🟢 online: ${hp.name || 'PC'} · ${hp.gpu || ''}` : '⚪ offline' + (hp.lastSeen ? ' – zuletzt ' + fmtDate(hp.lastSeen) : ' – noch nie verbunden')) : null,
+    hp?.enabled ? h('p', { class: hp.online ? 'ok-text' : 'hint' }, hp.online ? `🟢 online: ${hp.name || 'PC'} · ${hp.gpu || ''}` + (hp.status && hp.status !== 'bereit' ? ` · ${hp.status}` : ' · bereit') : '⚪ offline' + (hp.lastSeen ? ' – zuletzt ' + fmtDate(hp.lastSeen) : ' – noch nie verbunden')) : null,
     hp?.enabled && (hp.done || hp.failed) ? h('p', { class: 'hint' }, `${hp.done} Aufträge erledigt` + (hp.failed ? `, ${hp.failed} fehlgeschlagen` : '') + (hp.lastError ? ` · letzter Fehler: ${hp.lastError}` : '')) : null,
     h('label', { class: 'check' }, hpOn, 'Rechenhelfer verwenden'),
     h('label', {}, 'Whisper-Modell auf dem PC'), hpModel,
@@ -1449,7 +1449,8 @@ async function renderSettings() {
     hp?.enabled ? h('ol', { class: 'hint' },
       h('li', {}, 'ZIP herunterladen und auf dem PC entpacken, z. B. nach C:\\VideoZentrale-Rechenhelfer.'),
       h('li', {}, 'Im Ordner „Rechenhelfer“ doppelt auf „Einrichten.bat“ klicken (lädt einmalig whisper.cpp und das Modell, ca. 1,5–3 GB, und startet künftig automatisch).'),
-      h('li', {}, 'Hier steht dann „online“. Das ZIP enthält deinen Schlüssel – nicht weitergeben.')) : null);
+      h('li', {}, 'Hier steht dann „online“ (beim ersten Start erst nach dem Download von whisper.cpp). Läuft er nicht: auf dem PC „Starten.bat“ – dort siehst du die Meldungen; Protokoll unter %LOCALAPPDATA%\\VideoZentrale-Rechenhelfer\\rechenhelfer.log.'),
+      h('li', {}, 'Das ZIP enthält deinen Schlüssel – nicht weitergeben.')) : null);
 
   // ----- Sicherung -----
   const bk = await api('GET', '/api/backup').catch(() => null);
