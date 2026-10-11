@@ -57,3 +57,39 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   }
   return head + lines.join('\n') + '\n';
 }
+
+// Ruhige, seriöse Untertitel (LinkedIn): Satzteile in normaler Schreibweise, weiß auf halbtransparentem Kasten, unten.
+export function buildCalmAss(words, { width = 1080, height = 1350, posY = 0.86, font = 'Lato' } = {}) {
+  const size = Math.round(width * 0.052);
+  const head = `[Script Info]
+ScriptType: v4.00+
+PlayResX: ${width}
+PlayResY: ${height}
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Cap,${font},${size},&H00FFFFFF,&H00FFFFFF,&H5A000000,&H5A000000,-1,0,0,0,100,100,0,0,3,${Math.round(size * 0.35)},0,2,90,90,${Math.round(height * (1 - posY))},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+`;
+  // Wörter zu Zeilen bis ca. 38 Zeichen, Bruch bei Pause/Satzende
+  const lines = []; let cur = [];
+  const flush = () => { if (cur.length) lines.push(cur); cur = []; };
+  for (const w of words.filter((x) => clean(x.t))) {
+    const prev = cur[cur.length - 1];
+    const len = cur.map((x) => clean(x.t)).join(' ').length + clean(w.t).length + 1;
+    if (prev && (w.s - prev.e > 0.8 || len > 38 || /[.!?]$/.test(prev.t))) flush();
+    cur.push(w);
+  }
+  flush();
+  const ev = lines.map((l, i) => {
+    const start = l[0].s;
+    const next = lines[i + 1]?.[0].s ?? Infinity;
+    const end = Math.min(next, Math.max(l[l.length - 1].e + 0.4, start + 0.8));
+    return `Dialogue: 0,${assTime(start)},${assTime(end)},Cap,,0,0,0,,${l.map((w) => clean(w.t)).join(' ')}`;
+  });
+  return head + ev.join('\n') + '\n';
+}

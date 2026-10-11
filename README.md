@@ -39,6 +39,15 @@ Video-Zentrale (Browser) ── prüfen, freigeben ──▶ YouTube (privat) / 
   Titel, erzeugt fal.ai **KI-Musik** (Sonilo text-to-music, laut Anbieter kommerziell nutzbar, 0,0025 $/s ≈ 0,15 $/min; Datei +
   Nachweis mit Prompt in `musik\ki`). Gemischt unter die Stimme (Musik ca. −28 LUFS, Stimme −14 LUFS) mit Ducking. Standard: in Shorts
   an, Langfassung aus. Einstellungen → Hintergrundmusik; Musikstil je Kanal in den Kanaleinstellungen.
+- **LinkedIn (als Person):** Kanal „LinkedIn“ (nur Download, kein automatischer Upload). Rohvideos nach `\\PowerServer\videos\eingang-profi`
+  → automatisch LinkedIn-Kanal, Profi-Schnitt (Clips 4:5 / 1:1 / 16:9, ruhige Untertitel in Lato, keine Musik), Claude schreibt Beitrag in Ich-Form
+  + 3–5 Hashtags. Im Video: Video/Titelbild herunterladen, Beitrag kopieren, „Als gepostet markieren“ (→ Archiv). Auch jedes andere Video kann
+  von Hand auf den Kanal LinkedIn gestellt werden. Claude schlägt LinkedIn nie selbst vor.
+- **Schnitt nach Wunsch:** im Video (Eingang/Rohvideos) festlegen: Langfassung ja/nein, Anzahl Shorts/Clips, Kurzfassung (1–10 Min.,
+  beste Stellen am Stück, Claude wählt aus 15-s-Bausteinen) und einen Wunsch in Worten („nur den Bosskampf“). Tipp: „Automatisch schneiden“
+  aus oder Nachtbetrieb an, dann bleibt Zeit, den Plan vorher einzustellen.
+- **Papierkorb:** „🗑 Löschen“ im Video (mit Abfrage) → Ordner `papierkorb`, dort wiederherstellen oder endgültig löschen, „Papierkorb leeren“;
+  automatisch nach 30 Tagen (Einstellungen → Allgemein, 0 = nie).
 - **Sicherung:** Einstellungen → 💾 Sicherung. Täglich automatisch (Standard 03:30, 14 aufheben) nach `/data/sicherung`
   (= `/mnt/user/appdata/video-zentrale/sicherung`), „Jetzt sichern“, „Sicherung herunterladen“ (ZIP), Wiederherstellen aus Datei oder
   Server-Liste (vorher automatische Sicherung „vor-wiederherstellung“). Enthält Kanäle, Verbindungen/Schlüssel, Einstellungen,

@@ -27,13 +27,23 @@ export const defaultProfiles = () => [
       + 'tasse, tassen, sublimation, dtf, plotter, textildruck, werkstatt',
     musicStyle: 'light upbeat corporate background music, acoustic and soft electronic, positive, modern workshop vibe', musicMood: 'fröhlich',
     ...emptyConnections() },
+  linkedinProfile(),
 ];
+
+// LinkedIn: nur Download (kein automatischer Upload), professionell, Ich-Form als Person
+export const linkedinProfile = () => ({ id: 'linkedin', name: 'LinkedIn', color: '#0a66c2', isDefault: false, type: 'linkedin', category: '28',
+  tags: '', footer: '', keywords: '', music: false,
+  aiStyle: 'Persönliches LinkedIn-Profil von Michael, Inhaber von Flexisticker (3D-Druck mit Bambu Lab, Textil- und Tassendruck, Sublimation, DTF). '
+    + 'Er postet als Person in der Ich-Form: professionell, seriös, sachlich, mit echtem Mehrwert für Geschäftskunden, Einkäufer und Unternehmer – '
+    + 'Einblicke in die Werkstatt, gelöste Kundenaufgaben, Ergebnisse, Erfahrungen und Tipps. Keine Gaming-Sprache, kein Slang.',
+  musicStyle: 'calm minimal corporate background music, soft piano and light electronic, unobtrusive', musicMood: 'chillig',
+  ...emptyConnections() });
 
 const empty = () => ({
   videos: {},          // id -> Video
   auth: null,          // { salt, hash }
   sessions: {},        // token-Hash -> { at, seen }
-  settings: { language: 'de', autoArchive: true },
+  settings: { language: 'de', autoArchive: true, trashDays: 30 },
   profiles: defaultProfiles(),                                   // Kanäle mit eigenen Verbindungen und Vorgaben
   youtube: { clientId: '', clientSecret: '' },                   // Google-App (für alle Kanäle gleich)
   tiktok: { clientKey: '', clientSecret: '', redirectUri: '' },  // TikTok-App (für alle Konten gleich)
@@ -44,10 +54,11 @@ const empty = () => ({
     model: 'sonilo/v1.1/text-to-music', generated: 0, spent: 0, recent: [] },
   backup: { auto: true, time: '03:30', keep: 14, lastAt: '', lastFile: '', lastError: '' },        // Sicherung
   photos: [],                                                      // Fotos des Creators für Titelbilder
-  cut: { auto: true, longVersion: true, cutPauses: true, silenceDb: -45, minPause: 20, shorts: 3, shortMin: 30, shortMax: 45,
+  cut: { auto: true, longVersion: true, summary: 0, cutPauses: true, silenceDb: -45, minPause: 20, shorts: 3, shortMin: 30, shortMax: 45,
     moveRaw: true, whisper: { enabled: true, model: 'small', threads: 4, gpu: true },
     window: { enabled: false, from: '01:00', to: '07:00' },                          // Nachtbetrieb
     captions: { enabled: true, color: '#FFE14D' },                                   // animierte Untertitel in Shorts
+    linkedin: { format: '4:5', captions: true },                                     // Clips für LinkedIn (Profi-Stil)
     facecam: { enabled: false, x: 0, y: 0, w: 0, h: 0 } },                           // Bereich der Facecam (Anteile 0–1)
 });
 
@@ -94,8 +105,11 @@ function normalize(raw) {
   state.photos = Array.isArray(raw.photos) ? raw.photos : [];
   state.cut = { ...base.cut, ...raw.cut, whisper: { ...base.cut.whisper, ...raw.cut?.whisper },
     captions: { ...base.cut.captions, ...raw.cut?.captions }, facecam: { ...base.cut.facecam, ...raw.cut?.facecam },
-    window: { ...base.cut.window, ...raw.cut?.window } };
+    window: { ...base.cut.window, ...raw.cut?.window }, linkedin: { ...base.cut.linkedin, ...raw.cut?.linkedin } };
   for (const k of ['category', 'tags', 'footer']) delete state.settings[k];
+  // 1.9: LinkedIn-Kanal einmalig ergänzen (danach darf der Kunde ihn löschen)
+  if (!raw.migLinkedin && !state.profiles.some((p) => p.type === 'linkedin')) state.profiles.push(linkedinProfile());
+  state.migLinkedin = true;
   const defaults = Object.fromEntries(defaultProfiles().map((p) => [p.id, p]));
   for (const p of state.profiles) {
     const c = emptyConnections();

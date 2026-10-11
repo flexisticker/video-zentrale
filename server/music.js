@@ -123,7 +123,7 @@ export async function generate({ prompt, seconds, profileId, label }) {
 // → { file, kind: 'library'|'ai', name, mood, prompt? } oder null (aus / nichts gefunden / Fehler → warning)
 export async function trackFor({ profile, kind, seconds, idea = {} }) {
   const c = cfg();
-  if (!c.enabled || (kind === 'short' && !c.shorts) || (kind === 'long' && !c.long)) return null;
+  if (!c.enabled || profile?.music === false || (kind === 'short' && !c.shorts) || (kind === 'long' && !c.long)) return null;
   const mood = MOODS.includes(idea.mood) ? idea.mood : (profile?.musicMood || '');
   if (c.source !== 'ai') {
     const t = pickTrack(profile?.id, mood);

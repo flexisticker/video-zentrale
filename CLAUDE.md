@@ -98,6 +98,17 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   **KI-Titelbilder nachträglich** (`thumbs.generateAiOptions`, 1–3 Stück → Varianten 5–7, Bildaufbau-Stile `STYLES`, Hochformat 9:16
   bei Shorts, `ai.ensureFrames()` ohne Claude), Bereich unter dem Titelbild im Detail; `youtube.setThumbnail()` +
   `POST /api/videos/:id/youtube-thumb` für schon hochgeladene Videos.
+- 1.9.0 (11.10.2026): **LinkedIn** als Profiltyp `type: 'linkedin'` (`linkedinProfile()` in store.js, Migration `migLinkedin`,
+  `profiles.isPro()`, nie in Stichwort-/Claude-Kanalwahl, nicht Standardkanal), Ordner `eingang-profi` (`lib.INBOXES`, setzt Kanal beim Einlesen,
+  `channelFrom: 'ordner'`), Schnitt-Ausgaben erben manuellen Kanal. Profi-Schnitt: `renderShort(…, pro)` 4:5/1:1/16:9 (`cut.linkedin`),
+  `buildCalmAss()` (Schrift `fonts/Lato-Bold.ttf`, OFL), Musik aus (`profile.music === false`), `chooseHighlights(…, profile, wish)` mit
+  Geschäftskriterien. Claude: `proPrompt`/`proSchema` (Ich-Form, Beitrag 700–1500 Zeichen, 3–5 Hashtags in `tags`). UI: `linkedinBox()`, `applyMode()`,
+  `/file?download=1`, `POST /api/videos/:id/linkedin` (`v.li`). **Schnitt-Plan** `v.cutPlan` (`planOf`/`setPlan`, `/cut {plan}`, `/cutplan`):
+  long, shorts, summary (Sek.), wish → Kurzfassung `renderSummary` (trim/concat, Audio-Fades) aus `ai.chooseSummary()` (15-s-Bausteine).
+  **Papierkorb** (`papierkorb`, `v.trash {from, at}`, `/trash`, `/restore`, `DELETE /api/videos/:id`, `/api/trash/empty`, `purge()` löscht
+  auch Standbilder/Varianten/Transkript, `settings.trashDays` 30). Getestet (Mock + Playwright): eingang-profi → 2 Clips 1080×1350 ohne Musik,
+  Untertitel-Bild, Plan mit Wunsch → 1 Short + Kurzfassung, Papierkorb komplett, LinkedIn-Kasten (Kopieren, gepostet → Archiv).
+  **Nicht getestet:** echte Claude-Texte für LinkedIn, Kurzfassung mit echtem langem Gameplay.
 - Einrichtung beim Kunden (11.10.2026): Zentrale läuft über `https://videos.flexisticker.de` (NPM, Access List „Nur Heimnetz“,
   lokaler UniFi-DNS-Eintrag → 192.168.1.111). Browser zeigte trotzdem 403: Chrome/Edge „Sicheres DNS“ fragte Google/Cloudflare
   (öffentliche IP) → ausschalten bzw. „aktueller Dienstanbieter“, `net-internals/#dns` leeren. Prüfung: `curl -I` am PC.

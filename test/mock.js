@@ -92,7 +92,16 @@ http.createServer(async (req, res) => {
   if (p.startsWith('/whisper/')) { res.writeHead(200, { 'Content-Length': 2048 }); return res.end(Buffer.alloc(2048)); }
   if (p === '/v1/messages') {
     const j = JSON.parse(b.toString());
+    if (j.output_config?.format?.schema?.properties?.parts) {
+      const texts = j.messages[0].content.filter((c) => c.type === 'text').map((c) => c.text);
+      const parts = texts.filter((t) => t.startsWith('Baustein')).map((t, i) => { const m = /Sekunde (\d+)–(\d+)/.exec(t); return { part: i + 1, start: +m[1], end: +m[2] }; });
+      log.push({ summary: { parts: parts.length, wish: /Wunsch des Creators: „([^“]*)“/.exec(texts[0])?.[1] || '' } });
+      return json(res, 200, { id: 'msg_s', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn',
+        content: [{ type: 'text', text: JSON.stringify({ parts: parts.slice(0, 4) }) }], usage: { input_tokens: 9000, output_tokens: 300 } });
+    }
     if (j.output_config?.format?.schema?.properties?.shorts) {
+      const wish = /Wunsch des Creators für diesen Schnitt: „([^“]*)“/.exec(j.messages[0].content[0].text)?.[1];
+      if (wish) log.push({ hlWish: wish });
       const texts = j.messages[0].content.filter((c) => c.type === 'text').map((c) => c.text);
       log.push({ highlights: { imgs: j.messages[0].content.filter((c) => c.type === 'image').length, cands: texts.filter((t) => t.startsWith('Kandidat')) } });
       const sec = texts.filter((t) => t.startsWith('Kandidat')).map((t) => /Sekunde (\d+)–(\d+)/.exec(t)).map((m) => [Number(m[1]), Number(m[2])]);

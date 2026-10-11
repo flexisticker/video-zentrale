@@ -1,5 +1,12 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.9.0', date: '11.10.2026', items: [
+    'LinkedIn: neuer Kanal „LinkedIn“ (als Person, Ich-Form). Videos aus dem Ordner „eingang-profi“ landen automatisch dort.',
+    'Profi-Schnitt für LinkedIn: Clips im Format 4:5 (oder 1:1/16:9), ruhige Untertitel, keine Musik, Claude wählt Kernaussagen statt Gags.',
+    'Claude schreibt den LinkedIn-Beitrag (seriös, mit Frage am Ende) und passende Hashtags. Im Video: „Video herunterladen“, „Beitrag kopieren“, „Als gepostet markieren“.',
+    'Schnitt nach Wunsch: je Video wählen – Langfassung, Anzahl Shorts/Clips, Kurzfassung (1–10 Minuten, beste Stellen am Stück) – plus Wunsch in Worten an Claude.',
+    'Papierkorb: Videos löschen mit Sicherheitsabfrage, wiederherstellen oder endgültig löschen; wird nach 30 Tagen automatisch geleert (einstellbar).',
+  ] },
   { version: '1.8.0', date: '11.10.2026', items: [
     'Fehler behoben: Schnitt brach bei Unraid mit „EXDEV: cross-device link not permitted“ ab (appdata und Videos auf verschiedenen Laufwerken). Einfach „Erneut versuchen“ klicken.',
     'KI-Titelbilder jederzeit nachträglich: im Video unter dem Titelbild 1–3 Vorschläge erzeugen, eigenen Text eingeben, eins anklicken.',

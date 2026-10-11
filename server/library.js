@@ -8,7 +8,8 @@ import { db, save, DATA_DIR } from './store.js';
 import * as profiles from './profiles.js';
 
 export const VIDEO_DIR = process.env.VIDEO_DIR || '/videos';
-export const FOLDERS = ['eingang', 'geschnitten', 'hochgeladen', 'rohvideos'];
+export const FOLDERS = ['eingang', 'eingang-profi', 'geschnitten', 'hochgeladen', 'rohvideos', 'papierkorb'];
+export const INBOXES = ['eingang', 'eingang-profi']; // Rohaufnahmen (eingang-profi = LinkedIn/geschäftlich)
 export const VIDEO_EXT = ['.mp4', '.mov', '.mkv', '.webm', '.m4v'];
 const IMAGE_EXT = ['.jpg', '.jpeg', '.png', '.webp'];
 const THUMB_DIR = path.join(DATA_DIR, 'thumbs');
@@ -105,6 +106,8 @@ async function doScan() {
         // Von außen verschoben? Gleicher Name + Größe in anderem Ordner, dort verschwunden.
         v = Object.values(videos).find((x) => x.file === name && x.size === st.size && !fs.existsSync(fileOf(x)));
         if (v) v.folder = folder; else v = newVideo(folder, name);
+        // Ordner „eingang-profi“: gehört zum LinkedIn-Kanal (geschäftlich, professioneller Stil)
+        if (folder === 'eingang-profi' && !v.channel) { const pro = profiles.proProfile(); if (pro) { v.channel = pro.id; v.channelFrom = 'ordner'; } }
         changed = true;
       }
       seen.add(v.id);
@@ -186,6 +189,15 @@ export function moveFile(src, dst) {
     fs.renameSync(part, dst);
   } catch (e) { fs.rmSync(part, { force: true }); throw e; }
   fs.rmSync(src, { force: true });
+}
+
+// Endgültig löschen (nur aus dem Papierkorb): Video, Begleitdateien (Titelbild, .json) und alle Zwischendateien der Zentrale.
+export function deleteVideo(v, extraFiles = []) {
+  const base = path.basename(v.file, path.extname(v.file));
+  const files = [fileOf(v), ...[...IMAGE_EXT, '.json'].map((e) => path.join(dirOf(v.folder), base + e)), thumbPath(v), ...extraFiles];
+  for (const f of files) fs.rmSync(f, { force: true });
+  delete db().videos[v.id];
+  save();
 }
 
 // Video samt Begleitdateien verschieben.

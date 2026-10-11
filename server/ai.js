@@ -70,8 +70,9 @@ async function extractFrames(v) {
   return out;
 }
 
-function schema(ids, labels) {
+function schema(ids, labels, pro = false) {
   const s = (description) => ({ type: 'string', description });
+  if (pro) return proSchema(ids, labels, s);
   return {
     type: 'object',
     additionalProperties: false,
@@ -107,8 +108,47 @@ function schema(ids, labels) {
   };
 }
 
+// LinkedIn: gleiche Felder, andere Bedeutung (titles = Einstiegszeilen, description = Beitrag, tags = Hashtags, tiktok = Kurzfassung)
+function proSchema(ids, labels, s) {
+  const base = schema(ids, labels, false);
+  const P = base.properties;
+  P.titles = { type: 'array', items: { type: 'string' }, description: 'Genau 3 mögliche Einstiegszeilen (Hook) für den LinkedIn-Beitrag, je höchstens 90 Zeichen, sachlich und neugierig machend, Ich-Form, ohne Emojis.' };
+  P.description = s('Der komplette LinkedIn-Beitrag in der Ich-Form (Michael postet als Person): erste Zeile = stärkster Hook (gleich dem ersten Titel), '
+    + 'danach 3–6 kurze Absätze mit konkretem Mehrwert für Geschäftskunden (Problem → Lösung → Ergebnis bzw. Erfahrung/Tipp), professionell und seriös, '
+    + 'ohne Übertreibung, ohne Marktschreierei, höchstens 1–2 dezente Emojis oder keine, am Ende eine offene Frage an das Netzwerk. 700–1500 Zeichen. '
+    + 'Keine Hashtags im Text, keine erfundenen Zahlen, Kunden oder Links.');
+  P.tags = { type: 'array', items: { type: 'string' }, description: '3–5 passende, gebräuchliche LinkedIn-Hashtags ohne #, z. B. 3ddruck, textildruck, werbetechnik, handwerk, mittelstand.' };
+  P.tiktok = s('Ein Satz Kurzfassung als Videotitel bei LinkedIn (höchstens 100 Zeichen).');
+  P.thumbnailText = s('2–4 sachliche Wörter fürs Titelbild (seriös, kein Clickbait).');
+  P.aiThumb.properties.scene = s('Auf Englisch: Bildaufbau für ein seriöses, professionelles Titelbild (clean corporate look, ruhige Mimik, '
+    + 'Werkstatt/Produkt im Fokus, natürliches Licht, dezente Farben). Konkret, 2–4 Sätze, ohne den Text selbst zu wiederholen.');
+  return base;
+}
+
+function proPrompt(v, frames, extra, profile) {
+  const orient = v.width && v.height ? (v.height > v.width ? 'Hochformat' : 'Querformat') : 'unbekannt';
+  return [
+    'Du hilfst Michael, Inhaber von Flexisticker (3D-Druck, Textil- und Tassendruck), ein Video auf seinem persönlichen LinkedIn-Profil zu veröffentlichen.',
+    'Er postet als Person in der Ich-Form. Schreibe auf Deutsch, professionell, seriös und glaubwürdig – geschäftlicher Ton, kein Slang, keine Gaming-Sprache,',
+    'keine Übertreibungen. Alles muss zu dem passen, was auf den Standbildern zu sehen bzw. im Video gesagt wird. Erfinde keine Fakten, Zahlen, Kunden oder Links.',
+    `Profil: ${profile?.aiStyle || ''}`,
+    cfg().hints ? '\nAllgemeine Hinweise:\n' + cfg().hints : '',
+    '',
+    'Video:',
+    `- Dateiname: ${v.file}`,
+    `- Bisheriger Titel: ${v.title || '–'}`,
+    `- Länge: ${v.duration ? Math.round(v.duration) + ' Sekunden' : 'unbekannt'}, ${orient}`,
+    v.note ? `- Notiz von Michael: ${v.note}` : '',
+    v.transcriptText ? `- Gesprochener Text (automatisch erkannt, kann Fehler enthalten): „${v.transcriptText.slice(0, 12000)}“` : '',
+    extra ? `- Hinweis für diesen Vorschlag: ${extra}` : '',
+    `- Kanal: nimm "${profile.id}".`,
+    '',
+    `Es folgen ${frames.length} Standbilder in zeitlicher Reihenfolge (Nummer und Zeitpunkt stehen davor).`,
+  ].filter((l) => l !== '').join('\n');
+}
+
 function prompt(v, frames, extra) {
-  const lines = profiles.list().map((p) =>
+  const lines = profiles.list().filter((p) => !profiles.isPro(p)).map((p) =>
     `- ID "${p.id}" = ${p.name}${p.isDefault ? ' (Standard)' : ''}: ${p.aiStyle || 'keine Beschreibung'}. Stichwörter: ${p.keywords || '–'}. Standard-Tags: ${p.tags || '–'}`);
   const orient = v.width && v.height ? (v.height > v.width ? 'Hochformat (Short/TikTok)' : 'Querformat') : 'unbekannt';
   return [
@@ -160,11 +200,15 @@ export async function suggest(v, extra = '') {
     try { const segs = await whisper.transcribe(fileOf(v), v.id); whisper.saveTranscript(v, segs); } catch { /* ohne Ton weiter */ }
   }
   const frames = await extractFrames(v);
-  const ids = profiles.list().map((p) => p.id);
+  const chosen = v.channel ? profiles.get(v.channel) : null;
+  const pro = profiles.isPro(chosen);
+  // LinkedIn wählt Claude nie selbst – nur wenn das Video von Hand bzw. über „eingang-profi“ dorthin gehört
+  const ids = pro ? [chosen.id] : profiles.list().filter((p) => !profiles.isPro(p)).map((p) => p.id);
   const labels = ['', ...new Set(thumbs.photos().map((p) => p.label))];
-  const content = [{ type: 'text', text: prompt(v, frames, extra) + (labels.length > 1
+  const content = [{ type: 'text', text: (pro ? proPrompt(v, frames, extra, chosen) : prompt(v, frames, extra)) + (labels.length > 1
     ? `\n\nFür Titelbilder gibt es freigestellte Fotos des Creators mit diesen Gesichtsausdrücken: ${labels.filter(Boolean).join(', ')}.`
-      + ' Gute Titelbilder: ein klares Gefühl im Gesicht, das zur Szene passt, 2–4 große Wörter, starker Kontrast, neugierig machend.'
+      + (pro ? ' Gute Titelbilder für LinkedIn: seriös, ruhige freundliche Mimik (z. B. „zeigend“, „nachdenklich“, „cool“), Produkt/Werkstatt im Fokus, 2–4 sachliche Wörter.'
+        : ' Gute Titelbilder: ein klares Gefühl im Gesicht, das zur Szene passt, 2–4 große Wörter, starker Kontrast, neugierig machend.')
     : '\n\nEs gibt (noch) keine Fotos des Creators – nimm photo "".') }];
   for (const f of frames) {
     content.push({ type: 'text', text: `Standbild ${f.n} (bei ${Math.round(f.at)} s):` });
@@ -177,7 +221,7 @@ export async function suggest(v, extra = '') {
       max_tokens: 16000,
       betas: ['server-side-fallback-2026-07-01'],
       fallbacks: 'default', // lehnt Claude ab, versucht es Anthropic automatisch mit einem passenden anderen Modell
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: schema(ids, labels) } },
+      output_config: { effort: 'medium', format: { type: 'json_schema', schema: schema(ids, labels, pro) } },
       messages: [{ role: 'user', content }],
     });
   } catch (e) { throw new Error(friendly(e)); }
@@ -237,13 +281,23 @@ export async function suggest(v, extra = '') {
 
 // Aus Kandidaten-Stellen eines Rohvideos die besten Shorts wählen.
 // cands: [{start, end, peak, scenes}] (Sekunden); segs: Whisper-Segmente oder null.
-export async function chooseHighlights(v, cands, segs, c) {
+export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
   fs.mkdirSync(FRAME_DIR, { recursive: true });
+  const pro = profiles.isPro(profile);
   const content = [{ type: 'text', text: [
-    'Du schneidest aus einer Rohaufnahme die besten Kurzvideos (Shorts/TikTok) für einen deutschen Creator.',
-    `Wähle bis zu ${c.shorts} Stellen, die allein funktionieren: klarer Moment (Sieg, Fail, Überraschung, Lacher, Erklärung mit Pointe),`,
-    'starker Anfang in den ersten 2 Sekunden, Ende nach der Pointe. Lieber weniger, wenn nichts taugt (dann leere Liste).',
+    ...(pro ? [
+      'Du schneidest aus einer Rohaufnahme die besten kurzen Clips für LinkedIn – gepostet vom Inhaber eines Druck- und 3D-Druck-Betriebs als Person.',
+      `Wähle bis zu ${c.shorts} Stellen, die allein verständlich und professionell sind: eine klare Kernaussage, ein Tipp, ein Ergebnis,`,
+      'ein Vorher/Nachher, ein gelöstes Kundenproblem oder ein interessanter Einblick in die Fertigung. Keine Albernheiten, kein Leerlauf.',
+      'Der Anfang muss in den ersten 2 Sekunden zeigen, worum es geht; Ende nach einem abgeschlossenen Gedanken. Lieber weniger, wenn nichts taugt.',
+      `Kanalbeschreibung: ${profile.aiStyle || ''}`,
+    ] : [
+      'Du schneidest aus einer Rohaufnahme die besten Kurzvideos (Shorts/TikTok) für einen deutschen Creator.',
+      `Wähle bis zu ${c.shorts} Stellen, die allein funktionieren: klarer Moment (Sieg, Fail, Überraschung, Lacher, Erklärung mit Pointe),`,
+      'starker Anfang in den ersten 2 Sekunden, Ende nach der Pointe. Lieber weniger, wenn nichts taugt (dann leere Liste).',
+    ]),
     `Länge je Short ${c.shortMin}–${c.shortMax} Sekunden. Start/Ende dürfen bis zu 15 Sekunden um den Kandidaten verschoben werden.`,
+    wish ? `WICHTIG – Wunsch des Creators für diesen Schnitt: „${wish}“. Richte die Auswahl danach aus (auch wenn dadurch weniger Shorts entstehen).` : '',
     `Video: „${v.file}“, Länge ${whisper.fmtTime(v.duration)}. ${v.note ? 'Notiz: ' + v.note : ''}`,
     segs?.length ? 'Gesprochenes ist je Kandidat angegeben (automatisch erkannt, kann Fehler enthalten).' : 'Kein gesprochener Text verfügbar.',
     '',
@@ -303,6 +357,62 @@ export async function chooseHighlights(v, cands, segs, c) {
       mood: String(s.mood || ''), music: String(s.music || '').slice(0, 200) });
   }
   return picked;
+}
+
+// Kurzfassung: aus Bausteinen (je ~15 s) die besten in Summe ca. `target` Sekunden wählen – zeitliche Reihenfolge bleibt.
+export async function chooseSummary(v, parts, segs, target, profile, wish = '') {
+  fs.mkdirSync(FRAME_DIR, { recursive: true });
+  const pro = profiles.isPro(profile);
+  const content = [{ type: 'text', text: [
+    pro ? 'Du stellst aus einer Rohaufnahme eine professionelle Kurzfassung für LinkedIn zusammen (Inhaber eines Druck- und 3D-Druck-Betriebs, als Person).'
+      : 'Du stellst aus einer Rohaufnahme eine Kurzfassung (Best-of / Zusammenfassung) für YouTube zusammen.',
+    `Ziellänge insgesamt ca. ${Math.round(target)} Sekunden (±15 %). Wähle passende Stellen aus den Bausteinen; sie werden in zeitlicher Reihenfolge`,
+    'hintereinander geschnitten. Die Kurzfassung soll für sich verständlich sein: klarer Einstieg, die wichtigsten Momente bzw. Aussagen, ein Abschluss.',
+    'Start/Ende eines Bausteins darfst du um bis zu 8 Sekunden verschieben (z. B. damit ein Satz vollständig ist).',
+    wish ? `WICHTIG – Wunsch des Creators: „${wish}“. Richte die Auswahl danach aus.` : '',
+    `Video: „${v.file}“, Länge ${whisper.fmtTime(v.duration)}. ${v.note ? 'Notiz: ' + v.note : ''}`,
+    segs?.length ? 'Gesprochenes steht je Baustein dabei (automatisch erkannt).' : 'Kein gesprochener Text verfügbar.',
+    '', 'Bausteine (zu jedem ein Standbild aus der Mitte):',
+  ].filter(Boolean).join('\n') }];
+  for (let i = 0; i < parts.length; i++) {
+    const k = parts[i];
+    const file = path.join(FRAME_DIR, `${v.id}-z${i + 1}.jpg`);
+    const ok = await ffmpeg(['-hide_banner', '-loglevel', 'error', '-y', '-ss', ((k.start + k.end) / 2).toFixed(2), '-i', fileOf(v),
+      '-vf', "scale='if(gt(iw,ih),min(480,iw),-2)':'if(gt(iw,ih),-2,min(480,ih))'", '-frames:v', '1', '-q:v', '6', file]);
+    const said = segs ? whisper.textOf(segs, k.start, k.end).slice(0, 400) : '';
+    content.push({ type: 'text', text: `Baustein ${i + 1}: Sekunde ${k.start}–${k.end}, lauteste Stelle ${k.peak} LUFS, ${k.scenes} Bildwechsel${said ? `, gesagt: „${said}“` : ''}` });
+    if (ok && fs.existsSync(file)) {
+      content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: fs.readFileSync(file).toString('base64') } });
+      fs.rmSync(file, { force: true });
+    }
+  }
+  const schemaS = { type: 'object', additionalProperties: false, required: ['parts'],
+    properties: { parts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['part', 'start', 'end'], properties: {
+      part: { type: 'integer', description: 'Nummer des Bausteins' },
+      start: { type: 'number', description: 'Start in Sekunden ab Videoanfang' },
+      end: { type: 'number', description: 'Ende in Sekunden ab Videoanfang' } } } } } };
+  let r;
+  try {
+    r = await api().beta.messages.create({ model: MODEL, max_tokens: 16000, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
+      output_config: { effort: 'medium', format: { type: 'json_schema', schema: schemaS } }, messages: [{ role: 'user', content }] });
+  } catch (e) { throw new Error(friendly(e)); }
+  if (r.stop_reason === 'refusal') throw new Error('abgelehnt');
+  const out = JSON.parse(r.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
+  const cost = (r.usage?.input_tokens || 0) * PRICE.input + (r.usage?.output_tokens || 0) * PRICE.output;
+  const a = cfg(); a.spent = Math.round(((a.spent || 0) + cost) * 10000) / 10000; a.count = (a.count || 0) + 1; save();
+  const picked = [];
+  for (const x of out.parts || []) {
+    const k = parts[x.part - 1];
+    if (!k) continue;
+    const start = Math.max(0, k.start - 8, Math.min(Number(x.start), k.end - 3));
+    const end = Math.min(v.duration, k.end + 8, Math.max(Number(x.end), start + 3));
+    if (picked.some((p) => start < p.end && end > p.start)) continue;
+    picked.push({ start: Math.round(start * 10) / 10, end: Math.round(end * 10) / 10 });
+  }
+  // nicht über 130 % der Ziellänge
+  picked.sort((p, q) => p.start - q.start);
+  let total = 0;
+  return picked.filter((p) => { total += p.end - p.start; return total <= target * 1.3 || p === picked[0]; });
 }
 
 // ---- Warteschlange (eins nach dem anderen) ----

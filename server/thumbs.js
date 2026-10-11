@@ -253,9 +253,16 @@ const STYLES = [
   'Focus on the moment: the most important object or action from the frame large in the center, highlighted with a glowing outline or arrow, the person smaller in a corner reacting.',
 ];
 
+const PRO_STYLES = [
+  'Professional portrait layout: the person on one side, calm and confident, looking into the camera; the product or workshop scene on the other side.',
+  'Product hero shot: the finished product from the frame large and sharp in the center on a clean background, the person small in a corner.',
+  'Behind the scenes: the person working at the machine or workbench, natural light, the headline in a clean area at the top.',
+];
+
 // Ein KI-Titelbild erzeugen → Variante k
 async function genOne(v, { k, frame, photo, text, scene, vertical }) {
   const ch = profiles.effective(v);
+  const pro = profiles.isPro(ch);
   const color = ch?.color || '#7c5cff';
   const images = photo ? [toDataUri(photoPath(photo)), toDataUri(frame)] : [toDataUri(frame)];
   const prompt = [
@@ -263,8 +270,11 @@ async function genOne(v, { k, frame, photo, text, scene, vertical }) {
     photo ? 'Use the person from the FIRST image as the main subject: keep his face, identity, hairstyle and skin tone exactly the same; large, sharp and well lit, filling about 40% of the frame.' : '',
     `Use the ${photo ? 'SECOND' : 'FIRST'} image (a frame from the video) as the scene and background reference.`,
     scene ? 'Composition: ' + scene : '',
-    text ? `Add the headline text "${text}" in huge bold uppercase letters with a thick dark outline, spelled exactly like that, at most two lines, highly readable on a phone.` : 'No text.',
-    `Accent color ${color}. Vivid colors, strong contrast, depth, professional ${vertical ? 'short-video' : 'YouTube'} style.`,
+    text ? (pro ? `Add the headline text "${text}" in a clean bold sans-serif, spelled exactly like that, at most two lines, well readable, with a subtle shadow.`
+      : `Add the headline text "${text}" in huge bold uppercase letters with a thick dark outline, spelled exactly like that, at most two lines, highly readable on a phone.`) : 'No text.',
+    pro ? `Clean, professional, trustworthy business look for LinkedIn: calm friendly expression, natural light, workshop or product in focus, `
+      + `modern sans-serif headline, accent color ${color}, no exaggerated emotions, no comic effects, no clickbait arrows.`
+      : `Accent color ${color}. Vivid colors, strong contrast, depth, professional ${vertical ? 'short-video' : 'YouTube'} style.`,
     'No other text, no watermarks, no logos, no borders.',
   ].filter(Boolean).join(' ');
   const r = await fetch(`${FAL}/${fal().genModel || 'fal-ai/nano-banana/edit'}`, {
@@ -309,12 +319,14 @@ export async function generateAiOptions(v, framePathOf, { count = 1, text: custo
   const first = idea.photo === '' && v.ai?.aiThumb ? null : (avail.find((p) => p.label === idea.photo) || avail[0] || null);
   const others = avail.filter((p) => p !== first);
   const shortTitle = String(v.title || '').replace(/[#|–-].*$/, '').split(/\s+/).slice(0, 4).join(' ');
-  const text = String(customText != null && String(customText).trim() ? customText : (idea.text || shortTitle)).toUpperCase().slice(0, 40);
+  const rawText = String(customText != null && String(customText).trim() ? customText : (idea.text || shortTitle));
+  const text = (profiles.isPro(ch) ? rawText : rawText.toUpperCase()).slice(0, 40);
   const vertical = v.height > v.width;
+  const styles = profiles.isPro(ch) ? PRO_STYLES : STYLES;
   const jobs = [];
   for (let i = 0; i < n; i++) {
     jobs.push({ k: 5 + i, frame: frames[i % frames.length], photo: i === 0 ? first : (others[i - 1] || avail[0] || null),
-      text, scene: i === 0 && idea.scene ? idea.scene : STYLES[(idea.scene ? i - 1 : i) % STYLES.length], vertical });
+      text, scene: i === 0 && idea.scene ? idea.scene : styles[(idea.scene ? i - 1 : i) % styles.length], vertical });
   }
   // fal erlaubt neuen Konten 2 gleichzeitige Anfragen
   const results = [];

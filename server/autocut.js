@@ -11,7 +11,7 @@ import * as ai from './ai.js';
 import * as gpu from './gpu.js';
 import * as music from './music.js';
 import * as profiles from './profiles.js';
-import { buildAss } from './captions.js';
+import { buildAss, buildCalmAss } from './captions.js';
 import { fileURLToPath } from 'node:url';
 
 const FONTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fonts');
@@ -36,6 +36,7 @@ export function configure(b) {
   if (b.shortMin != null && !isNaN(b.shortMin)) c.shortMin = Math.round(num(b.shortMin, 10, 170));
   if (b.shortMax != null && !isNaN(b.shortMax)) c.shortMax = Math.round(num(b.shortMax, c.shortMin, 180));
   if (typeof b.moveRaw === 'boolean') c.moveRaw = b.moveRaw;
+  if (b.summary != null && !isNaN(b.summary)) c.summary = Math.round(num(b.summary, 0, 1800));
   if (b.window) {
     const t = (x) => /^([01]\d|2[0-3]):[0-5]\d$/.test(x || '');
     if (typeof b.window.enabled === 'boolean') c.window.enabled = b.window.enabled;
@@ -46,6 +47,10 @@ export function configure(b) {
   if (b.captions) {
     if (typeof b.captions.enabled === 'boolean') c.captions.enabled = b.captions.enabled;
     if (/^#[0-9a-f]{6}$/i.test(b.captions.color || '')) c.captions.color = b.captions.color;
+  }
+  if (b.linkedin) {
+    if (['4:5', '1:1', '16:9'].includes(b.linkedin.format)) c.linkedin.format = b.linkedin.format;
+    if (typeof b.linkedin.captions === 'boolean') c.linkedin.captions = b.linkedin.captions;
   }
   if (b.facecam) {
     const f = b.facecam, ok = (x) => typeof x === 'number' && x >= 0 && x <= 1;
@@ -124,7 +129,7 @@ function keepRanges(duration, cut) {
 }
 
 // Kandidaten für Shorts: Fenster mit hoher Aktivität (laut + Bildwechsel), sich nicht überlappend.
-function candidates(loud, scenes, duration, cut, len) {
+function candidates(loud, scenes, duration, cut, len, max = 12) {
   if (duration < len + 5) return duration >= 10 ? [{ start: 0, end: duration, score: 0, peak: Math.max(...loud) }] : [];
   const med = percentile(loud, 0.5), hi = percentile(loud, 0.95);
   const spread = Math.max(3, hi - med);
@@ -140,7 +145,7 @@ function candidates(loud, scenes, duration, cut, len) {
   win.sort((a, b) => b.sum - a.sum);
   const picked = [];
   for (const w of win) {
-    if (picked.length >= 12) break;
+    if (picked.length >= max) break;
     if (picked.some((p) => Math.abs(p.start - w.start) < len)) continue;
     picked.push(w);
   }
@@ -176,23 +181,28 @@ async function renderLong(v, file, keep, hasAudio, out, onP, track) {
 }
 
 // Short im Hochformat: Bildmitte oder Facecam oben + Spiel unten, animierte Untertitel, Grafikkarte wenn vorhanden.
-async function renderShort(v, file, s, hasAudio, out, onP, words, track) {
+async function renderShort(v, file, s, hasAudio, out, onP, words, track, pro = false) {
   const c = cfg();
   const vertical = v.height > v.width;
   const fc = c.facecam;
-  const useCam = !vertical && fc?.enabled && fc.w > 0.02 && fc.h > 0.02;
+  const useCam = !pro && !vertical && fc?.enabled && fc.w > 0.02 && fc.h > 0.02;
   const n = (x) => Number(x).toFixed(4);
+  // LinkedIn: 4:5 (1080 × 1350), 1:1 (1080 × 1080) oder 16:9 (1920 × 1080, nur aus Querformat)
+  const fmt = pro ? (c.linkedin?.format === '16:9' && vertical ? '4:5' : c.linkedin?.format || '4:5') : '';
+  const [W, H] = fmt === '1:1' ? [1080, 1080] : fmt === '4:5' ? [1080, 1350] : fmt === '16:9' ? [1920, 1080] : [1080, 1920];
   let graph;
-  if (vertical) graph = '[0:v]scale=1080:-2,setsar=1[base]';
+  if (pro) graph = `[0:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1[base]`;
+  else if (vertical) graph = '[0:v]scale=1080:-2,setsar=1[base]';
   else if (useCam) {
     graph = `[0:v]split[a][b];[a]crop=iw*${n(fc.w)}:ih*${n(fc.h)}:iw*${n(fc.x)}:ih*${n(fc.y)},scale=1080:704:force_original_aspect_ratio=increase,crop=1080:704[top];`
       + '[b]scale=-2:1216,crop=1080:1216[bot];[top][bot]vstack,setsar=1[base]';
   } else graph = '[0:v]crop=trunc(ih*9/16/2)*2:ih,scale=1080:1920,setsar=1[base]';
   let ass = '';
   const clipWords = (words || []).filter((w) => w.s >= s.start && w.e <= s.end).map((w) => ({ s: w.s - s.start, e: w.e - s.start, t: w.t }));
-  if (c.captions?.enabled && clipWords.length) {
+  if ((pro ? c.linkedin?.captions !== false : c.captions?.enabled) && clipWords.length) {
     ass = path.join(TMP, `${v.id}-s${Math.round(s.start)}.ass`);
-    fs.writeFileSync(ass, buildAss(clipWords, { color: c.captions.color, posY: useCam ? 0.74 : 0.7 }));
+    fs.writeFileSync(ass, pro ? buildCalmAss(clipWords, { width: W, height: H })
+      : buildAss(clipWords, { color: c.captions.color, posY: useCam ? 0.74 : 0.7 }));
     graph += `;[base]ass=${ass}:fontsdir=${FONTS},fps=30[v]`;
   } else graph += ';[base]fps=30[v]';
   let audio = hasAudio ? ['-map', '0:a:0', '-af', LOUDNORM, '-c:a', 'aac', '-b:a', '160k'] : [];
@@ -209,13 +219,58 @@ async function renderShort(v, file, s, hasAudio, out, onP, words, track) {
   if (r.code !== 0) throw new Error('Short: ' + lastError(r));
 }
 
+const SEG = 15; // Länge der Bausteine einer Kurzfassung (Sekunden)
+
+// Was soll geschnitten werden? Vorgaben aus den Einstellungen, je Video überschreibbar (v.cutPlan)
+export function planOf(v) {
+  const c = cfg();
+  const p = v.cutPlan || {};
+  return {
+    long: typeof p.long === 'boolean' ? p.long : c.longVersion,
+    shorts: Number.isFinite(p.shorts) ? Math.max(0, Math.min(5, p.shorts)) : c.shorts,
+    summary: Number.isFinite(p.summary) ? Math.max(0, Math.min(1800, p.summary)) : (c.summary || 0),
+    wish: String(p.wish || '').slice(0, 500),
+  };
+}
+export function setPlan(v, b = {}) {
+  const p = {};
+  if (typeof b.long === 'boolean') p.long = b.long;
+  if (b.shorts != null && !isNaN(b.shorts)) p.shorts = Math.round(Number(b.shorts));
+  if (b.summary != null && !isNaN(b.summary)) p.summary = Math.round(Number(b.summary));
+  if (typeof b.wish === 'string') p.wish = b.wish.trim().slice(0, 500);
+  v.cutPlan = p;
+  save();
+  return planOf(v);
+}
+
+// Kurzfassung: Stellen hintereinander, neu kodiert (Ton je Stelle kurz ein-/ausgeblendet gegen Knackser)
+async function renderSummary(v, file, reel, hasAudio, out, onP, track) {
+  const total = reel.reduce((x, r) => x + r.end - r.start, 0);
+  let g = '';
+  reel.forEach((r, i) => {
+    const d = (r.end - r.start).toFixed(3);
+    g += `[0:v]trim=${r.start.toFixed(3)}:${r.end.toFixed(3)},setpts=PTS-STARTPTS[v${i}];`;
+    if (hasAudio) g += `[0:a:0]atrim=${r.start.toFixed(3)}:${r.end.toFixed(3)},asetpts=PTS-STARTPTS,afade=t=in:d=0.15,afade=t=out:st=${Math.max(0, d - 0.15)}:d=0.15[a${i}];`;
+  });
+  g += reel.map((_, i) => `[v${i}]` + (hasAudio ? `[a${i}]` : '')).join('') + `concat=n=${reel.length}:v=1:a=${hasAudio ? 1 : 0}[cv]` + (hasAudio ? '[ca]' : '');
+  let audio = [];
+  if (track) { g += ';' + music.mixGraph({ hasVoice: hasAudio, dur: total, voiceIn: 'ca' }); audio = ['-map', '[aout]', '-c:a', 'aac', '-b:a', '192k']; }
+  else if (hasAudio) { g += `;[ca]${LOUDNORM}[aout]`; audio = ['-map', '[aout]', '-c:a', 'aac', '-b:a', '192k']; }
+  const mInput = track ? ['-stream_loop', '-1', '-i', track.file] : [];
+  const r = await gpu.encodeWithFallback((venc) => ffmpeg(['-i', file, ...mInput, '-filter_complex', g, '-map', '[cv]', ...audio, ...venc,
+    '-t', total.toFixed(2), '-movflags', '+faststart', '-progress', 'pipe:1', '-y', out], progressFrom(total, onP)));
+  if (r.code !== 0) throw new Error('Kurzfassung: ' + lastError(r));
+}
+
 // fertige Datei unter freiem Namen in "geschnitten" ablegen und als Video eintragen
-function publish(tmp, name, fields) {
+function publish(tmp, name, fields, raw) {
   const target = lib.freeName('geschnitten', name);
   lib.moveFile(tmp, path.join(lib.dirOf('geschnitten'), target));
   const st = fs.statSync(path.join(lib.dirOf('geschnitten'), target));
   const nv = lib.newVideo('geschnitten', target);
   Object.assign(nv, { size: st.size, mtime: st.mtimeMs }, fields);
+  // von Hand/über den Ordner gewählter Kanal gilt auch für die geschnittenen Videos
+  if (raw?.channel) { nv.channel = raw.channel; nv.channelFrom = raw.channelFrom || 'roh'; }
   return nv;
 }
 
@@ -252,26 +307,44 @@ async function runCut(v) {
     cut = [];
   }
   const keep = keepRanges(duration, cut);
+  const plan = planOf(v);
   const len = Math.round((c.shortMin + c.shortMax) / 2);
-  const cands = c.shorts > 0 ? candidates(loud, scenes, duration, cut, len) : [];
+  const cands = plan.shorts > 0 ? candidates(loud, scenes, duration, cut, len, Math.max(12, plan.shorts * 3)) : [];
 
+  const profile = profiles.effective(v);
+  const pro = profiles.isPro(profile);
   let shorts = [];
   if (cands.length) {
     step('Highlights auswählen');
     if (db().ai.apiKey) {
-      try { shorts = await ai.chooseHighlights(v, cands, segs, c); }
+      try { shorts = await ai.chooseHighlights(v, cands, segs, { ...c, shorts: plan.shorts }, profile, plan.wish); }
       catch (e) { v.cut.warning = 'Claude-Auswahl: ' + e.message + ' – lauteste Stellen genommen.'; }
     }
-    if (!shorts.length) shorts = cands.slice(0, c.shorts).map((x) => ({ ...x, title: '', reason: 'laute/bewegte Stelle' }));
+    if (!shorts.length) shorts = cands.slice(0, plan.shorts).map((x) => ({ ...x, title: '', reason: 'laute/bewegte Stelle' }));
   }
 
+  // Kurzfassung: die besten Stellen hintereinander (Ziellänge in Sekunden)
+  let reel = [];
+  if (plan.summary > 0 && duration > plan.summary + 20) {
+    step('Kurzfassung planen');
+    const parts = candidates(loud, scenes, duration, cut, SEG, Math.min(40, Math.ceil(plan.summary / SEG) * 3));
+    if (db().ai.apiKey) {
+      try { reel = await ai.chooseSummary(v, parts, segs, plan.summary, profile, plan.wish); }
+      catch (e) { v.cut.warning = 'Claude-Kurzfassung: ' + e.message + ' – beste Stellen nach Lautstärke genommen.'; }
+    }
+    if (!reel.length) {
+      let total = 0;
+      for (const x of parts) { if (total >= plan.summary) break; reel.push({ start: x.start, end: x.end }); total += x.end - x.start; }
+    }
+    reel.sort((a, b) => a.start - b.start);
+  } else if (plan.summary > 0) v.cut.warning = 'Video ist kürzer als die gewünschte Kurzfassung – keine Kurzfassung erstellt.';
+
   const base = path.basename(v.file, path.extname(v.file));
-  const jobs = (c.longVersion ? 1 : 0) + shorts.length;
+  const jobs = (plan.long ? 1 : 0) + shorts.length + (reel.length ? 1 : 0);
   let done = 0;
   const outputs = [];
   const sourceNote = (a, b) => `Aus „${v.file}“${a != null ? ` (${whisper.fmtTime(a)}–${whisper.fmtTime(b)})` : ''}.`;
 
-  const profile = profiles.effective(v);
   const getTrack = async (kind, seconds, idea, label) => {
     try {
       const t = await music.trackFor({ profile, kind, seconds, idea });
@@ -280,7 +353,25 @@ async function runCut(v) {
     } catch (e) { v.cut.warning = 'Musik: ' + e.message + ' – ohne Musik geschnitten.'; return null; }
   };
 
-  if (c.longVersion) {
+  if (reel.length) {
+    const label = 'Kurzfassung schneiden';
+    step(label, 0);
+    const tmp = path.join(TMP, v.id + '-kurz.mp4');
+    const total = reel.reduce((x, r) => x + r.end - r.start, 0);
+    const track = await getTrack('long', total, {}, label);
+    const onP = (p) => step(label, (done + p / 100) / jobs * 100);
+    try { await renderSummary(v, file, reel, hasAudio, tmp, onP, track); }
+    catch (e) { if (!track) throw e; v.cut.warning = 'Mischen mit Musik ging nicht – Kurzfassung ohne Musik.'; await renderSummary(v, file, reel, hasAudio, tmp, onP, null); }
+    const nv = publish(tmp, `${base} – Kurzfassung.mp4`, {
+      source: { rawId: v.id, rawFile: v.file, kind: 'summary', parts: reel.map((r) => [r.start, r.end]) },
+      note: sourceNote() + ` Kurzfassung aus ${reel.length} Stellen (${whisper.fmtTime(total)}).` + (plan.wish ? ' Wunsch: ' + plan.wish : '') + music.noteOf(track),
+      music: track ? { kind: track.kind, name: track.name, mood: track.mood || '' } : null,
+      transcriptText: segs ? reel.map((r) => whisper.textOf(segs, r.start, r.end)).join(' … ').slice(0, 20000) : '',
+    }, v);
+    outputs.push(nv.id); done++;
+  }
+
+  if (plan.long) {
     step('Langfassung schneiden', 0);
     const tmp = path.join(TMP, v.id + '-lang.mp4');
     const total = keep.reduce((s, [a, b]) => s + b - a, 0);
@@ -297,7 +388,7 @@ async function runCut(v) {
       note: sourceNote() + (removed ? ` ${whisper.fmtTime(removed)} ruhige Abschnitte entfernt.` : '') + music.noteOf(track),
       music: track ? { kind: track.kind, name: track.name, mood: track.mood || '' } : null,
       transcriptText: segs ? whisper.textOf(segs).slice(0, 20000) : '',
-    });
+    }, v);
     outputs.push(nv.id); done++;
   }
   for (let i = 0; i < shorts.length; i++) {
@@ -306,19 +397,19 @@ async function runCut(v) {
     const tmp = path.join(TMP, `${v.id}-short${i + 1}.mp4`);
     const label = `Short ${i + 1} von ${shorts.length} schneiden`;
     const track = await getTrack('short', s.end - s.start, { mood: s.mood, music: s.music }, label);
-    try { await renderShort(v, file, s, hasAudio, tmp, (p) => step(label, (done + p / 100) / jobs * 100), words, track); }
+    try { await renderShort(v, file, s, hasAudio, tmp, (p) => step(label, (done + p / 100) / jobs * 100), words, track, pro); }
     catch (e) {
       if (!track) throw e;
       v.cut.warning = 'Mischen mit Musik ging nicht – Short ohne Musik.';
-      await renderShort(v, file, s, hasAudio, tmp, (p) => step(label, (done + p / 100) / jobs * 100), words, null);
+      await renderShort(v, file, s, hasAudio, tmp, (p) => step(label, (done + p / 100) / jobs * 100), words, null, pro);
     }
-    const nv = publish(tmp, `${base} – Short ${i + 1}.mp4`, {
+    const nv = publish(tmp, `${base} – ${pro ? 'LinkedIn-Clip' : 'Short'} ${i + 1}.mp4`, {
       source: { rawId: v.id, rawFile: v.file, kind: 'short', start: s.start, end: s.end },
       title: s.title ? s.title.slice(0, 100) : `${base} – Short ${i + 1}`,
       note: sourceNote(s.start, s.end) + (s.reason ? ' Warum: ' + s.reason : '') + music.noteOf(track),
       music: track ? { kind: track.kind, name: track.name, mood: track.mood || '' } : null,
       transcriptText: segs ? whisper.textOf(segs, s.start, s.end) : '',
-    });
+    }, v);
     outputs.push(nv.id); done++;
   }
 
@@ -396,7 +487,7 @@ export function onDone(fn) { afterRun = fn; }
 export function autoQueue() {
   if (!cfg().auto) return;
   for (const v of Object.values(db().videos)) {
-    if (v.folder === 'eingang' && !v.missing && v.duration != null && v.duration > 0 && !v.cut) enqueue(v);
+    if (lib.INBOXES.includes(v.folder) && !v.missing && v.duration != null && v.duration > 0 && !v.cut) enqueue(v);
   }
 }
 

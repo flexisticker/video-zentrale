@@ -9,10 +9,13 @@ const TABS = [
   ['eingang', 'Eingang (roh)'],
   ['hochgeladen', 'Hochgeladen'],
   ['rohvideos', 'Rohvideos'],
+  ['papierkorb', '🗑 Papierkorb'],
   ['einstellungen', 'Einstellungen'],
 ];
 
-const FOLDER_NAMES = { eingang: 'Eingang (roh)', geschnitten: 'Zur Freigabe', hochgeladen: 'Hochgeladen', rohvideos: 'Rohvideos (Originale)' };
+const INBOXES = ['eingang', 'eingang-profi'];
+const inTab = (v, tab) => v.folder === tab || (tab === 'eingang' && v.folder === 'eingang-profi');
+const FOLDER_NAMES = { papierkorb: 'Papierkorb', eingang: 'Eingang (roh)', 'eingang-profi': 'Eingang Profi (LinkedIn)', geschnitten: 'Zur Freigabe', hochgeladen: 'Hochgeladen', rohvideos: 'Rohvideos (Originale)' };
 const S = { videos: [], busy: false, tab: 'geschnitten', search: '', channel: '', openId: null, settings: null, version: '' };
 try { S.channel = localStorage.getItem('vz-channel') || ''; } catch { /* egal */ }
 const app = document.getElementById('app');
@@ -78,6 +81,7 @@ const profilesList = () => S.settings?.profiles || [];
 const profileOf = (id) => profilesList().find((p) => p.id === id) || null;
 // Kanal, in den das Video geht: eigene Wahl oder Vorschlag.
 const channelOf = (v) => profileOf(v.channel) || profileOf(v.suggestion?.id);
+const isPro = (p) => p?.type === 'linkedin'; // nur Download, professioneller Stil
 
 function channelBadge(v) {
   const p = channelOf(v);
@@ -198,7 +202,7 @@ function readHash() {
 }
 window.addEventListener('hashchange', () => { readHash(); render(); });
 
-function go(hash) { location.hash = hash; }
+function go(hash) { location.hash = hash === 'eingang-profi' ? 'eingang' : hash; }
 
 // ---------- Daten ----------
 async function refresh() {
@@ -252,7 +256,7 @@ function render() {
 
 function updateCounts() {
   for (const [id, el] of Object.entries(countEls)) {
-    el.textContent = S.videos.filter((v) => v.folder === id && !v.missing).length;
+    el.textContent = S.videos.filter((v) => inTab(v, id) && !v.missing).length;
   }
 }
 
@@ -260,7 +264,7 @@ function renderMain() {
   if (!mainEl) return;
   if (S.tab === 'einstellungen') return renderSettings();
   const q = S.search.toLowerCase();
-  const list = S.videos.filter((v) => v.folder === S.tab && (!q || (v.title + ' ' + v.file + ' ' + v.tags).toLowerCase().includes(q))
+  const list = S.videos.filter((v) => inTab(v, S.tab) && (!q || (v.title + ' ' + v.file + ' ' + v.tags).toLowerCase().includes(q))
     && (!S.channel || channelOf(v)?.id === S.channel));
   const setChannel = (id) => { S.channel = id; try { localStorage.setItem('vz-channel', id); } catch { /* egal */ } renderMain(); };
   const filter = profilesList().length > 1 ? h('div', { class: 'filter' },
@@ -270,7 +274,7 @@ function renderMain() {
       b.firstChild.style.background = p.color;
       return b;
     })) : null;
-  const missing = S.videos.filter((v) => v.missing && v.folder === S.tab);
+  const missing = S.videos.filter((v) => v.missing && inTab(v, S.tab));
   const keepFocus = document.activeElement?.id === 'search';
   const search = h('input', { id: 'search', type: 'search', placeholder: 'Suchen …', value: S.search,
     oninput: (e) => { S.search = e.target.value; renderMain(); } });
@@ -279,11 +283,17 @@ function renderMain() {
     eingang: 'Rohaufnahmen vom OBS-Sortierer – werden automatisch geschnitten (Langfassung + Shorts → „Zur Freigabe“).',
     hochgeladen: 'Archiv: Videos, die auf YouTube und TikTok sind.',
     rohvideos: 'Originale, aus denen die Zentrale geschnitten hat. Hier aufräumen, wenn Platz knapp wird.',
+    papierkorb: `Gelöschte Videos – im Video „Wiederherstellen“ oder „Endgültig löschen“. ${S.settings?.settings?.trashDays ? `Wird nach ${S.settings.settings.trashDays} Tagen automatisch geleert.` : ''}`,
   };
+  const emptyTrash = S.tab === 'papierkorb' && list.some((v) => !v.missing) ? h('button', { class: 'btn small danger', onclick: async () => {
+    const n = list.filter((v) => !v.missing).length;
+    if (!confirm(`Papierkorb leeren?\n\n${n} Video(s) werden endgültig gelöscht – samt Titelbild und Texten. Das lässt sich nicht rückgängig machen.`)) return;
+    try { const r = await api('POST', '/api/trash/empty'); toast(`${r.deleted} Video(s) endgültig gelöscht.`); await refresh(); renderMain(); updateCounts(); } catch (x) { toast(x.message, true); }
+  } }, '🗑 Papierkorb leeren') : null;
   const grid = h('div', { class: 'grid' }, list.filter((v) => !v.missing).map(card));
   mainEl.replaceChildren(...[
     h('div', { class: 'bar' }, search, filter, h('span', { class: 'hint' }, hints[S.tab]),
-      h('div', { style: { flex: '1' } }),
+      h('div', { style: { flex: '1' } }), emptyTrash,
       h('button', { class: 'btn small ghost', onclick: async () => { await api('POST', '/api/scan'); await refresh(); renderMain(); updateCounts(); toast('Ordner neu eingelesen.'); } }, '↻ Ordner prüfen')),
     list.some((v) => !v.missing) ? grid : h('div', { class: 'empty' },
       h('b', {}, q ? 'Nichts gefunden.' : 'Noch keine Videos hier.'),
@@ -313,7 +323,9 @@ function card(v) {
         v.cut?.state === 'running' ? h('span', { class: 'chip run', title: v.cut.step }, `✂ ${v.cut.step || 'schneidet'} ${v.cut.progress ? v.cut.progress + ' %' : ''}`) : null,
         v.cut?.state === 'error' ? h('span', { class: 'chip bad', title: v.cut.error }, '✂ Fehler') : null,
         v.cut?.state === 'done' ? h('span', { class: 'chip ok' }, `✂ ${v.cut.outputs?.length || 0} Videos`) : null,
-        stateChip('YouTube', v.yt), stateChip('TikTok', v.tt)),
+        v.folder === 'eingang-profi' ? h('span', { class: 'chip li' }, 'Profi') : null,
+        v.folder === 'papierkorb' ? h('span', { class: 'chip bad' }, '🗑 ' + fmtDate(v.trash?.at)) : null,
+        ...(isPro(channelOf(v)) ? [stateChip('LinkedIn', v.li)] : [stateChip('YouTube', v.yt), stateChip('TikTok', v.tt)])),
       running ? h('div', { class: 'bar-progress' }, h('i', { style: { width: (running.progress || 0) + '%' } })) : null));
 }
 
@@ -326,6 +338,7 @@ function openDetail(id) {
   if (!v) { detail = null; return; }
   const close = () => { go(v.folder); };
   const f = {};
+  const labels = {};
   const field = (key, label, max, opts = {}) => {
     const len = h('span', { class: 'len' });
     const el = h(opts.area ? 'textarea' : 'input', { value: v[key] || '', rows: opts.rows, placeholder: opts.placeholder || '' });
@@ -333,6 +346,7 @@ function openDetail(id) {
     el.addEventListener('input', upd);
     f[key] = el;
     const l = h('label', {}, label, len);
+    labels[key] = l;
     upd(); saveBtn.disabled = true;
     return [l, el];
   };
@@ -341,7 +355,7 @@ function openDetail(id) {
   const cat = h('select', { onchange: dirty }, h('option', { value: '' }, 'Vorgabe des Kanals'),
     CATEGORIES.map(([id, n]) => h('option', { value: id, selected: String(v.category) === id }, n)));
   f.category = cat;
-  const chan = h('select', { onchange: () => { dirty(); chanInfo(); } });
+  const chan = h('select', { onchange: () => { dirty(); chanInfo(); updateDetail(); } });
   const chanReason = h('div', { class: 'hint' });
   const chanInfo = () => {
     const auto = profileOf(v.suggestion?.id);
@@ -351,7 +365,7 @@ function openDetail(id) {
     chan.value = cur;
     const p = chan.value ? profileOf(chan.value) : auto;
     const why = !chan.value ? 'Vorschlag (' + (v.suggestion?.reason || '–') + ')' : v.channelFrom === 'json' && chan.value === v.channel ? 'aus der .json' : 'von dir gewählt';
-    chanReason.textContent = p ? `→ YouTube ${p.youtube.channel ? '„' + p.youtube.channel.title + '“' : '(nicht verbunden)'} · TikTok ${p.tiktok.user?.name ? '„' + p.tiktok.user.name + '“' : p.tiktok.connected ? 'verbunden' : '(nicht verbunden)'} · ${why}` : '';
+    chanReason.textContent = isPro(p) ? `→ LinkedIn: nur Download, du postest selbst · ${why}` : p ? `→ YouTube ${p.youtube.channel ? '„' + p.youtube.channel.title + '“' : '(nicht verbunden)'} · TikTok ${p.tiktok.user?.name ? '„' + p.tiktok.user.name + '“' : p.tiktok.connected ? 'verbunden' : '(nicht verbunden)'} · ${why}` : '';
     chan.style.borderColor = p?.color || '';
   };
   chanInfo();
@@ -418,10 +432,10 @@ function openDetail(id) {
     h('div', { class: 'two' },
       h('div', {}, field('tags', 'Tags (mit Komma getrennt)', 500, { placeholder: 'leer = Vorgabe des Kanals' })),
       h('div', {}, h('label', {}, 'Kategorie'), cat)),
-    field('tiktok', 'TikTok-Text (zum Einfügen in der App)', 2200, { area: true, rows: 3, placeholder: 'leer = Titel + Hashtags aus den Tags' }),
+    h('div', { class: 'tt-part' }, field('tiktok', 'TikTok-Text (zum Einfügen in der App)', 2200, { area: true, rows: 3, placeholder: 'leer = Titel + Hashtags aus den Tags' }),
     h('div', { class: 'row', style: { marginTop: '6px' } },
       h('button', { class: 'btn small', onclick: () => { f.tiktok.value = (f.title.value + ' ' + hashtags(f.tags.value)).trim(); f.tiktok.dispatchEvent(new Event('input')); } }, 'Aus Titel + Tags erzeugen'),
-      h('button', { class: 'btn small', onclick: () => copy(f.tiktok.value || (f.title.value + ' ' + hashtags(f.tags.value)).trim()) }, '⧉ Kopieren')),
+      h('button', { class: 'btn small', onclick: () => copy(f.tiktok.value || (f.title.value + ' ' + hashtags(f.tags.value)).trim()) }, '⧉ Kopieren'))),
     field('note', 'Notiz (nur für dich)', 2000, { area: true, rows: 2 }),
     h('div', { class: 'row', style: { marginTop: '12px' } }, saveBtn),
     ytBox, ttBox);
@@ -440,8 +454,43 @@ function openDetail(id) {
     try { Object.assign(v, await api('POST', `/api/videos/${v.id}/ai-frame/${n}/cover`)); setCover(); toast('Titelbild übernommen.'); }
     catch (x) { toast(x.message, true); }
   };
-  detail = { id, cutBox, transcriptBox, v, ytBox, ttBox, moveBox, folderEl, ensureSaved, chanInfo, chan, aiBox, genBox, f, setField, setCover, setCoverFromFrame, isDirty: () => !saveBtn.disabled, markClean: () => { saveBtn.disabled = true; }, cleanup: () => document.removeEventListener('keydown', onKey) };
+  // LinkedIn-Kanal: Felder anders beschriften, TikTok/Kategorie ausblenden
+  const applyMode = (pro) => {
+    const set = (k, t) => { if (labels[k]) labels[k].firstChild.textContent = t; };
+    set('title', pro ? 'Titel des Videos (LinkedIn)' : 'Titel (YouTube)');
+    set('description', pro ? 'LinkedIn-Beitrag (Ich-Form)' : 'Beschreibung (YouTube)');
+    set('tags', pro ? 'Hashtags (mit Komma getrennt, ohne #)' : 'Tags (mit Komma getrennt)');
+    right.querySelector('.tt-part').style.display = pro ? 'none' : '';
+    cat.parentElement.style.display = pro ? 'none' : '';
+  };
+  detail = { id, cutBox, transcriptBox, v, ytBox, ttBox, moveBox, folderEl, ensureSaved, chanInfo, chan, aiBox, genBox, f, applyMode, setField, setCover, setCoverFromFrame, isDirty: () => !saveBtn.disabled, markClean: () => { saveBtn.disabled = true; }, cleanup: () => document.removeEventListener('keydown', onKey) };
   updateDetail();
+}
+
+// LinkedIn: kein Upload – Video/Titelbild herunterladen, Beitrag kopieren, als gepostet markieren
+function linkedinBox(box, v) {
+  const s = v.li || { state: 'none' };
+  const f = detail.f;
+  const postText = () => { const tags = hashtags(f.tags.value); return (f.description.value.trim() + (tags ? '\n\n' + tags : '')).trim(); };
+  const mark = async (undo) => {
+    try {
+      let url = '';
+      if (!undo) { url = prompt('Als auf LinkedIn gepostet markieren.\nLink zum Beitrag (optional):', s.url || ''); if (url === null) return; }
+      await detail.ensureSaved();
+      Object.assign(v, await api('POST', `/api/videos/${v.id}/linkedin`, { undo: !!undo, url }));
+      await refresh(); updateDetail(); updateCounts();
+    } catch (x) { toast(x.message, true); }
+  };
+  const kids = [h('h3', {}, h('span', { class: 'dot', style: { background: '#0a66c2' } }), 'LinkedIn', h('span', { class: 'meta' }, ' → als Person (Ich-Form) · Upload machst du selbst')),
+    h('div', { class: 'row' },
+      h('a', { class: 'btn primary', href: `/api/videos/${v.id}/file?download=1`, download: v.file }, '⤓ Video herunterladen'),
+      v.hasImage ? h('a', { class: 'btn', href: imgUrl(v), download: v.file.replace(/\.[^.]+$/, '') + '.jpg' }, '⤓ Titelbild') : null,
+      h('button', { class: 'btn', onclick: async () => { await detail.ensureSaved().catch(() => {}); copy(postText()); toast('Beitrag mit Hashtags kopiert.'); } }, '⧉ Beitrag kopieren')),
+    h('p', { class: 'hint' }, 'Auf linkedin.com → „Beitrag beginnen“ → Video hinzufügen → Text einfügen. Das Titelbild kannst du dort unter „Miniaturansicht“ hochladen. Untertitel sind eingebrannt (LinkedIn läuft meist ohne Ton).')];
+  if (s.state === 'done') kids.push(h('div', { class: 'status ok-text' }, '✓ Auf LinkedIn gepostet ', fmtDate(s.at), s.url ? [' · ', h('a', { href: s.url, target: '_blank', rel: 'noopener' }, 'Beitrag öffnen')] : null),
+    h('button', { class: 'btn small ghost', onclick: () => mark(true) }, 'Markierung zurücknehmen'));
+  else kids.push(h('button', { class: 'btn small', onclick: () => mark(false) }, '✓ Als gepostet markieren'));
+  box.replaceChildren(...kids.filter(Boolean));
 }
 
 function platformBox(box, v, key, label, color) {
@@ -604,15 +653,46 @@ function renderAi(box, v) {
   add(box, ...kids.filter(Boolean)); // add() filtert null
 }
 
+// Was soll geschnitten werden? Je Video einstellbar, dazu ein Wunsch in Worten für Claude.
+function cutPlanForm(v, c) {
+  const p = v.plan || {};
+  const pro = isPro(channelOf(v));
+  const long = h('input', { type: 'checkbox', checked: p.long !== false });
+  const shorts = h('select', {}, [0, 1, 2, 3, 4, 5].map((n) => h('option', { value: n, selected: (p.shorts ?? 3) === n }, n === 0 ? 'keine' : String(n))));
+  const summary = h('select', {}, [[0, 'keine'], [60, '1 Minute'], [120, '2 Minuten'], [180, '3 Minuten'], [300, '5 Minuten'], [480, '8 Minuten'], [600, '10 Minuten']]
+    .map(([n, t]) => h('option', { value: n, selected: (p.summary || 0) === n }, t)));
+  const wish = h('textarea', { rows: 2, maxlength: 500, value: p.wish || '',
+    placeholder: pro ? 'z. B. „nur den Teil, wo ich die Tasse presse“ oder „Fokus auf das Ergebnis“' : 'z. B. „nur den Bosskampf“, „die lustigsten Momente mit Max“, „ohne das Menü am Anfang“' });
+  const plan = () => ({ long: long.checked, shorts: Number(shorts.value), summary: Number(summary.value), wish: wish.value });
+  const go = async () => {
+    const pl = plan();
+    if (!pl.long && !pl.shorts && !pl.summary) return toast('Bitte mindestens eins auswählen.', true);
+    if (c?.state === 'done' && !confirm('Nochmal schneiden? Es entstehen zusätzliche Videos unter „Zur Freigabe“.')) return;
+    try { await api('POST', `/api/videos/${v.id}/cut`, { force: true, plan: pl }); await refresh(); updateDetail(true); startPolling(); } catch (x) { toast(x.message, true); }
+  };
+  return h('div', { class: 'cutplan' },
+    h('b', {}, 'Was soll entstehen?'),
+    h('label', { class: 'check' }, long, 'Langfassung (ganzes Video, ruhige Stellen raus)'),
+    h('div', { class: 'two' },
+      h('div', {}, h('label', {}, pro ? 'LinkedIn-Clips (4:5)' : 'Shorts / Clips (Hochformat)'), shorts),
+      h('div', {}, h('label', {}, 'Kurzfassung (beste Stellen am Stück)'), summary)),
+    h('label', {}, 'Dein Wunsch an Claude (optional)'), wish,
+    h('div', { class: 'row', style: { marginTop: '8px' } },
+      c?.state === 'queued'
+        ? h('button', { class: 'btn', onclick: async () => { try { Object.assign(v, await api('POST', `/api/videos/${v.id}/cutplan`, plan())); toast('Gemerkt – wird beim Schnitt so gemacht.'); } catch (x) { toast(x.message, true); } } }, 'Plan merken')
+        : null,
+      h('button', { class: 'btn primary', onclick: go }, c?.state === 'done' ? '↻ So nochmal schneiden' : c?.state === 'queued' ? '✂ Jetzt so schneiden' : '✂ So schneiden')));
+}
+
 function renderCut(box, v) {
   const c = v.cut;
   const kids = [];
   if (v.source?.rawFile) {
     const raw = S.videos.find((x) => x.id === v.source.rawId);
     kids.push(h('div', { class: 'meta' }, '✂ Automatisch geschnitten aus ', raw ? h('a', { href: '#video/' + raw.id }, v.source.rawFile) : v.source.rawFile,
-      v.source.kind === 'short' ? ' (Short)' : ' (Langfassung)'));
+      v.source.kind === 'short' ? ' (Short)' : v.source.kind === 'summary' ? ' (Kurzfassung)' : ' (Langfassung)'));
   }
-  if (['eingang', 'rohvideos'].includes(v.folder)) {
+  if ([...INBOXES, 'rohvideos'].includes(v.folder)) {
     const sec = h('div', { class: 'section' }, h('h3', {}, '✂ Automatischer Schnitt'));
     if (!c) add(sec, h('div', { class: 'status' }, 'Noch nicht geschnitten.'));
     else if (c.state === 'queued') add(sec, h('div', { class: 'status' }, 'Wartet – es wird immer nur ein Video gleichzeitig geschnitten.'));
@@ -624,11 +704,7 @@ function renderCut(box, v) {
         h('div', { class: 'row' }, (c.outputs || []).map((id) => { const o = S.videos.find((x) => x.id === id); return o ? h('a', { class: 'btn small', href: '#video/' + id }, o.title || o.file) : null; })));
     }
     if (c?.warning) add(sec, h('div', { class: 'hint' }, 'Hinweis: ' + c.warning));
-    if (!c || ['done', 'error'].includes(c.state)) add(sec, h('div', { class: 'row', style: { marginTop: '8px' } },
-      h('button', { class: 'btn', onclick: async () => {
-        if (c?.state === 'done' && !confirm('Nochmal schneiden? Es entstehen zusätzliche Videos unter „Zur Freigabe“.')) return;
-        try { await api('POST', `/api/videos/${v.id}/cut`, { force: true }); await refresh(); updateDetail(true); startPolling(); } catch (x) { toast(x.message, true); }
-      } }, c ? '↻ Erneut schneiden' : '✂ Jetzt schneiden')));
+    if (!c || ['done', 'error', 'queued'].includes(c.state)) add(sec, cutPlanForm(v, c));
     kids.push(sec);
   }
   box.replaceChildren(...kids);
@@ -675,22 +751,45 @@ function updateDetail(force) {
     renderGenThumbs(detail.genBox, detail.v);
   }
   // Felder nicht überschreiben, nur Status-Teile
-  Object.assign(detail.v, { yt: v.yt, tt: v.tt, folder: v.folder, file: v.file, hasImage: v.hasImage, imageVersion: v.imageVersion });
+  Object.assign(detail.v, { yt: v.yt, tt: v.tt, li: v.li, folder: v.folder, file: v.file, hasImage: v.hasImage, imageVersion: v.imageVersion });
   if (!detail.chan.value && v.suggestion?.id !== detail.v.suggestion?.id) { detail.v.suggestion = v.suggestion; detail.chanInfo(); }
-  platformBox(detail.ytBox, detail.v, 'yt', 'YouTube', 'var(--yt)');
-  platformBox(detail.ttBox, detail.v, 'tt', 'TikTok', 'var(--tt)');
+  const target = profileOf(detail.chan.value) || channelOf(detail.v);
+  detail.applyMode(isPro(target));
+  if (isPro(target)) { linkedinBox(detail.ytBox, detail.v); detail.ttBox.replaceChildren(); }
+  else {
+    platformBox(detail.ytBox, detail.v, 'yt', 'YouTube', 'var(--yt)');
+    platformBox(detail.ttBox, detail.v, 'tt', 'TikTok', 'var(--tt)');
+  }
   const mv = async (folder, msg) => {
     try { await detail.ensureSaved(); await api('POST', `/api/videos/${v.id}/move`, { folder }); await refresh(); toast(msg); go(folder); }
     catch (x) { toast(x.message, true); }
   };
   detail.folderEl.textContent = 'Ordner: ' + FOLDER_NAMES[v.folder] + (v.folder === 'hochgeladen' ? ' (Archiv)' : '');
   const b = [];
-  if (v.folder === 'eingang') b.push(h('button', { class: 'btn', onclick: () => mv('geschnitten', 'Zur Freigabe verschoben.') }, '→ Zur Freigabe (ohne Schnitt)'));
+  if (INBOXES.includes(v.folder)) b.push(h('button', { class: 'btn', onclick: () => mv('geschnitten', 'Zur Freigabe verschoben.') }, '→ Zur Freigabe (ohne Schnitt)'));
   if (v.folder === 'geschnitten') {
     b.push(h('button', { class: 'btn', onclick: () => mv('hochgeladen', 'Ins Archiv verschoben.') }, '✓ Fertig – ins Archiv'));
     b.push(h('button', { class: 'btn ghost', onclick: () => mv('eingang', 'Zurück in den Eingang.') }, '← Zurück in den Eingang'));
   }
   if (v.folder === 'hochgeladen') b.push(h('button', { class: 'btn ghost', onclick: () => mv('geschnitten', 'Zurück zur Freigabe.') }, '← Zurück zur Freigabe'));
+  if (v.folder === 'papierkorb') {
+    b.push(h('button', { class: 'btn primary', onclick: async () => {
+      try { Object.assign(v, await api('POST', `/api/videos/${v.id}/restore`)); await refresh(); updateCounts(); toast('Wiederhergestellt (' + FOLDER_NAMES[v.folder] + ').'); go(v.folder); }
+      catch (x) { toast(x.message, true); }
+    } }, '↩ Wiederherstellen'));
+    b.push(h('button', { class: 'btn danger', onclick: async () => {
+      if (!confirm(`„${v.title || v.file}“ endgültig löschen?\n\nVideo, Titelbild und Texte werden vom Server entfernt. Das lässt sich nicht rückgängig machen.`)) return;
+      try { await api('DELETE', `/api/videos/${v.id}`); await refresh(); updateCounts(); toast('Endgültig gelöscht.'); go('papierkorb'); }
+      catch (x) { toast(x.message, true); }
+    } }, '✕ Endgültig löschen'));
+  } else {
+    b.push(h('button', { class: 'btn ghost danger', onclick: async () => {
+      const where = v.yt?.id || v.li?.state === 'done' || v.tt?.state === 'done' ? '\n\nHinweis: Auf YouTube/TikTok/LinkedIn bleibt das Video bestehen – dort bei Bedarf selbst löschen.' : '';
+      if (!confirm(`„${v.title || v.file}“ in den Papierkorb legen?\n\nDu kannst es dort wiederherstellen.${where}`)) return;
+      try { await detail.ensureSaved().catch(() => {}); await api('POST', `/api/videos/${v.id}/trash`); await refresh(); updateCounts(); toast('In den Papierkorb gelegt.'); go(v.folder); }
+      catch (x) { toast(x.message, true); }
+    } }, '🗑 Löschen'));
+  }
   detail.moveBox.replaceChildren(...b);
 }
 
@@ -818,9 +917,10 @@ async function renderSettings() {
     const footer = h('textarea', { rows: 3, value: p.footer, placeholder: 'z. B. Links zu Discord/Shop, „Musik: Epidemic Sound“' });
     const mStyle = h('input', { value: p.musicStyle, placeholder: 'englisch, z. B. energetic electronic gaming beat' });
     const mMood = h('select', {}, h('option', { value: '' }, '– keine –'), (st.music?.moods || []).map((x) => h('option', { value: x, selected: p.musicMood === x }, x)));
+    const proMusic = h('input', { type: 'checkbox', checked: p.music });
     const save = run(() => api('PUT', '/api/profiles/' + p.id, { name: name.value, color: color.value, isDefault: def.checked || undefined,
       keywords: kw.value, aiStyle: style.value, category: cat.value, tags: tags.value, footer: footer.value,
-      musicStyle: mStyle.value, musicMood: mMood.value }), 'Kanal gespeichert.');
+      musicStyle: mStyle.value, musicMood: mMood.value, ...(isPro(p) ? { music: proMusic.checked } : {}) }), 'Kanal gespeichert.');
 
     // YouTube
     const yp = y.pending[p.id];
@@ -869,7 +969,7 @@ async function renderSettings() {
     head.firstChild.style.background = p.color;
     const box = h('div', { class: 'box channelbox' }, head,
       h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Name'), name), h('div', {}, h('label', {}, 'Farbe'), color)),
-      h('label', { class: 'check' }, def, 'Standardkanal (wenn kein Stichwort passt)'),
+      isPro(p) ? null : h('label', { class: 'check' }, def, 'Standardkanal (wenn kein Stichwort passt)'),
       h('label', {}, 'Beschreibung für Claude (Thema, Ton, Publikum)'), style,
       h('label', {}, 'Stichwörter für den Vorschlag (mit Komma; Titel/Dateiname zählt doppelt)'), kw,
       h('div', { class: 'two' }, h('div', {}, h('label', {}, 'YouTube-Kategorie'), cat), h('div', {}, h('label', {}, 'Standard-Tags'), tags)),
@@ -879,7 +979,10 @@ async function renderSettings() {
       h('div', { class: 'row', style: { marginTop: '12px' } },
         h('button', { class: 'btn primary', onclick: save }, 'Speichern'),
         st.profiles.length > 1 ? h('button', { class: 'btn ghost danger', onclick: () => confirm(`Kanal „${p.name}“ löschen?`) && run(() => api('DELETE', '/api/profiles/' + p.id), 'Kanal gelöscht.')() }, 'Löschen') : null),
-      ytPart, ttPart);
+      ...(isPro(p) ? [h('div', { class: 'conn' }, h('b', {}, h('span', { class: 'dot', style: { background: '#0a66c2' } }), ' LinkedIn – nur Download'),
+        h('p', { class: 'hint' }, 'Kein automatischer Upload: Im Video gibt es „Video herunterladen“ und „Beitrag kopieren“. Videos aus dem Ordner \\\\PowerServer\\videos\\eingang-profi landen automatisch hier, '
+          + 'werden im Profi-Stil geschnitten (Format und Untertitel unter „Automatischer Schnitt“) und Claude schreibt den Beitrag in der Ich-Form.'),
+        h('label', { class: 'check' }, proMusic, 'Hintergrundmusik in LinkedIn-Clips'))] : [ytPart, ttPart]));
     box.style.borderTop = '3px solid ' + p.color;
     return box;
   };
@@ -953,7 +1056,12 @@ async function renderSettings() {
   const wModel = h('select', {}, Object.entries(w.whisper?.models || w.models || {}).map(([m, d]) => h('option', { value: m, selected: w.model === m }, `${m} – ${d}${(w.installed || []).includes(m) ? ' ✓ geladen' : ''}`)));
   const wThreads = numIn(w.threads, { min: 1, max: 32 });
   const wGpu = cb(w.useGpu);
+  const cSum = h('select', {}, [[0, 'keine'], [60, '1 Minute'], [120, '2 Minuten'], [180, '3 Minuten'], [300, '5 Minuten'], [480, '8 Minuten'], [600, '10 Minuten']]
+    .map(([n, t]) => h('option', { value: n, selected: (c.summary || 0) === n }, t)));
   const win = c.window || {};
+  const liFmt = h('select', {}, [['4:5', '4:5 hoch (empfohlen, 1080 × 1350)'], ['1:1', '1:1 quadratisch (1080 × 1080)'], ['16:9', '16:9 quer (1920 × 1080)']]
+    .map(([k, n]) => h('option', { value: k, selected: (c.linkedin?.format || '4:5') === k }, n)));
+  const liCap = cb(c.linkedin?.captions !== false);
   const wnOn = cb(win.enabled), wnFrom = h('input', { type: 'time', value: win.from || '01:00' }), wnTo = h('input', { type: 'time', value: win.to || '07:00' });
   const gpuInfo = !w.gpu?.available ? 'Grafikkarten-Version ist in diesem Image nicht enthalten.'
     : w.gpu.tried ? (w.gpu.ok ? '🟢 läuft auf der Grafikkarte' : '⚪ Grafikkarte ging nicht (' + (w.gpu.error || '?') + ') – nutzt Prozessor') : 'wird beim nächsten Mal ausprobiert';
@@ -966,6 +1074,8 @@ async function renderSettings() {
     h('div', { class: 'two' }, h('div', {}, h('label', {}, 'ruhig = leiser als (LUFS)'), cDb), h('div', {}, h('label', {}, 'ab Länge (Sekunden)'), cMin)),
     h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Shorts je Video (0 = keine)'), cShorts),
       h('div', {}, h('label', {}, 'Länge von – bis (s)'), h('div', { class: 'row' }, cSmin, cSmax))),
+    h('div', {}, h('label', {}, 'Kurzfassung (beste Stellen am Stück) – Standard'), cSum),
+    h('p', { class: 'hint' }, 'Je Video kannst du im Video selbst (Eingang/Rohvideos) festlegen, was entstehen soll, und Claude einen Wunsch mitgeben.'),
     h('label', { class: 'check' }, cMove, 'Original danach nach „Rohvideos“ verschieben'),
     h('label', { class: 'check' }, wnOn, '🌙 Nachtbetrieb: nur in diesem Zeitfenster schneiden'),
     h('div', { class: 'row' }, h('span', { class: 'hint' }, 'von'), wnFrom, h('span', { class: 'hint' }, 'bis'), wnTo,
@@ -973,6 +1083,8 @@ async function renderSettings() {
     h('label', { class: 'check' }, capOn, 'Animierte Untertitel in Shorts (Wort für Wort)'),
     h('div', { class: 'row' }, h('span', { class: 'hint' }, 'Farbe des gesprochenen Worts:'), capColor),
     h('label', { class: 'check' }, camOn, 'Facecam-Layout für Shorts (Facecam oben, Spiel unten)'),
+    h('div', { class: 'two' }, h('div', {}, h('label', {}, 'LinkedIn-Clips (Ordner eingang-profi): Format'), liFmt),
+      h('div', {}, h('label', {}, '\u00a0'), h('label', { class: 'check' }, liCap, 'ruhige Untertitel einbrennen'))),
     camPart,
     h('p', { class: 'hint' }, c.gpu?.nvenc ? '🟢 Grafikkarte (NVENC) wird zum Kodieren genutzt.' : '⚪ Grafikkarte nicht genutzt' + (c.gpu?.error ? ' – ' + c.gpu.error : '') + '. In Unraid: --runtime=nvidia, NVIDIA_VISIBLE_DEVICES=all, NVIDIA_DRIVER_CAPABILITIES=all.'),
     h('h3', { style: { marginTop: '16px' } }, '🗣 Sprache erkennen (Whisper)'),
@@ -985,8 +1097,8 @@ async function renderSettings() {
     h('div', { class: 'row', style: { marginTop: '12px' } },
       h('button', { class: 'btn', onclick: run(() => api('POST', '/api/cut/config', { auto: cAuto.checked, longVersion: cLong.checked, cutPauses: cPause.checked,
         silenceDb: Number(cDb.value), minPause: Number(cMin.value), shorts: Number(cShorts.value), shortMin: Number(cSmin.value), shortMax: Number(cSmax.value),
-        moveRaw: cMove.checked, whisper: { enabled: wOn.checked, model: wModel.value, threads: Number(wThreads.value), gpu: wGpu.checked },
-        window: { enabled: wnOn.checked, from: wnFrom.value, to: wnTo.value },
+        moveRaw: cMove.checked, summary: Number(cSum.value), whisper: { enabled: wOn.checked, model: wModel.value, threads: Number(wThreads.value), gpu: wGpu.checked },
+        window: { enabled: wnOn.checked, from: wnFrom.value, to: wnTo.value }, linkedin: { format: liFmt.value, captions: liCap.checked },
         captions: { enabled: capOn.checked, color: capColor.value }, facecam: { enabled: camOn.checked, x: cam.x, y: cam.y, w: cam.w, h: cam.h } }), 'Gespeichert.') }, 'Speichern')));
 
   // ----- Musik -----
@@ -1092,11 +1204,13 @@ async function renderSettings() {
 
   // ----- Allgemein + Zugang -----
   const auto = h('input', { type: 'checkbox', checked: st.settings.autoArchive });
+  const trashDays = h('input', { type: 'number', min: 0, max: 365, value: st.settings.trashDays ?? 30 });
   const old = h('input', { type: 'password', autocomplete: 'current-password' });
   const neu = h('input', { type: 'password', autocomplete: 'new-password' });
   const account = h('div', { class: 'box' }, h('h3', {}, 'Allgemein & Zugang'),
     h('label', { class: 'check' }, auto, 'Nach YouTube + TikTok automatisch ins Archiv'),
-    h('div', { class: 'row', style: { marginTop: '8px' } }, h('button', { class: 'btn small', onclick: run(() => api('PUT', '/api/settings', { autoArchive: auto.checked }), 'Gespeichert.') }, 'Speichern')),
+    h('label', {}, 'Papierkorb automatisch leeren nach … Tagen (0 = nie)'), trashDays,
+    h('div', { class: 'row', style: { marginTop: '8px' } }, h('button', { class: 'btn small', onclick: run(() => api('PUT', '/api/settings', { autoArchive: auto.checked, trashDays: Number(trashDays.value) }), 'Gespeichert.') }, 'Speichern')),
     h('label', {}, 'Altes Passwort'), old, h('label', {}, 'Neues Passwort (mind. 8 Zeichen)'), neu,
     h('div', { class: 'row', style: { marginTop: '12px' } },
       h('button', { class: 'btn', onclick: async () => { try { await api('POST', '/api/password', { old: old.value, password: neu.value }); old.value = neu.value = ''; toast('Passwort geändert.'); } catch (x) { toast(x.message, true); } } }, 'Passwort ändern'),

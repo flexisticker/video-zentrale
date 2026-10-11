@@ -209,3 +209,8 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .gen-list { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 .gen-list.vertical { grid-template-columns: repeat(auto-fill, minmax(90px, 140px)); }
 .gen-list.vertical .variant { aspect-ratio: 9 / 16; }
+
+.chip.li { background: #0a66c2; color: #fff; border-color: #0a66c2; }
+
+.cutplan { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.cutplan textarea { width: 100%; }

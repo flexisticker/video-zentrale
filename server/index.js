@@ -102,10 +102,30 @@ function checkLimit(ip) {
 
 function publicVideo(v) {
   const strip = (s) => s && { ...s, history: undefined, historyCount: s.history?.length || 0 };
-  return { ...v, yt: strip(v.yt), tt: strip(v.tt), suggestion: profiles.suggest(v),
+  return { ...v, yt: strip(v.yt), tt: strip(v.tt), suggestion: profiles.suggest(v), plan: lib.INBOXES.includes(v.folder) || v.folder === 'rohvideos' ? autocut.planOf(v) : undefined,
     transcriptText: undefined, hasTranscript: !!v.transcriptText,
     imageVersion: v.image ? (v.imageAt || v.mtime) : v.thumbAt, hasImage: !!lib.imagePath(v) };
 }
+
+// endgültig löschen inkl. Standbilder, Varianten und Transkript
+function purge(v) {
+  const extra = [];
+  for (let n = 1; n <= 9; n++) { extra.push(ai2.framePath(v, n), thumbs.variantPath(v, n)); }
+  extra.push(path.join(process.env.DATA_DIR || '/data', 'transkripte', v.id + '.json'));
+  lib.deleteVideo(v, extra);
+}
+
+// Papierkorb nach X Tagen automatisch leeren
+function emptyOldTrash() {
+  const days = Number(db().settings.trashDays) || 0;
+  if (!days) return;
+  const limit = Date.now() - days * 86400_000;
+  for (const v of Object.values(db().videos)) {
+    if (v.folder === 'papierkorb' && v.trash?.at && new Date(v.trash.at).getTime() < limit) { try { purge(v); } catch (e) { console.error('Papierkorb:', e.message); } }
+  }
+}
+setInterval(emptyOldTrash, 3600_000).unref();
+setTimeout(emptyOldTrash, 60_000);
 
 function getVideo(id) {
   const v = db().videos[id];
@@ -116,11 +136,12 @@ function getVideo(id) {
 const isUploading = (v) => ['queued', 'uploading'].includes(v.yt?.state) || ['queued', 'uploading'].includes(v.tt?.state);
 
 // Datei mit Range-Unterstützung ausliefern (Videoplayer springt so direkt an jede Stelle).
-function sendFile(req, res, file, type) {
+function sendFile(req, res, file, type, downloadName) {
   let st;
   try { st = fs.statSync(file); } catch { throw new HttpError(404, 'Datei fehlt.'); }
   const range = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
   const base = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, max-age=0' };
+  if (downloadName) base['Content-Disposition'] = `attachment; filename="${downloadName.replace(/[^\w .()\-]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(downloadName)}`;
   if (range && (range[1] || range[2])) {
     let start = range[1] ? Number(range[1]) : st.size - Number(range[2]);
     let end = range[1] && range[2] ? Number(range[2]) : st.size - 1;
@@ -250,7 +271,15 @@ async function api(req, res, url) {
   if ((r = /^\/api\/videos\/([0-9a-f]{16})(\/.*)?$/.exec(p))) {
     const v = getVideo(r[1]);
     const sub = r[2] || '';
-    if (sub === '/file' && (m === 'GET' || m === 'HEAD')) return sendFile(req, res, lib.fileOf(v), TYPES[path.extname(v.file).toLowerCase()] || 'application/octet-stream');
+    if (sub === '/file' && (m === 'GET' || m === 'HEAD')) return sendFile(req, res, lib.fileOf(v), TYPES[path.extname(v.file).toLowerCase()] || 'application/octet-stream',
+      url.searchParams.get('download') ? v.file : '');
+    if (sub === '/linkedin' && m === 'POST') {
+      const b = await readJson(req);
+      v.li = b.undo ? { state: 'none' } : { state: 'done', at: new Date().toISOString(), url: /^https:\/\//.test(String(b.url || '')) ? String(b.url) : '' };
+      saveNow();
+      if (!b.undo && db().settings.autoArchive && v.folder === 'geschnitten') { try { lib.moveVideo(v, 'hochgeladen'); } catch (e) { console.error('Archivieren:', e.message); } }
+      return send(res, 200, publicVideo(v));
+    }
     if (sub === '/image' && m === 'GET') {
       const img = lib.imagePath(v);
       if (!img) throw new HttpError(404, 'Kein Bild.');
@@ -278,6 +307,26 @@ async function api(req, res, url) {
       lib.setImage(v, buf, ext);
       return send(res, 200, publicVideo(v));
     }
+    if (sub === '/trash' && m === 'POST') {
+      if (v.folder === 'papierkorb') return send(res, 200, publicVideo(v));
+      if (isUploading(v)) throw new HttpError(409, 'Während eines Uploads nicht löschen.');
+      if (['queued', 'running'].includes(v.cut?.state)) throw new HttpError(409, 'Wird gerade geschnitten – bitte warten.');
+      const from = v.folder;
+      lib.moveVideo(v, 'papierkorb');
+      v.trash = { from, at: new Date().toISOString() }; saveNow();
+      return send(res, 200, publicVideo(v));
+    }
+    if (sub === '/restore' && m === 'POST') {
+      if (v.folder !== 'papierkorb') throw new HttpError(409, 'Video ist nicht im Papierkorb.');
+      lib.moveVideo(v, lib.FOLDERS.includes(v.trash?.from) && v.trash.from !== 'papierkorb' ? v.trash.from : 'geschnitten');
+      delete v.trash; saveNow();
+      return send(res, 200, publicVideo(v));
+    }
+    if (sub === '' && m === 'DELETE') {
+      if (v.folder !== 'papierkorb' && !v.missing) throw new HttpError(409, 'Erst in den Papierkorb legen.');
+      purge(v);
+      return send(res, 200, { ok: true });
+    }
     if (sub === '/move' && m === 'POST') {
       const { folder } = await readJson(req);
       if (isUploading(v)) throw new HttpError(409, 'Während eines Uploads nicht verschieben.');
@@ -288,9 +337,11 @@ async function api(req, res, url) {
     }
     if (sub === '/cut' && m === 'POST') {
       const b = await readJson(req);
+      if (b.plan) autocut.setPlan(v, b.plan);
       autocut.enqueue(v, { force: !!b.force, now: true });
       return send(res, 200, publicVideo(v));
     }
+    if (sub === '/cutplan' && m === 'POST') { autocut.setPlan(v, await readJson(req)); return send(res, 200, publicVideo(v)); }
     if (sub === '/transcript' && m === 'GET') {
       const segs = whisper.loadTranscript(v);
       return send(res, 200, { segments: segs, text: v.transcriptText || '' });
@@ -360,6 +411,7 @@ async function api(req, res, url) {
     const s = db().settings;
     if (typeof b.language === 'string') s.language = b.language.slice(0, 8);
     if (typeof b.autoArchive === 'boolean') s.autoArchive = b.autoArchive;
+    if (b.trashDays != null && !isNaN(b.trashDays)) s.trashDays = Math.max(0, Math.min(365, Math.round(Number(b.trashDays))));
     saveNow();
     return send(res, 200, { ok: true });
   }
@@ -412,6 +464,11 @@ async function api(req, res, url) {
     else buf = await readRaw(req, 500 * 1024 * 1024);
     try { return send(res, 200, { ...backup.restore(buf), status: backup.status() }); }
     catch (e) { throw new HttpError(400, e.message); }
+  }
+  if (p === '/api/trash/empty' && m === 'POST') {
+    let n = 0;
+    for (const v of Object.values(db().videos)) if (v.folder === 'papierkorb') { purge(v); n++; }
+    return send(res, 200, { deleted: n });
   }
   if (p === '/api/version' && m === 'GET') return send(res, 200, ver.info());
   if (p === '/api/version/check' && m === 'POST') { await ver.checkUpdate(true); return send(res, 200, ver.info()); }
