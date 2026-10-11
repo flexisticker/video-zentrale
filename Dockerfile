@@ -8,9 +8,23 @@ RUN git clone --depth 1 --branch v1.9.5 https://github.com/ggml-org/whisper.cpp 
       -DGGML_OPENMP=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF -DCMAKE_BUILD_TYPE=Release \
  && cmake --build /src/build -j"$(nproc)" --target whisper-cli
 
+# Dieselbe Spracherkennung mit NVIDIA-CUDA (GTX 1050 Ti = Architektur 61; 75/86 für neuere Karten).
+# Die Zentrale probiert diese Variante zuerst und nimmt sonst die normale (Prozessor).
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS whisper-cuda
+RUN apt-get update && apt-get install -y --no-install-recommends git cmake build-essential ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN git clone --depth 1 --branch v1.9.5 https://github.com/ggml-org/whisper.cpp /src \
+ && cmake -S /src -B /src/build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="61;75;86" -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF \
+      -DGGML_OPENMP=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF -DCMAKE_BUILD_TYPE=Release \
+ && cmake --build /src/build -j"$(nproc)" --target whisper-cli \
+ && mkdir /cudalibs \
+ && ldd /src/build/bin/whisper-cli | awk '/=> \/usr\/local\/cuda/ {print $3}' | xargs -r -I{} cp -L {} /cudalibs/ \
+ && ls -la /cudalibs
+
 FROM node:22-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 COPY --from=whisper /src/build/bin/whisper-cli /usr/local/bin/whisper-cli
+COPY --from=whisper-cuda /src/build/bin/whisper-cli /usr/local/bin/whisper-cli-cuda
+COPY --from=whisper-cuda /cudalibs /usr/local/lib/whisper-cuda
 WORKDIR /app
 ENV NODE_ENV=production PORT=8090 DATA_DIR=/data VIDEO_DIR=/videos TZ=Europe/Berlin
 COPY package.json package-lock.json ./
