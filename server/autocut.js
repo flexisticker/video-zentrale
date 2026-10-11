@@ -8,11 +8,16 @@ import { db, save, saveNow, DATA_DIR } from './store.js';
 import * as lib from './library.js';
 import * as whisper from './whisper.js';
 import * as ai from './ai.js';
+import * as gpu from './gpu.js';
+import { buildAss } from './captions.js';
+import { fileURLToPath } from 'node:url';
+
+const FONTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fonts');
 
 const TMP = path.join(DATA_DIR, 'tmp');
 const cfg = () => db().cut;
 
-export function status() { return { ...cfg(), whisper: whisper.status(), running: running ? { id: running } : null, queued: queue.length }; }
+export function status() { return { ...cfg(), whisper: whisper.status(), gpu: gpu.status(), running: running ? { id: running } : null, queued: queue.length }; }
 
 export function configure(b) {
   const c = cfg();
@@ -26,6 +31,15 @@ export function configure(b) {
   if (b.shortMin != null && !isNaN(b.shortMin)) c.shortMin = Math.round(num(b.shortMin, 10, 170));
   if (b.shortMax != null && !isNaN(b.shortMax)) c.shortMax = Math.round(num(b.shortMax, c.shortMin, 180));
   if (typeof b.moveRaw === 'boolean') c.moveRaw = b.moveRaw;
+  if (b.captions) {
+    if (typeof b.captions.enabled === 'boolean') c.captions.enabled = b.captions.enabled;
+    if (/^#[0-9a-f]{6}$/i.test(b.captions.color || '')) c.captions.color = b.captions.color;
+  }
+  if (b.facecam) {
+    const f = b.facecam, ok = (x) => typeof x === 'number' && x >= 0 && x <= 1;
+    if (typeof f.enabled === 'boolean') c.facecam.enabled = f.enabled;
+    if (ok(f.x) && ok(f.y) && ok(f.w) && ok(f.h) && f.x + f.w <= 1.001 && f.y + f.h <= 1.001) Object.assign(c.facecam, { x: f.x, y: f.y, w: f.w, h: f.h });
+  }
   const w = b.whisper || {};
   if (typeof w.enabled === 'boolean') c.whisper.enabled = w.enabled;
   if (whisper.MODELS[w.model]) c.whisper.model = w.model;
@@ -147,13 +161,31 @@ async function renderLong(v, file, keep, hasAudio, out, onP) {
   if (r.code !== 0) throw new Error('Langfassung: ' + lastError(r));
 }
 
-async function renderShort(v, file, s, hasAudio, out, onP) {
+// Short im Hochformat: Bildmitte oder Facecam oben + Spiel unten, animierte Untertitel, Grafikkarte wenn vorhanden.
+async function renderShort(v, file, s, hasAudio, out, onP, words) {
+  const c = cfg();
   const vertical = v.height > v.width;
-  const vf = vertical ? 'scale=1080:-2,setsar=1' : "crop=trunc(ih*9/16/2)*2:ih,scale=1080:1920,setsar=1";
+  const fc = c.facecam;
+  const useCam = !vertical && fc?.enabled && fc.w > 0.02 && fc.h > 0.02;
+  const n = (x) => Number(x).toFixed(4);
+  let graph;
+  if (vertical) graph = '[0:v]scale=1080:-2,setsar=1[base]';
+  else if (useCam) {
+    graph = `[0:v]split[a][b];[a]crop=iw*${n(fc.w)}:ih*${n(fc.h)}:iw*${n(fc.x)}:ih*${n(fc.y)},scale=1080:704:force_original_aspect_ratio=increase,crop=1080:704[top];`
+      + '[b]scale=-2:1216,crop=1080:1216[bot];[top][bot]vstack,setsar=1[base]';
+  } else graph = '[0:v]crop=trunc(ih*9/16/2)*2:ih,scale=1080:1920,setsar=1[base]';
+  let ass = '';
+  const clipWords = (words || []).filter((w) => w.s >= s.start && w.e <= s.end).map((w) => ({ s: w.s - s.start, e: w.e - s.start, t: w.t }));
+  if (c.captions?.enabled && clipWords.length) {
+    ass = path.join(TMP, `${v.id}-s${Math.round(s.start)}.ass`);
+    fs.writeFileSync(ass, buildAss(clipWords, { color: c.captions.color, posY: useCam ? 0.74 : 0.7 }));
+    graph += `;[base]ass=${ass}:fontsdir=${FONTS},fps=30[v]`;
+  } else graph += ';[base]fps=30[v]';
   const audio = hasAudio ? ['-map', '0:a:0', '-af', LOUDNORM, '-c:a', 'aac', '-b:a', '160k'] : [];
-  const r = await ffmpeg(['-ss', s.start.toFixed(2), '-i', file, '-t', (s.end - s.start).toFixed(2), '-map', '0:v:0', ...audio,
-    '-vf', vf, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p', '-r', '30',
-    '-movflags', '+faststart', '-progress', 'pipe:1', '-y', out], progressFrom(s.end - s.start, onP));
+  const r = await gpu.encodeWithFallback((venc) => ffmpeg(['-ss', s.start.toFixed(2), '-i', file, '-t', (s.end - s.start).toFixed(2),
+    '-filter_complex', graph, '-map', '[v]', ...audio, ...venc,
+    '-movflags', '+faststart', '-progress', 'pipe:1', '-y', out], progressFrom(s.end - s.start, onP)));
+  if (ass) fs.rmSync(ass, { force: true });
   if (r.code !== 0) throw new Error('Short: ' + lastError(r));
 }
 
@@ -181,11 +213,14 @@ async function runCut(v) {
   step('Bildwechsel suchen');
   const scenes = await sceneChanges(file);
 
-  let segs = whisper.loadTranscript(v);
+  let words = whisper.loadWords(v);
+  let segs = words ? whisper.sentences(words) : null;
   if (!segs && c.whisper.enabled) {
     step('Sprache erkennen (Whisper)');
-    try { segs = await whisper.transcribe(file, v.id, (p) => step('Sprache erkennen (Whisper)', p)); whisper.saveTranscript(v, segs); }
-    catch (e) { v.cut.warning = e.message; segs = null; }
+    try {
+      words = await whisper.transcribe(file, v.id, (p) => step('Sprache erkennen (Whisper)', p));
+      whisper.saveTranscript(v, words); segs = whisper.sentences(words);
+    } catch (e) { v.cut.warning = e.message; segs = null; words = null; }
   }
 
   let cut = c.cutPauses && hasAudio ? pauses(loud, c) : [];
@@ -232,7 +267,7 @@ async function runCut(v) {
     const s = shorts[i];
     step(`Short ${i + 1} von ${shorts.length} schneiden`);
     const tmp = path.join(TMP, `${v.id}-short${i + 1}.mp4`);
-    await renderShort(v, file, s, hasAudio, tmp, (p) => step(`Short ${i + 1} von ${shorts.length} schneiden`, (done + p / 100) / jobs * 100));
+    await renderShort(v, file, s, hasAudio, tmp, (p) => step(`Short ${i + 1} von ${shorts.length} schneiden`, (done + p / 100) / jobs * 100), words);
     const nv = publish(tmp, `${base} – Short ${i + 1}.mp4`, {
       source: { rawId: v.id, rawFile: v.file, kind: 'short', start: s.start, end: s.end },
       title: s.title ? s.title.slice(0, 100) : `${base} – Short ${i + 1}`,
@@ -293,6 +328,7 @@ export function autoQueue() {
 }
 
 export function init() {
+  gpu.check().then((g) => console.log('Grafikkarte:', g.nvenc ? 'NVENC aktiv' : 'nicht genutzt (' + g.error + ')'));
   for (const v of Object.values(db().videos)) {
     if (['queued', 'running'].includes(v.cut?.state)) { v.cut = { ...v.cut, state: 'queued' }; queue.push(v.id); }
   }

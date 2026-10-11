@@ -63,7 +63,7 @@ function run(cmd, args, onLine) {
 // Nur eine Erkennung gleichzeitig (CPU).
 let chain = Promise.resolve();
 
-// → [{ s, e, t }] (Sekunden, Text)
+// → Wörter [{ s, e, t }] (Sekunden, Text) – ein Eintrag je Wort (für Untertitel)
 export function transcribe(videoFile, key, onProgress = () => {}) {
   const job = chain.then(() => doTranscribe(videoFile, key, onProgress));
   chain = job.catch(() => {});
@@ -78,7 +78,8 @@ async function doTranscribe(videoFile, key, onProgress) {
   try {
     const a = await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', videoFile, '-map', '0:a:0', '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav]);
     if (a.code !== 0 || !fs.existsSync(wav)) return []; // keine Tonspur
-    const r = await run(BIN, ['-m', model, '-f', wav, '-l', 'de', '-t', String(c.threads || 4), '-oj', '-of', base, '-pp'], (l) => {
+    // -ml 1 -sow: ein Segment je Wort → Zeitmarken pro Wort
+    const r = await run(BIN, ['-m', model, '-f', wav, '-l', 'de', '-t', String(c.threads || 4), '-ml', '1', '-sow', '-oj', '-of', base, '-pp'], (l) => {
       const m = /progress\s*=\s*(\d+)%/.exec(l);
       if (m) onProgress(Number(m[1]));
     });
@@ -90,6 +91,18 @@ async function doTranscribe(videoFile, key, onProgress) {
     fs.rmSync(wav, { force: true });
     fs.rmSync(base + '.json', { force: true });
   }
+}
+
+// Wörter zu Sätzen/Zeilen gruppieren (Anzeige, Text für Claude)
+export function sentences(words) {
+  const out = []; let cur = null;
+  for (const w of words) {
+    if (cur && (w.s - cur.e > 1.0 || cur.n >= 20 || /[.!?]$/.test(cur.t))) { out.push(cur); cur = null; }
+    if (!cur) cur = { s: w.s, e: w.e, t: w.t, n: 1 };
+    else { cur.e = w.e; cur.t += ' ' + w.t; cur.n++; }
+  }
+  if (cur) out.push(cur);
+  return out.map(({ s, e, t }) => ({ s, e, t }));
 }
 
 // Text eines Zeitraums (für Shorts) bzw. alles.
@@ -104,13 +117,21 @@ export const fmtTime = (s) => {
 
 // Transkripte liegen als Datei, nicht im Speicher (können lang werden).
 const TDIR = path.join(DATA_DIR, 'transkripte');
-export function saveTranscript(v, segs) {
+export function saveTranscript(v, words) {
   fs.mkdirSync(TDIR, { recursive: true });
-  fs.writeFileSync(path.join(TDIR, v.id + '.json'), JSON.stringify(segs));
+  fs.writeFileSync(path.join(TDIR, v.id + '.json'), JSON.stringify({ words }));
   v.transcriptAt = new Date().toISOString();
-  v.transcriptText = textOf(segs).slice(0, 20000);
+  v.transcriptText = textOf(words).slice(0, 20000);
   save();
 }
+export function loadWords(v) {
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(TDIR, v.id + '.json'), 'utf8'));
+    return Array.isArray(j) ? j : j.words; // 1.3.0 speicherte Sätze als Liste
+  } catch { return null; }
+}
+// Sätze mit Zeitmarken (für Anzeige und Claude)
 export function loadTranscript(v) {
-  try { return JSON.parse(fs.readFileSync(path.join(TDIR, v.id + '.json'), 'utf8')); } catch { return null; }
+  const w = loadWords(v);
+  return w ? sentences(w) : null;
 }

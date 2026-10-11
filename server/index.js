@@ -5,6 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
 import { load, db, save, saveNow } from './store.js';
 import * as lib from './library.js';
 import * as youtube from './youtube.js';
@@ -14,6 +15,8 @@ import * as profiles from './profiles.js';
 import * as ai from './ai.js';
 import * as autocut from './autocut.js';
 import * as whisper from './whisper.js';
+import * as thumbs from './thumbs.js';
+import * as ai2 from './ai.js';
 
 const PORT = Number(process.env.PORT || 8090);
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -300,6 +303,17 @@ async function api(req, res, url) {
       if (!fm[2] && m === 'GET') return sendFile(req, res, file, 'image/jpeg');
       if (fm[2] && m === 'POST') { lib.setImage(v, fs.readFileSync(file), '.jpg'); return send(res, 200, publicVideo(v)); }
     }
+    let vm;
+    if ((vm = /^\/variant\/([1-4])(\/cover|\/boost)?$/.exec(sub))) {
+      const k = Number(vm[1]), file = thumbs.variantPath(v, k);
+      if (!vm[2] && m === 'GET') { if (!fs.existsSync(file)) throw new HttpError(404, 'Variante fehlt.'); return sendFile(req, res, file, 'image/jpeg'); }
+      if (vm[2] === '/cover' && m === 'POST') { lib.setImage(v, fs.readFileSync(file), '.jpg'); return send(res, 200, publicVideo(v)); }
+      if (vm[2] === '/boost' && m === 'POST') { await thumbs.boost(v, k); return send(res, 200, publicVideo(v)); }
+    }
+    if (sub === '/variants' && m === 'POST') {
+      await thumbs.makeVariants(v, (n) => { const f = ai2.framePath(v, n); return fs.existsSync(f) ? f : null; });
+      return send(res, 200, publicVideo(v));
+    }
     if (sub === '/forget' && m === 'POST') {
       if (!v.missing) throw new HttpError(409, 'Nur fehlende Videos können entfernt werden.');
       delete db().videos[v.id]; saveNow();
@@ -317,7 +331,7 @@ async function api(req, res, url) {
   }
 
   if (p === '/api/settings' && m === 'GET') {
-    return send(res, 200, { settings: db().settings, youtube: youtube.status(), tiktok: tiktok.status(), ai: ai.status(), cut: autocut.status(),
+    return send(res, 200, { settings: db().settings, youtube: youtube.status(), tiktok: tiktok.status(), ai: ai.status(), cut: autocut.status(), fal: thumbs.falStatus(),
       profiles: profiles.list().map(profiles.publicProfile), version: VERSION });
   }
   if (p === '/api/settings' && m === 'PUT') {
@@ -327,6 +341,37 @@ async function api(req, res, url) {
     if (typeof b.autoArchive === 'boolean') s.autoArchive = b.autoArchive;
     saveNow();
     return send(res, 200, { ok: true });
+  }
+  // Standbild aus einer Rohaufnahme zum Markieren der Facecam
+  if (p === '/api/facecam-frame' && m === 'GET') {
+    const cand = Object.values(db().videos).filter((x) => !x.missing && x.width > x.height && ['eingang', 'rohvideos'].includes(x.folder))
+      .sort((a, b) => (b.mtime || 0) - (a.mtime || 0))[0]
+      || Object.values(db().videos).filter((x) => !x.missing && x.width > x.height).sort((a, b) => (b.mtime || 0) - (a.mtime || 0))[0];
+    if (!cand) throw new HttpError(404, 'Noch keine Aufnahme im Querformat vorhanden.');
+    const out = path.join(process.env.DATA_DIR || '/data', 'tmp', 'facecam.jpg');
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    await new Promise((resolve) => {
+      const pr = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(Math.floor((cand.duration || 10) * 0.3)), '-i', lib.fileOf(cand),
+        '-vf', 'scale=960:-2', '-frames:v', '1', '-q:v', '4', out], { stdio: 'ignore' });
+      pr.on('close', resolve); pr.on('error', resolve);
+    });
+    if (!fs.existsSync(out)) throw new HttpError(500, 'Standbild nicht lesbar.');
+    return sendFile(req, res, out, 'image/jpeg');
+  }
+  if (p === '/api/fal/config' && m === 'POST') { thumbs.falConfigure(await readJson(req)); return send(res, 200, thumbs.falStatus()); }
+  if (p === '/api/photos' && m === 'GET') return send(res, 200, { photos: thumbs.photos(), labels: thumbs.LABELS });
+  if (p === '/api/photos' && m === 'POST') {
+    const buf = await readRaw(req, 25 * 1024 * 1024);
+    return send(res, 200, await thumbs.addPhoto(buf, { label: url.searchParams.get('label'), channel: url.searchParams.get('channel') || '' }));
+  }
+  let ph;
+  if ((ph = /^\/api\/photos\/([0-9a-f]{12})(\/image|\/recut)?$/.exec(p))) {
+    const photo = thumbs.photos().find((x) => x.id === ph[1]);
+    if (!photo) throw new HttpError(404, 'Foto nicht gefunden.');
+    if (ph[2] === '/image' && m === 'GET') return sendFile(req, res, thumbs.photoPath(photo), TYPES[path.extname(photo.file)] || 'image/png');
+    if (ph[2] === '/recut' && m === 'POST') return send(res, 200, await thumbs.recut(photo.id));
+    if (!ph[2] && m === 'PUT') return send(res, 200, thumbs.updatePhoto(photo.id, await readJson(req)));
+    if (!ph[2] && m === 'DELETE') { thumbs.removePhoto(photo.id); return send(res, 200, { ok: true }); }
   }
   if (p === '/api/cut/config' && m === 'POST') { autocut.configure(await readJson(req)); return send(res, 200, autocut.status()); }
   if (p === '/api/ai/config' && m === 'POST') { ai.configure(await readJson(req)); return send(res, 200, ai.status()); }

@@ -483,7 +483,21 @@ function renderAi(box, v) {
           if (a.channel && !d.chan.value) { d.chan.value = a.channel; d.chan.dispatchEvent(new Event('change')); }
           toast('Übernommen – noch speichern.');
         } }, 'Alles übernehmen')),
-      a.frames?.length ? h('div', {}, h('b', { class: 'meta' }, 'Titelbild – Claude empfiehlt Bild ' + a.thumbnailFrame + (a.thumbnailText ? ', Text: „' + a.thumbnailText + '“' : '') + ':'),
+      v.thumbVariants?.length ? h('div', {}, h('b', { class: 'meta' }, 'Titelbild-Varianten – anklicken zum Übernehmen:'),
+        h('div', { class: 'variants' }, v.thumbVariants.map((t) => {
+          const b = h('button', { class: 'variant', title: (t.ai ? 'KI-Aufwertung' : t.text + (t.photo ? ' · ' + t.photo : '')) + ' – als Titelbild nehmen',
+            onclick: async () => { try { Object.assign(v, await api('POST', `/api/videos/${v.id}/variant/${t.k}/cover`)); d.setCover(); toast('Titelbild übernommen.'); } catch (x) { toast(x.message, true); } } });
+          b.style.backgroundImage = `url("/api/videos/${v.id}/variant/${t.k}?t=${v.thumbVariantsAt || 0}")`;
+          const wrap = h('div', { class: 'vwrap' }, b, t.ai ? h('span', { class: 'chip ok' }, '✨ KI') : null);
+          if (!t.ai && S.settings?.fal?.configured) wrap.append(h('button', { class: 'btn small ghost', title: 'Mit fal.ai aufwerten (kostet Guthaben)', onclick: async (e) => {
+            e.target.disabled = true; e.target.textContent = '✨ wird aufgewertet …';
+            try { Object.assign(v, await api('POST', `/api/videos/${v.id}/variant/${t.k}/boost`)); await refresh(); updateDetail(true); toast('KI-Variante fertig.'); }
+            catch (x) { toast(x.message, true); e.target.disabled = false; e.target.textContent = '✨ KI-Aufwertung'; }
+          } }, '✨ KI-Aufwertung'));
+          return wrap;
+        })),
+        h('button', { class: 'btn small ghost', onclick: async () => { try { Object.assign(v, await api('POST', `/api/videos/${v.id}/variants`)); await refresh(); updateDetail(true); toast('Neu erzeugt.'); } catch (x) { toast(x.message, true); } } }, '↻ Varianten neu bauen (z. B. nach neuen Fotos)')) : null,
+      a.frames?.length ? h('details', {}, h('summary', { class: 'meta' }, 'Standbilder – Claude empfiehlt Bild ' + a.thumbnailFrame + (a.thumbnailText ? ', Text: „' + a.thumbnailText + '“' : '') + ':'),
         h('div', { class: 'frames' }, a.frames.map((n) => {
           const b = h('button', { class: 'frame' + (n === a.thumbnailFrame ? ' best' : ''), title: 'Als Titelbild nehmen', onclick: () => d.setCoverFromFrame(n) });
           b.style.backgroundImage = `url("/api/videos/${v.id}/ai-frame/${n}?t=${encodeURIComponent(a.at)}")`;
@@ -549,9 +563,9 @@ function updateDetail(force) {
   const cutSig = JSON.stringify([v.cut, v.folder, v.hasTranscript]);
   if (force || cutSig !== detail.cutSig) { detail.cutSig = cutSig; renderCut(detail.cutBox, v); }
   if (v.hasTranscript !== detail.hasTranscript) { detail.hasTranscript = v.hasTranscript; renderTranscript(detail.transcriptBox, v); }
-  const aiChanged = JSON.stringify(v.ai || null) !== detail.aiSeen;
+  const aiChanged = force === true || JSON.stringify([v.ai || null, v.thumbVariantsAt || 0]) !== detail.aiSeen;
   if (aiChanged) {
-    detail.aiSeen = JSON.stringify(v.ai || null);
+    detail.aiSeen = JSON.stringify([v.ai || null, v.thumbVariantsAt || 0]);
     // Vorschlag wurde serverseitig übernommen und hier ist nichts ungespeichert → Felder auffrischen
     if (v.ai?.applied && v.ai?.state === 'done' && !detail.isDirty()) {
       for (const k of ['title', 'description', 'tags', 'tiktok']) detail.f[k].value = v[k] || '';
@@ -559,7 +573,8 @@ function updateDetail(force) {
       detail.markClean();
       detail.v.title = v.title;
     }
-    Object.assign(detail.v, { ai: v.ai, suggestion: v.suggestion, hasImage: v.hasImage, imageVersion: v.imageVersion, image: v.image });
+    Object.assign(detail.v, { ai: v.ai, suggestion: v.suggestion, hasImage: v.hasImage, imageVersion: v.imageVersion, image: v.image,
+      thumbVariants: v.thumbVariants, thumbVariantsAt: v.thumbVariantsAt });
     detail.setCover(); detail.chanInfo();
     detail.aiBox.replaceChildren(); renderAi(detail.aiBox, detail.v);
   }
@@ -640,6 +655,29 @@ window.addEventListener('message', (e) => {
   if (e.data.ok) toast(`${e.data.platform} verbunden für „${e.data.kanal}“.`); else toast(`${e.data.platform}: ${e.data.error}`, true);
   if (S.tab === 'einstellungen' && !S.openId) renderSettings();
 });
+
+// Facecam auf einem Standbild per Ziehen markieren → Anteile 0–1
+function markFacecam(cur, done) {
+  const img = h('img', { src: '/api/facecam-frame?t=' + Date.now(), alt: '', draggable: 'false' });
+  const box = h('div', { class: 'selbox' });
+  const stage = h('div', { class: 'stage' }, img, box);
+  let r = cur?.w ? { x: cur.x, y: cur.y, w: cur.w, h: cur.h } : null, start = null;
+  const show = () => { if (!r) { box.style.display = 'none'; return; } Object.assign(box.style, { display: 'block', left: r.x * 100 + '%', top: r.y * 100 + '%', width: r.w * 100 + '%', height: r.h * 100 + '%' }); };
+  const pos = (e) => { const b = stage.getBoundingClientRect(); return { x: Math.min(1, Math.max(0, (e.clientX - b.left) / b.width)), y: Math.min(1, Math.max(0, (e.clientY - b.top) / b.height)) }; };
+  stage.addEventListener('pointerdown', (e) => { start = pos(e); stage.setPointerCapture(e.pointerId); e.preventDefault(); });
+  stage.addEventListener('pointermove', (e) => { if (!start) return; const p = pos(e); r = { x: Math.min(start.x, p.x), y: Math.min(start.y, p.y), w: Math.abs(p.x - start.x), h: Math.abs(p.y - start.y) }; show(); });
+  stage.addEventListener('pointerup', () => { start = null; });
+  img.addEventListener('error', () => { toast('Kein Standbild verfügbar – erst eine Aufnahme in den Eingang legen.', true); modal.remove(); });
+  const modal = h('div', { class: 'modal', onclick: (e) => { if (e.target === modal) modal.remove(); } },
+    h('div', { class: 'sheet' }, h('h2', {}, 'Facecam markieren'),
+      h('p', { class: 'hint' }, 'Ziehe mit der Maus einen Rahmen um deine Facecam. Im Short kommt dieser Bereich oben hin, darunter das Spiel.'),
+      stage,
+      h('div', { class: 'row', style: { marginTop: '12px' } },
+        h('button', { class: 'btn primary', onclick: () => { if (!r || r.w < 0.03 || r.h < 0.03) return toast('Bitte einen Rahmen ziehen.', true); done(r); modal.remove(); } }, 'Übernehmen'),
+        h('button', { class: 'btn ghost', onclick: () => modal.remove() }, 'Abbrechen'))));
+  document.body.append(modal);
+  show();
+}
 
 // append ohne null/false (sonst steht „null“ im Text)
 const add = (el, ...kids) => el.append(...kids.flat().filter((k) => k != null && k !== false));
@@ -805,6 +843,12 @@ async function renderSettings() {
   const cDb = numIn(c.silenceDb, { min: -70, max: -20 }), cMin = numIn(c.minPause, { min: 5, max: 600 });
   const cShorts = numIn(c.shorts, { min: 0, max: 5 }), cSmin = numIn(c.shortMin, { min: 10, max: 170 }), cSmax = numIn(c.shortMax, { min: 10, max: 180 });
   const wOn = cb(w.enabled);
+  const capOn = cb(c.captions?.enabled), capColor = h('input', { type: 'color', value: c.captions?.color || '#FFE14D', class: 'color small' });
+  const camOn = cb(c.facecam?.enabled);
+  let cam = { ...(c.facecam || {}) };
+  const camInfo = h('span', { class: 'hint' }, cam.w ? `markiert: ${Math.round(cam.x * 100)} % / ${Math.round(cam.y * 100)} %, ${Math.round(cam.w * 100)} × ${Math.round(cam.h * 100)} %` : 'noch nicht markiert');
+  const camPart = h('div', { class: 'cam' }, h('div', { class: 'row' },
+    h('button', { class: 'btn small', onclick: () => markFacecam(cam, (r) => { cam = { ...cam, ...r }; camInfo.textContent = `markiert: ${Math.round(r.x * 100)} % / ${Math.round(r.y * 100)} %, ${Math.round(r.w * 100)} × ${Math.round(r.h * 100)} % – noch speichern`; }) }, '⬚ Facecam markieren'), camInfo));
   const wModel = h('select', {}, Object.entries(w.whisper?.models || w.models || {}).map(([m, d]) => h('option', { value: m, selected: w.model === m }, `${m} – ${d}${(w.installed || []).includes(m) ? ' ✓ geladen' : ''}`)));
   const wThreads = numIn(w.threads, { min: 1, max: 32 });
   const dl = w.download;
@@ -817,6 +861,11 @@ async function renderSettings() {
     h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Shorts je Video (0 = keine)'), cShorts),
       h('div', {}, h('label', {}, 'Länge von – bis (s)'), h('div', { class: 'row' }, cSmin, cSmax))),
     h('label', { class: 'check' }, cMove, 'Original danach nach „Rohvideos“ verschieben'),
+    h('label', { class: 'check' }, capOn, 'Animierte Untertitel in Shorts (Wort für Wort)'),
+    h('div', { class: 'row' }, h('span', { class: 'hint' }, 'Farbe des gesprochenen Worts:'), capColor),
+    h('label', { class: 'check' }, camOn, 'Facecam-Layout für Shorts (Facecam oben, Spiel unten)'),
+    camPart,
+    h('p', { class: 'hint' }, c.gpu?.nvenc ? '🟢 Grafikkarte (NVENC) wird zum Kodieren genutzt.' : '⚪ Grafikkarte nicht genutzt' + (c.gpu?.error ? ' – ' + c.gpu.error : '') + '. In Unraid: --runtime=nvidia, NVIDIA_VISIBLE_DEVICES=all, NVIDIA_DRIVER_CAPABILITIES=all.'),
     h('h3', { style: { marginTop: '16px' } }, '🗣 Sprache erkennen (Whisper)'),
     h('p', { class: 'hint' }, 'Wandelt Gesprochenes in Text – Claude versteht dann, was du sagst. Läuft lokal auf dem Server, kostet nichts. Das Modell wird beim ersten Mal geladen.'),
     dl ? h('p', { class: dl.error ? 'err' : 'hint' }, dl.error || `Lade Modell „${dl.model}“ … ${dl.total ? Math.round(dl.done / dl.total * 100) + ' %' : Math.round(dl.done / 1e6) + ' MB'}`) : null,
@@ -825,7 +874,44 @@ async function renderSettings() {
     h('div', { class: 'row', style: { marginTop: '12px' } },
       h('button', { class: 'btn', onclick: run(() => api('POST', '/api/cut/config', { auto: cAuto.checked, longVersion: cLong.checked, cutPauses: cPause.checked,
         silenceDb: Number(cDb.value), minPause: Number(cMin.value), shorts: Number(cShorts.value), shortMin: Number(cSmin.value), shortMax: Number(cSmax.value),
-        moveRaw: cMove.checked, whisper: { enabled: wOn.checked, model: wModel.value, threads: Number(wThreads.value) } }), 'Gespeichert.') }, 'Speichern')));
+        moveRaw: cMove.checked, whisper: { enabled: wOn.checked, model: wModel.value, threads: Number(wThreads.value) },
+        captions: { enabled: capOn.checked, color: capColor.value }, facecam: { enabled: camOn.checked, x: cam.x, y: cam.y, w: cam.w, h: cam.h } }), 'Gespeichert.') }, 'Speichern')));
+
+  // ----- Titelbilder & Fotos -----
+  const fl = st.fal;
+  const fKey = h('input', { type: 'password', autocomplete: 'off', placeholder: fl.configured ? 'gespeichert (' + fl.keyHint + ') – zum Ändern neu eintragen' : 'fal.ai API-Schlüssel' });
+  const fModel = h('input', { value: fl.model });
+  const upLabel = h('select', {}, fl.labels.map((l) => h('option', { value: l }, l)));
+  const upChannel = h('select', {}, h('option', { value: '' }, 'alle Kanäle'), st.profiles.map((p) => h('option', { value: p.id }, p.name)));
+  const upInput = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', multiple: true, class: 'hidden', onchange: async (e) => {
+    const files = [...e.target.files]; e.target.value = '';
+    for (const f of files) {
+      toast(`Lade „${f.name}“ hoch${fl.configured ? ' und stelle frei' : ''} …`);
+      try { const p = await api('POST', `/api/photos?label=${encodeURIComponent(upLabel.value)}&channel=${encodeURIComponent(upChannel.value)}`, undefined, f); if (p.note) toast(p.note, true); }
+      catch (x) { toast(x.message, true); }
+    }
+    again();
+  } });
+  const phList = await api('GET', '/api/photos').catch(() => ({ photos: [] }));
+  const photoGrid = h('div', { class: 'photos' }, phList.photos.map((p) => {
+    const lab = h('select', { onchange: () => api('PUT', '/api/photos/' + p.id, { label: lab.value }).then(() => toast('Gespeichert.')) }, fl.labels.map((l) => h('option', { value: l, selected: p.label === l }, l)));
+    const chs = h('select', { onchange: () => api('PUT', '/api/photos/' + p.id, { channel: chs.value }).then(() => toast('Gespeichert.')) },
+      h('option', { value: '' }, 'alle Kanäle'), st.profiles.map((x) => h('option', { value: x.id, selected: p.channel === x.id }, x.name)));
+    const img = h('div', { class: 'photo' + (p.cut ? '' : ' uncut') }); img.style.backgroundImage = `url("/api/photos/${p.id}/image?t=${encodeURIComponent(p.at)}")`;
+    return h('div', { class: 'phcard' }, img, lab, chs,
+      p.cut ? null : h('div', { class: 'hint' }, 'nicht freigestellt', fl.configured ? h('button', { class: 'btn small', onclick: run(() => api('POST', `/api/photos/${p.id}/recut`), 'Freigestellt.') }, 'freistellen') : null),
+      h('button', { class: 'btn small ghost danger', onclick: () => confirm('Foto löschen?') && run(() => api('DELETE', '/api/photos/' + p.id), 'Gelöscht.')() }, 'Löschen'));
+  }));
+  const thumbBox = h('div', { class: 'box wide' }, h('h3', {}, '🖼 Titelbilder & Fotos von dir'),
+    h('p', { class: 'hint' }, 'Lade 4–8 Fotos mit verschiedenen Gesichtsausdrücken hoch (überrascht, jubelnd, zeigend …). Claude wählt je Video das passende Foto, Standbild und den Text; die Zentrale baut 3 Varianten (1280 × 720). Mit fal.ai werden Fotos automatisch freigestellt.'),
+    h('div', { class: 'row' }, upLabel, upChannel, h('button', { class: 'btn primary', onclick: () => upInput.click() }, '⤒ Fotos hochladen'), upInput),
+    phList.photos.length ? photoGrid : h('p', { class: 'hint' }, 'Noch keine Fotos.'),
+    h('h3', { style: { marginTop: '16px' } }, 'fal.ai'),
+    fl.configured ? h('p', { class: 'ok-text' }, `✓ eingerichtet · ${fl.count} freigestellt, ${fl.boosts} KI-Aufwertungen`) : h('p', { class: 'hint' }, 'Schlüssel von fal.ai (Dashboard → API Keys). Freistellen kostet nur Bruchteile eines Cents; „KI-Aufwertung“ eines Titelbilds je nach Modell einige Cent.'),
+    h('label', {}, 'API-Schlüssel'), fKey,
+    h('details', {}, h('summary', { class: 'hint' }, 'Modell für die KI-Aufwertung'), fModel),
+    h('div', { class: 'row', style: { marginTop: '10px' } },
+      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/fal/config', { key: fKey.value, model: fModel.value }), 'Gespeichert.') }, 'Speichern')));
 
   // ----- Allgemein + Zugang -----
   const auto = h('input', { type: 'checkbox', checked: st.settings.autoArchive });
@@ -846,7 +932,7 @@ async function renderSettings() {
       h('button', { class: 'btn small', onclick: () => { const n = prompt('Name des neuen Kanals:'); if (n) run(() => api('POST', '/api/profiles', { name: n }), 'Kanal angelegt.')(); } }, '+ Kanal')),
     h('div', { class: 'settings' }, st.profiles.map(channelBox)),
     h('h2', { class: 'h2', style: { marginTop: '24px' } }, 'Apps & Zugang'),
-    h('div', { class: 'settings' }, claudeBox, cutBox, googleBox, tiktokBox, account));
+    h('div', { class: 'settings' }, claudeBox, cutBox, thumbBox, googleBox, tiktokBox, account));
 }
 
 start();

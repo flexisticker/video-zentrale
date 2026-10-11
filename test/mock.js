@@ -1,7 +1,9 @@
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
 // Nachbau der Google-/YouTube- und TikTok-Schnittstellen für lokale Tests.
 import http from 'node:http';
 const log = [];
-let tokenCalls = 0, ytFailOnce = true, devN = 0;
+let tokenCalls = 0, ytFailOnce = true, devN = 0, falLast = null;
 const YT_NAMES = { 'dev1': 'MichaModus', 'dev2': '3D by Micha' };
 const yt = { size: 0, got: 0 }, tt = { size: 0, got: 0, chunks: 0 };
 const body = (req) => new Promise((r) => { const c = []; req.on('data', (d) => c.push(d)); req.on('end', () => r(Buffer.concat(c))); });
@@ -66,6 +68,17 @@ http.createServer(async (req, res) => {
     res.writeHead(tt.got >= tt.size ? 201 : 206); return res.end();
   }
   if (p === '/v2/post/publish/status/fetch/') return json(res, 200, { data: { status: tt.got >= tt.size ? 'SEND_TO_USER_INBOX' : 'PROCESSING_UPLOAD' }, error: { code: 'ok' } });
+  // fal.ai: Freistellen (liefert Test-Person mit Transparenz) und KI-Aufwertung (liefert das Eingangsbild zurück)
+  if (p === '/fal-ai/birefnet' || p.startsWith('/fal-ai/flux')) {
+    if (req.headers.authorization !== 'Key fal-test') return json(res, 401, { detail: 'Unauthorized' });
+    const j = JSON.parse(b.toString());
+    log.push({ fal: { model: p, prompt: (j.prompt || '').slice(0, 60), img: j.image_url?.slice(0, 30) } });
+    falLast = Buffer.from(j.image_url.split(',')[1], 'base64');
+    if (p === '/fal-ai/birefnet') return json(res, 200, { image: { url: 'http://127.0.0.1:9300/falimg/cut.png' } });
+    return json(res, 200, { images: [{ url: 'http://127.0.0.1:9300/falimg/last' }] });
+  }
+  if (p === '/falimg/cut.png') { res.writeHead(200, { 'Content-Type': 'image/png' }); return res.end(require('fs').readFileSync(process.env.TEST_PERSON)); }
+  if (p === '/falimg/last') { res.writeHead(200, { 'Content-Type': 'image/jpeg' }); return res.end(falLast); }
   if (p.startsWith('/whisper/')) { res.writeHead(200, { 'Content-Length': 2048 }); return res.end(Buffer.alloc(2048)); }
   if (p === '/v1/messages') {
     const j = JSON.parse(b.toString());
@@ -87,11 +100,13 @@ http.createServer(async (req, res) => {
       ? { summary: 'Testdruck mit PETG auf dem A1.', game: 'Bambu Lab A1', channel: '3dbymicha', channelReason: 'Es geht um 3D-Druck mit PETG.',
           titles: ['PETG auf dem Bambu A1 – so klappt der erste Druck', 'Neues Filament im Test: PETG', 'PETG vs. PLA – mein Ergebnis'],
           description: 'Heute teste ich neues PETG-Filament auf dem Bambu Lab A1.\n\nWas taugt es?', tags: ['3d-druck', 'petg', 'bambu lab', 'filament'],
-          tiktok: 'PETG-Test auf dem A1 – Ergebnis? 👀 #3ddruck #bambulab #petg', thumbnailFrame: 4, thumbnailText: 'PETG TEST' }
+          tiktok: 'PETG-Test auf dem A1 – Ergebnis? 👀 #3ddruck #bambulab #petg', thumbnailFrame: 4, thumbnailText: 'PETG TEST',
+          thumbs: [{ frame: 4, photo: 'zeigend', text: 'PETG im Test', side: 'right' }, { frame: 2, photo: 'schockiert', text: 'Das hält?!', side: 'left' }, { frame: 5, photo: '', text: 'Ergebnis', side: 'right' }] }
       : { summary: 'Clutch-Szene im Shooter.', game: 'Fortnite', channel: 'michamodus', channelReason: 'Gameplay-Highlight.',
           titles: ['1v3 Clutch in letzter Sekunde 😱', 'Die krasseste Runde der Woche', 'Fortnite: Clutch mit 1 HP'],
           description: 'Diese Runde war wild.\n\nSchreib in die Kommentare, wie du gespielt hättest!', tags: ['fortnite', 'clutch', 'gaming', 'deutsch'],
-          tiktok: '1 HP, 3 Gegner, 0 Plan 😅 #fortnite #clutch #gaming', thumbnailFrame: 2, thumbnailText: '1 HP CLUTCH' };
+          tiktok: '1 HP, 3 Gegner, 0 Plan 😅 #fortnite #clutch #gaming', thumbnailFrame: 2, thumbnailText: '1 HP CLUTCH',
+          thumbs: [{ frame: 2, photo: 'schockiert', text: '1 HP?!', side: 'right' }, { frame: 4, photo: 'jubelnd', text: 'Clutch des Jahres', side: 'left' }, { frame: 5, photo: '', text: 'Wie?!', side: 'right' }] };
     return json(res, 200, { id: 'msg_1', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn',
       content: [{ type: 'text', text: JSON.stringify(out) }], usage: { input_tokens: 7000, output_tokens: 900 } });
   }

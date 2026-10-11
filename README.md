@@ -19,6 +19,15 @@ Video-Zentrale (Browser) ── prüfen, freigeben ──▶ YouTube (privat) / 
   Bildmitte, neu kodiert). Die Short-Stellen wählt **Claude** aus den ~12 auffälligsten Kandidaten (Standbild + Lautstärke +
   Gesagtes), ohne API-Schlüssel die lautesten Stellen. Ergebnisse → `geschnitten` (mit Claude-Vorschlag), Original → `rohvideos`.
   Sicherungen: ohne Tonspur oder wenn mehr als die Hälfte wegfiele, wird nichts gekürzt. Läuft nacheinander mit niedriger Priorität.
+- **Shorts im Detail:** animierte Untertitel Wort für Wort (Schrift Anton, gesprochenes Wort farbig, Farbe einstellbar),
+  optional **Facecam-Layout** (Facecam oben, Spiel unten – Bereich einmal unter Einstellungen → Automatischer Schnitt
+  auf einem Standbild markieren). Kodiert wird auf der **Grafikkarte** (NVENC), wenn verfügbar, sonst Prozessor.
+  Unraid: Extra Parameters `--runtime=nvidia`, Variablen `NVIDIA_VISIBLE_DEVICES=all`, `NVIDIA_DRIVER_CAPABILITIES=all`.
+- **Titelbilder:** Fotos von dir (verschiedene Gesichtsausdrücke) unter Einstellungen → Titelbilder hochladen; mit fal.ai
+  werden sie automatisch freigestellt (BiRefNet „Portrait“, ca. 0,1–0,2 Cent). Claude plant je Video 3 Varianten
+  (Standbild, Gesichtsausdruck, 2–4 Wörter, Seite); die Zentrale baut sie mit ffmpeg (1280 × 720, Kanalfarbe).
+  Variante 1 wird automatisch Titelbild, solange keins da ist. „✨ KI-Aufwertung“ schickt eine Variante an
+  FLUX Kontext (fal.ai, ca. 4 Cent) → Variante 4. Nur für Querformat (Shorts/TikTok-Cover wählt man in der App).
 - **Sprache → Text (Whisper):** whisper.cpp im Container, Modell (Standard „small“, ~470 MB) wird beim ersten Mal von
   huggingface.co nach `/data/whisper` geladen. Transkript im Detail aufklappbar (Klick auf Zeit springt im Video), geht an Claude.
 - **Kanäle:** jedes Video gehört zu einem Kanal (Start: **MichaModus** = Gaming, Standard; **3dbymicha** = gewerblich).

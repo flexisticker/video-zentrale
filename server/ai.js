@@ -8,6 +8,7 @@ import { db, save, saveNow, DATA_DIR } from './store.js';
 import * as profiles from './profiles.js';
 import { fileOf, setImage } from './library.js';
 import * as whisper from './whisper.js';
+import * as thumbs from './thumbs.js';
 
 const MODEL = 'claude-opus-5-5';
 const FRAMES = [0.08, 0.25, 0.42, 0.58, 0.75, 0.92];
@@ -62,12 +63,12 @@ async function extractFrames(v) {
   return out;
 }
 
-function schema(ids) {
+function schema(ids, labels) {
   const s = (description) => ({ type: 'string', description });
   return {
     type: 'object',
     additionalProperties: false,
-    required: ['summary', 'game', 'channel', 'channelReason', 'titles', 'description', 'tags', 'tiktok', 'thumbnailFrame', 'thumbnailText'],
+    required: ['summary', 'game', 'channel', 'channelReason', 'titles', 'description', 'tags', 'tiktok', 'thumbnailFrame', 'thumbnailText', 'thumbs'],
     properties: {
       summary: s('Ein Satz: was im Video passiert (für den Creator, nicht fürs Publikum).'),
       game: s('Erkanntes Spiel bzw. Produkt/Thema, leer wenn unklar.'),
@@ -79,6 +80,13 @@ function schema(ids) {
       tiktok: s('TikTok-Text: 1–2 kurze Sätze mit Hook + 3–6 passende Hashtags, höchstens 300 Zeichen.'),
       thumbnailFrame: { type: 'integer', description: 'Nummer des Standbilds (1–6), das sich am besten als Titelbild eignet.' },
       thumbnailText: s('2–4 Wörter als Text fürs Titelbild (groß, knallig).'),
+      thumbs: { type: 'array', description: 'Genau 3 unterschiedliche Titelbild-Ideen (Bild, Foto des Creators, Text, Seite des Fotos).',
+        items: { type: 'object', additionalProperties: false, required: ['frame', 'photo', 'text', 'side'], properties: {
+          frame: { type: 'integer', description: 'Standbild-Nummer 1–6 als Hintergrund' },
+          photo: { type: 'string', enum: labels, description: 'Gesichtsausdruck des Creators, der zur Szene passt ("" = kein Foto)' },
+          text: s('2–4 Wörter, neugierig machend, nicht identisch mit dem Titel'),
+          side: { type: 'string', enum: ['left', 'right'], description: 'Seite für das Foto; der Text kommt auf die andere Seite – wähle die Seite, auf der im Standbild weniger Wichtiges ist' },
+        } } },
     },
   };
 }
@@ -137,7 +145,11 @@ export async function suggest(v, extra = '') {
   }
   const frames = await extractFrames(v);
   const ids = profiles.list().map((p) => p.id);
-  const content = [{ type: 'text', text: prompt(v, frames, extra) }];
+  const labels = ['', ...new Set(thumbs.photos().map((p) => p.label))];
+  const content = [{ type: 'text', text: prompt(v, frames, extra) + (labels.length > 1
+    ? `\n\nFür Titelbilder gibt es freigestellte Fotos des Creators mit diesen Gesichtsausdrücken: ${labels.filter(Boolean).join(', ')}.`
+      + ' Gute Titelbilder: ein klares Gefühl im Gesicht, das zur Szene passt, 2–4 große Wörter, starker Kontrast, neugierig machend.'
+    : '\n\nEs gibt (noch) keine Fotos des Creators – nimm photo "".') }];
   for (const f of frames) {
     content.push({ type: 'text', text: `Standbild ${f.n} (bei ${Math.round(f.at)} s):` });
     content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: fs.readFileSync(f.file).toString('base64') } });
@@ -149,7 +161,7 @@ export async function suggest(v, extra = '') {
       max_tokens: 16000,
       betas: ['server-side-fallback-2026-07-01'],
       fallbacks: 'default', // lehnt Claude ab, versucht es Anthropic automatisch mit einem passenden anderen Modell
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: schema(ids) } },
+      output_config: { effort: 'medium', format: { type: 'json_schema', schema: schema(ids, labels) } },
       messages: [{ role: 'user', content }],
     });
   } catch (e) { throw new Error(friendly(e)); }
@@ -173,6 +185,9 @@ export async function suggest(v, extra = '') {
     tiktok: clip(out.tiktok, 2200),
     thumbnailFrame: Number.isInteger(out.thumbnailFrame) && frames.some((f) => f.n === out.thumbnailFrame) ? out.thumbnailFrame : frames[0].n,
     thumbnailText: clip(out.thumbnailText, 60),
+    thumbs: (Array.isArray(out.thumbs) ? out.thumbs : []).slice(0, 3).map((t) => ({
+      frame: frames.some((f) => f.n === t.frame) ? t.frame : frames[0].n, photo: clip(t.photo, 30),
+      text: clip(t.text, 60), side: t.side === 'left' ? 'left' : 'right' })),
   };
   // Noch nichts von Hand oder per .json eingetragen → Vorschlag gleich übernehmen (bleibt änderbar).
   if (!v.editedAt && !v.metaAt) {
@@ -183,8 +198,14 @@ export async function suggest(v, extra = '') {
     v.tiktok = a.tiktok;
     a.applied = true;
   }
+  // Titelbild-Varianten (Standbild + Foto + Text); ohne eigenes Titelbild gleich Variante 1 nehmen
+  let vars = [];
+  try { vars = await thumbs.makeVariants(v, (n) => { const f = framePath(v, n); return fs.existsSync(f) ? f : null; }); } catch (e) { console.error('Varianten', e.message); }
   if (!v.image) {
-    try { setImage(v, fs.readFileSync(framePath(v, v.ai.thumbnailFrame)), '.jpg'); v.ai.coverApplied = true; } catch { /* egal */ }
+    try {
+      const src = vars.length ? thumbs.variantPath(v, 1) : framePath(v, v.ai.thumbnailFrame);
+      setImage(v, fs.readFileSync(src), '.jpg'); v.ai.coverApplied = true;
+    } catch { /* egal */ }
   }
   saveNow();
   return v.ai;

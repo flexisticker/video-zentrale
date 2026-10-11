@@ -17,6 +17,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY server ./server
 COPY public ./public
+COPY fonts ./fonts
 # Unraid: Eintrag „WebUI“ im Container-Menü
 LABEL net.unraid.docker.webui="http://[IP]:[PORT:8090]/"
 EXPOSE 8090

@@ -1,0 +1,33 @@
+// Titelbilder, Fotos, Facecam (Zentrale auf localhost:8191 mit test/mock.js inkl. fal.ai)
+const { chromium } = require(require('child_process').execSync('npm root -g').toString().trim() + '/playwright');
+const T = process.argv[2] || '/tmp';
+(async () => {
+  const br = await chromium.launch(); const pg = await br.newPage({ viewport: { width: 1400, height: 900 } });
+  const errs = []; pg.on('pageerror', (e) => errs.push(e.message)); pg.on('dialog', (d) => d.accept());
+  await pg.goto('http://localhost:8191'); await pg.fill('input[type=password]', 'geheim123'); await pg.click('button[type=submit]');
+  await pg.waitForSelector('.card');
+  const id = await pg.evaluate(async () => (await (await fetch('/api/videos')).json()).videos.find((v) => v.file.includes('Langfassung')).id);
+  await pg.evaluate((i) => { location.hash = 'video/' + i; }, id);
+  await pg.waitForSelector('.variants .variant');
+  console.log('Varianten im Detail:', await pg.$$eval('.variants .variant', (b) => b.length));
+  await pg.click('.vwrap >> nth=1 >> .variant'); await pg.waitForSelector('text=Titelbild übernommen');
+  await pg.click('.vwrap >> nth=0 >> button:has-text("KI-Aufwertung")');
+  await pg.waitForSelector('.vwrap .chip:has-text("KI")', { timeout: 30000 });
+  console.log('nach KI-Aufwertung:', await pg.$$eval('.variants .variant', (b) => b.length), 'Varianten');
+  await pg.screenshot({ path: T + '/th-1-detail.png', fullPage: true });
+  await pg.click('.close'); await pg.click('text=Einstellungen'); await pg.waitForSelector('.photos .phcard');
+  console.log('Fotos:', await pg.$$eval('.phcard select:first-of-type', (s) => s.map((x) => x.value)));
+  await pg.click('text=Facecam markieren'); await pg.waitForSelector('.stage img');
+  await pg.waitForFunction(() => document.querySelector('.stage img').naturalWidth > 0);
+  const b = await (await pg.$('.stage')).boundingBox();
+  await pg.mouse.move(b.x + b.width * 0.70, b.y + b.height * 0.60); await pg.mouse.down();
+  await pg.mouse.move(b.x + b.width * 0.97, b.y + b.height * 0.97, { steps: 5 }); await pg.mouse.up();
+  await pg.screenshot({ path: T + '/th-2-facecam.png' });
+  await pg.click('.modal button:has-text("Übernehmen")');
+  console.log('Facecam-Info:', await pg.textContent('.cam .hint'));
+  await pg.locator('.box', { hasText: 'Automatischer Schnitt' }).locator('button', { hasText: 'Speichern' }).click(); await pg.waitForSelector('text=Gespeichert');
+  await pg.screenshot({ path: T + '/th-3-settings.png', fullPage: true });
+  await pg.setViewportSize({ width: 390, height: 844 }); await pg.waitForTimeout(500);
+  console.log('Handy Einstellungen Überlauf:', await pg.evaluate(() => document.documentElement.scrollWidth > innerWidth));
+  console.log('JS-Fehler:', errs); await br.close();
+})().catch((e) => { console.error('FEHLER', e); process.exit(1); });

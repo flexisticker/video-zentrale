@@ -151,3 +151,23 @@ input[type=number] { width: 100%; }
 
 code { background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; font-size: 12px; word-break: break-all; }
 details summary.hint { cursor: pointer; }
+
+/* Titelbild-Varianten, Fotos, Facecam */
+.variants { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 6px 0; }
+.vwrap { display: grid; gap: 4px; justify-items: start; position: relative; }
+.vwrap .chip { position: absolute; top: 6px; left: 6px; }
+.variant { width: 100%; aspect-ratio: 16 / 9; background: #000 center / cover no-repeat; border: 2px solid var(--line); border-radius: 8px; padding: 0; }
+.variant:hover { border-color: var(--accent); }
+.box.wide { grid-column: 1 / -1; }
+.photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-top: 12px; }
+.phcard { display: grid; gap: 6px; }
+.photo { aspect-ratio: 3 / 4; border-radius: 8px; border: 1px solid var(--line); background-color: #2a2d3a; background-position: center; background-size: contain; background-repeat: no-repeat;
+  background-image: none; }
+.photo { background-color: #23263300; background-blend-mode: normal; }
+.phcard .photo { background-color: #1b1e29; }
+.photo.uncut { outline: 2px dashed var(--warn); }
+input.color.small { width: 60px; height: 32px; }
+.stage { position: relative; user-select: none; touch-action: none; cursor: crosshair; max-width: 960px; }
+.stage img { width: 100%; display: block; border-radius: 8px; }
+.selbox { position: absolute; border: 3px solid var(--accent2); background: rgba(255, 79, 139, .18); display: none; pointer-events: none; }
+.box.wide > .row select { width: auto; min-width: 160px; }
