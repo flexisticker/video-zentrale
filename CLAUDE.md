@@ -157,6 +157,7 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   Laufendes Whisper als `Start-Process` (Windows: Hidden), alle 3 s Prüfung OBS/Spiel → Kill + Fehler → Server rechnet selbst.
   hello-Antwort liefert `gaming`-Einstellungen. 1.15.1: Status/Protokoll `%LOCALAPPDATA%\VideoZentrale-Rechenhelfer\rechenhelfer.log`, Modell beim Start.
   Getestet mit pwsh unter Linux (Testspiel-Prozess, langsames Fake-Whisper). Erkennungsverzögerung bis ~25 s (Long-Poll), Abbruch ≤ 3 s.
+- Beim Kunden (11.10.2026): Rechenhelfer auf dem PC (RTX 3070) eingerichtet und **online**. Echte CUDA-Spracherkennung noch nicht bestätigt.
 - Achtung `.dockerignore`: `tools` ist ausgeschlossen, nur `!tools/rechenhelfer` erlaubt (1.14.0/1.15.0-Bau schlug deshalb fehl). Neue Ordner,
   die ins Image sollen, dort freigeben.
 - Einrichtung beim Kunden (11.10.2026): Zentrale läuft über `https://videos.flexisticker.de` (NPM, Access List „Nur Heimnetz“,
