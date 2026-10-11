@@ -6,6 +6,7 @@ const CATEGORIES = [['20', 'Gaming'], ['24', 'Unterhaltung'], ['22', 'Menschen &
   ['10', 'Musik'], ['1', 'Film & Animation'], ['2', 'Autos & Fahrzeuge'], ['19', 'Reisen & Events']];
 const TABS = [
   ['posten', '📱 Zum Posten'],
+  ['coach', '💡 Coach'],
   ['geschnitten', 'Zur Freigabe'],
   ['eingang', 'Eingang (roh)'],
   ['hochgeladen', 'Hochgeladen'],
@@ -244,7 +245,7 @@ let mainEl, countEls = {};
 function render() {
   countEls = {};
   const tabs = h('nav', { class: 'tabs' }, TABS.map(([id, label]) => {
-    const c = id === 'einstellungen' ? null : h('span', { class: 'count' });
+    const c = ['einstellungen', 'coach'].includes(id) ? null : h('span', { class: 'count' });
     if (c) countEls[id] = c;
     return h('button', { class: 'tab' + (S.tab === id && !S.openId ? ' on' : ''), onclick: () => go(id) }, label, c);
   }));
@@ -275,6 +276,7 @@ function renderMain() {
   if (!mainEl) return;
   if (S.tab === 'einstellungen') return renderSettings();
   if (S.tab === 'posten') return renderPosting();
+  if (S.tab === 'coach') return renderCoach();
   const q = S.search.toLowerCase();
   const list = S.videos.filter((v) => inTab(v, S.tab) && (!q || (v.title + ' ' + v.file + ' ' + v.tags).toLowerCase().includes(q))
     && (!S.channel || channelOf(v)?.id === S.channel));
@@ -340,6 +342,33 @@ function card(v) {
         v.folder === 'papierkorb' ? h('span', { class: 'chip bad' }, '🗑 ' + fmtDate(v.trash?.at)) : null,
         ...(isPro(channelOf(v)) ? [stateChip('LinkedIn', v.li)] : [stateChip('YouTube', v.yt), stateChip('TikTok', v.tt)])),
       running ? h('div', { class: 'bar-progress' }, h('i', { style: { width: (running.progress || 0) + '%' } })) : null));
+}
+
+// ---------- 💡 Coach ----------
+async function renderCoach() {
+  const all = await api('GET', '/api/coach').catch(() => ({}));
+  if (S.tab !== 'coach') return;
+  const box = (p) => {
+    const c = all[p.id];
+    const btn = h('button', { class: 'btn primary', onclick: async () => {
+      btn.disabled = true; btn.textContent = 'Claude schaut sich deine Videos an … (ca. 30 s)';
+      try { await api('POST', '/api/coach', { profileId: p.id }); renderCoach(); } catch (x) { toast(x.message, true); btn.disabled = false; btn.textContent = c ? '↻ Neue Tipps holen' : '💡 Tipps holen'; }
+    } }, c ? '↻ Neue Tipps holen' : '💡 Tipps holen');
+    const head = h('h3', {}, h('span', { class: 'dot', style: { background: p.color } }), ' ', p.name);
+    if (!c) return h('div', { class: 'box coach' }, head, h('p', { class: 'hint' }, 'Claude schaut sich deine letzten Videos dieses Kanals an und gibt dir persönliche Tipps und Ideen (kostet ein paar Cent).'), btn);
+    return h('div', { class: 'box coach' }, head,
+      h('p', { class: 'hint' }, `Stand ${fmtDate(c.at)} · aus ${c.videos} Videos`),
+      h('p', {}, c.summary),
+      c.strengths?.length ? [h('b', {}, '✅ Das läuft schon gut'), h('ul', {}, c.strengths.map((x) => h('li', {}, x)))] : null,
+      h('b', {}, '💡 Tipps für mehr Reichweite'),
+      h('ol', { class: 'ctips' }, (c.tips || []).map((t) => h('li', {}, h('b', {}, t.title), h('div', {}, t.text)))),
+      c.ideas?.length ? [h('b', {}, '🎬 Ideen für nächste Videos'), h('ul', {}, c.ideas.map((x) => h('li', {}, x)))] : null,
+      h('div', { class: 'row', style: { marginTop: '8px' } }, btn));
+  };
+  mainEl.replaceChildren(h('div', { class: 'posting' },
+    h('h2', { class: 'h2' }, '💡 Dein Coach'),
+    h('p', { class: 'hint' }, 'Persönliche Tipps aus deinen letzten Videos – Einstieg, Rhythmus, Themen, Aufnahme, Titel. Aufrufzahlen kennt Claude (noch) nicht, nur Inhalte und Einschätzungen. Die Tipps je Video stehen im Video unter „Viral-Potenzial“.'),
+    ...profilesList().map(box)));
 }
 
 // ---------- Zum Posten (Handy) ----------
@@ -769,7 +798,12 @@ function renderViral(v) {
   if (!x?.score) return null;
   return h('div', { class: 'section viralbox' }, h('div', { class: 'row' }, h('b', {}, 'Viral-Potenzial'), viralChip(v, true),
     h('span', { class: 'hint' }, x.by === 'Schnitt' ? '(Einschätzung beim Schnitt)' : '(Einschätzung von Claude)')),
-    x.why ? h('div', {}, x.why) : null, x.tip ? h('div', { class: 'hint' }, '💡 Tipp: ' + x.tip) : null);
+    x.why ? h('div', {}, x.why) : null, x.tip ? h('div', {}, h('b', {}, '💡 ' + x.tip)) : null,
+    (x.hook || x.edit || x.packaging || x.nextTime) ? h('ul', { class: 'vtips' },
+      x.hook ? h('li', {}, h('b', {}, 'Einstieg: '), x.hook) : null,
+      x.edit ? h('li', {}, h('b', {}, 'Schnitt: '), x.edit) : null,
+      x.packaging ? h('li', {}, h('b', {}, 'Titel/Bild: '), x.packaging) : null,
+      x.nextTime ? h('li', {}, h('b', {}, 'Nächstes Mal beim Aufnehmen: '), x.nextTime) : null) : null);
 }
 
 function renderAi(box, v) {

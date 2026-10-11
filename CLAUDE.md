@@ -133,6 +133,9 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
 - 1.12.0: Profil `clipHints` (MichaModus: Funny Moments, Rage, Fails …; 3dbymicha: Satisfying, Vorher/Nachher) und `shorts` je Kanal
   (6 bzw. 4, max. 10, `planOf` nimmt Kanalwert vor global). Kandidaten bis 30. **Viral-Potenzial**: chooseHighlights liefert `viral/viralWhy/viralTip`
   je Clip (→ `v.viral`, by 'Schnitt'), suggest-Schema `viral {score, why, tip}` (→ `v.viral`, by 'Claude', überschreibt). UI `viralChip()`, `renderViral()`.
+- 1.13.0: Viral-Schema mit `hook/edit/packaging/nextTime`; **Coach** `ai.coach(profileId)` (letzte 25 Videos des Kanals: Titel, Summary,
+  Viral, Transkript-Ausschnitt → summary/strengths/tips[5]/ideas, `db().coach[kanal]`), Routen `GET/POST /api/coach`, Reiter „💡 Coach“.
+  Keine Aufrufzahlen (YouTube Analytics nicht angebunden) – mögliche nächste Stufe.
 - Einrichtung beim Kunden (11.10.2026): Zentrale läuft über `https://videos.flexisticker.de` (NPM, Access List „Nur Heimnetz“,
   lokaler UniFi-DNS-Eintrag → 192.168.1.111). Browser zeigte trotzdem 403: Chrome/Edge „Sicheres DNS“ fragte Google/Cloudflare
   (öffentliche IP) → ausschalten bzw. „aktueller Dienstanbieter“, `net-internals/#dns` leeren. Prüfung: `curl -I` am PC.

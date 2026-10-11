@@ -246,3 +246,8 @@ input[type=range] { width: 100%; accent-color: #7c5cff; }
 .chip.viral.cool { color: var(--muted); }
 .chip.viral.big { font-size: 15px; padding: 3px 10px; }
 .viralbox { border-color: rgba(255, 79, 59, .45); display: grid; gap: 4px; margin-top: 0; margin-bottom: 8px; }
+
+/* Coach */
+.vtips { margin: 4px 0 0; padding-left: 18px; display: grid; gap: 3px; font-size: 14px; }
+.coach ul, .coach ol { margin: 4px 0 10px; padding-left: 20px; display: grid; gap: 6px; }
+.ctips li div { color: var(--muted); }

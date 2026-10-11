@@ -79,9 +79,14 @@ function schema(ids, labels, pro = false) {
     required: ['summary', 'game', 'channel', 'channelReason', 'titles', 'description', 'tags', 'tiktok', 'thumbnailFrame', 'thumbnailText', 'thumbs', 'aiThumb', 'viral'],
     properties: {
       summary: s('Ein Satz: was im Video passiert (für den Creator, nicht fürs Publikum).'),
-      viral: { type: 'object', additionalProperties: false, required: ['score', 'why', 'tip'], description: 'Ehrliche Einschätzung des Viral-Potenzials dieses Videos auf der Zielplattform.',
+      viral: { type: 'object', additionalProperties: false, required: ['score', 'why', 'tip', 'hook', 'edit', 'packaging', 'nextTime'],
+        description: 'Ehrliche Einschätzung des Viral-Potenzials dieses Videos auf der Zielplattform – wie ein erfahrener Creator-Coach, direkt und konkret.',
         properties: { score: { type: 'integer', description: '1 = kaum, 10 = sehr hoch' }, why: s('Ein Satz Begründung (Hook, Emotion, Überraschung, Teilwert …)'),
-          tip: s('Ein konkreter Tipp für mehr Reichweite (z. B. anderer Einstieg, Hook-Text, Titel)') } },
+          tip: s('Der wichtigste Tipp in einem Satz'),
+          hook: s('Tipp zum Einstieg/Hook: wie die ersten 2 Sekunden fesseln (konkret, bezogen auf dieses Video)'),
+          edit: s('Tipp zu Schnitt/Inhalt: was raus, kürzer, schneller, was betonen'),
+          packaging: s('Tipp zu Titel/Titelbild/Text: was klickstärker wäre'),
+          nextTime: s('Tipp für den Creator fürs nächste Mal beim Aufnehmen (z. B. Reaktionen laut aussprechen, Facecam, Ziel vorher ansagen)') } },
       game: s('Erkanntes Spiel bzw. Produkt/Thema, leer wenn unklar.'),
       channel: { type: 'string', enum: ids, description: 'Kanal-ID, zu dem das Video am besten passt.' },
       channelReason: s('Kurze Begründung für den Kanal.'),
@@ -254,7 +259,8 @@ export async function suggest(v, extra = '') {
     aiThumb: out.aiThumb ? { frame: frames.some((f) => f.n === out.aiThumb.frame) ? out.aiThumb.frame : frames[0].n,
       photo: clip(out.aiThumb.photo, 30), text: clip(out.aiThumb.text, 60), scene: clip(out.aiThumb.scene, 1200) } : null,
     viral: out.viral && Number(out.viral.score) ? { score: Math.max(1, Math.min(10, Math.round(Number(out.viral.score)))),
-      why: clip(out.viral.why, 300), tip: clip(out.viral.tip, 300) } : null,
+      why: clip(out.viral.why, 300), tip: clip(out.viral.tip, 300), hook: clip(out.viral.hook, 300), edit: clip(out.viral.edit, 300),
+      packaging: clip(out.viral.packaging, 300), nextTime: clip(out.viral.nextTime, 300) } : null,
   };
   if (v.ai.viral) v.viral = { ...v.ai.viral, by: 'Claude', at: v.ai.at };
   // Noch nichts von Hand oder per .json eingetragen → Vorschlag gleich übernehmen (bleibt änderbar).
@@ -465,6 +471,48 @@ export function autoQueue() {
   for (const v of Object.values(db().videos)) {
     if (v.folder === 'geschnitten' && !v.missing && v.duration != null && !v.ai) enqueue(v);
   }
+}
+
+// 💡 Coach: Claude schaut auf die letzten Videos eines Kanals und gibt persönliche Tipps + Ideen (nur Text, wenige Cent).
+export async function coach(profileId) {
+  const prof = profiles.get(profileId) || profiles.fallback();
+  const vids = Object.values(db().videos).filter((v) => !v.missing && v.folder !== 'papierkorb' && profiles.effective(v)?.id === prof.id
+    && ['geschnitten', 'hochgeladen'].includes(v.folder))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))).slice(0, 25);
+  if (vids.length < 2) throw new Error('Zu wenige Videos in diesem Kanal für eine Einschätzung (mindestens 2).');
+  const lines = vids.map((v, i) => [
+    `${i + 1}. „${v.title || v.file}“ (${v.height > v.width ? 'Hochformat/Short' : 'Querformat'}, ${v.duration ? Math.round(v.duration) + ' s' : '?'}`
+      + `${v.yt?.state === 'done' ? ', auf YouTube' : ''}${v.tt?.state === 'done' ? ', auf TikTok' : ''})`,
+    v.ai?.summary ? `   Inhalt: ${v.ai.summary}` : '',
+    v.viral?.score ? `   Viral-Einschätzung ${v.viral.score}/10: ${v.viral.why || ''}` : '',
+    v.transcriptText ? `   Gesprochen (Ausschnitt): „${v.transcriptText.slice(0, 300)}“` : '',
+  ].filter(Boolean).join('\n')).join('\n');
+  const schemaC = { type: 'object', additionalProperties: false, required: ['summary', 'strengths', 'tips', 'ideas'], properties: {
+    summary: { type: 'string', description: 'Zwei Sätze: wo der Kanal gerade steht' },
+    strengths: { type: 'array', items: { type: 'string' }, description: '2–3 Dinge, die schon gut funktionieren (konkret)' },
+    tips: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['title', 'text'], properties: {
+      title: { type: 'string', description: 'Kurze Überschrift' }, text: { type: 'string', description: '2–3 Sätze, konkret und umsetzbar, mit Beispiel aus seinen Videos' } } },
+      description: '5 persönliche Tipps, nach Wirkung sortiert (Hook, Rhythmus, Themen, Aufnahme, Titel/Titelbild, Regelmäßigkeit, Community)' },
+    ideas: { type: 'array', items: { type: 'string' }, description: '3–5 konkrete Ideen für nächste Videos/Shorts, die zu seinem Stil passen' },
+  } };
+  let r;
+  try {
+    r = await api().beta.messages.create({ model: MODEL, max_tokens: 8000, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
+      output_config: { effort: 'medium', format: { type: 'json_schema', schema: schemaC } },
+      messages: [{ role: 'user', content: [
+        `Du bist ein erfahrener, ehrlicher Coach für Kurzvideos und YouTube. Der Creator Michael (Deutsch, Du-Form) will mit dem Kanal „${prof.name}“ mehr Reichweite.`,
+        `Kanal: ${prof.aiStyle || ''}`, prof.clipHints ? `Worauf er Wert legt: ${prof.clipHints}` : '',
+        'Schau dir seine letzten Videos an und gib ihm persönliche, konkrete Tipps – keine Allgemeinplätze. Sei ehrlich, aber motivierend.',
+        'Zahlen zu Aufrufen liegen nicht vor; stütze dich auf Inhalte, Titel und die Viral-Einschätzungen.', '', 'Letzte Videos:', lines,
+      ].filter(Boolean).join('\n') }] });
+  } catch (e) { throw new Error(friendly(e)); }
+  if (r.stop_reason === 'refusal') throw new Error('abgelehnt');
+  const out = JSON.parse(r.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
+  const cost = (r.usage?.input_tokens || 0) * PRICE.input + (r.usage?.output_tokens || 0) * PRICE.output;
+  const a = cfg(); a.spent = Math.round(((a.spent || 0) + cost) * 10000) / 10000; a.count = (a.count || 0) + 1;
+  db().coach = { ...(db().coach || {}), [prof.id]: { at: new Date().toISOString(), videos: vids.length, cost: Math.round(cost * 10000) / 10000, ...out } };
+  saveNow();
+  return db().coach[prof.id];
 }
 
 export function init() {

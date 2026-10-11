@@ -101,6 +101,15 @@ http.createServer(async (req, res) => {
   if (p.startsWith('/whisper/')) { res.writeHead(200, { 'Content-Length': 2048 }); return res.end(Buffer.alloc(2048)); }
   if (p === '/v1/messages') {
     const j = JSON.parse(b.toString());
+    if (j.output_config?.format?.schema?.properties?.ideas) {
+      log.push({ coach: j.messages[0].content.slice(0, 300) });
+      const out = { summary: 'Viele starke Reaktionen, aber oft langsamer Einstieg.', strengths: ['Echte Reaktionen', 'Klare Highlights'],
+        tips: [{ title: 'Mit der Reaktion starten', text: 'Beginne Shorts mit deinem Ausruf statt mit der Vorgeschichte.' },
+          { title: 'Ziel ansagen', text: 'Sag am Anfang, was du vorhast – dann bleiben Zuschauer bis zur Auflösung.' }],
+        ideas: ['Top 5 Rage-Momente der Woche', 'Erster Eindruck: neues WoW in 60 Sekunden'] };
+      return json(res, 200, { id: 'msg_c', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn',
+        content: [{ type: 'text', text: JSON.stringify(out) }], usage: { input_tokens: 3000, output_tokens: 600 } });
+    }
     if (j.output_config?.format?.schema?.properties?.parts) {
       const texts = j.messages[0].content.filter((c) => c.type === 'text').map((c) => c.text);
       const parts = texts.filter((t) => t.startsWith('Baustein')).map((t, i) => { const m = /Sekunde (\d+)–(\d+)/.exec(t); return { part: i + 1, start: +m[1], end: +m[2] }; });
@@ -138,7 +147,8 @@ http.createServer(async (req, res) => {
           titles: ['1v3 Clutch in letzter Sekunde 😱', 'Die krasseste Runde der Woche', 'Fortnite: Clutch mit 1 HP'],
           description: 'Diese Runde war wild.\n\nSchreib in die Kommentare, wie du gespielt hättest!', tags: ['fortnite', 'clutch', 'gaming', 'deutsch'],
           tiktok: '1 HP, 3 Gegner, 0 Plan 😅 #fortnite #clutch #gaming', thumbnailFrame: 2, thumbnailText: '1 HP CLUTCH',
-          viral: { score: 7, why: 'Knappe Clutch-Situation mit starker Reaktion.', tip: 'Titel mit „1 HP“ beginnen.' },
+          viral: { score: 7, why: 'Knappe Clutch-Situation mit starker Reaktion.', tip: 'Titel mit „1 HP“ beginnen.',
+            hook: 'Direkt mit dem letzten Schuss einsteigen.', edit: 'Die 10 s Laufweg am Anfang raus.', packaging: 'Titelbild: Gesicht + „1 HP“ groß.', nextTime: 'Sag laut, wie viel Leben du noch hast.' },
           aiThumb: { frame: 2, photo: 'schockiert', text: '1 HP Clutch', scene: 'The shocked streamer leans in from the right, the game fight explodes behind him in the left half, text top left.' },
           thumbs: [{ frame: 2, photo: 'schockiert', text: '1 HP?!', side: 'right' }, { frame: 4, photo: 'jubelnd', text: 'Clutch des Jahres', side: 'left' }, { frame: 5, photo: '', text: 'Wie?!', side: 'right' }] };
     return json(res, 200, { id: 'msg_1', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn',

@@ -1,5 +1,9 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.13.0', date: '11.10.2026', items: [
+    'Tipps je Video: Einstieg/Hook, Schnitt, Titel/Bild und „Nächstes Mal beim Aufnehmen“ – unter „Viral-Potenzial“ im Video.',
+    '💡 Coach: Claude schaut sich deine letzten Videos je Kanal an – was gut läuft, 5 persönliche Tipps für mehr Reichweite und Ideen für neue Videos.',
+  ] },
   { version: '1.12.0', date: '11.10.2026', items: [
     'Mehr Clips: bis zu 10 je Video, MichaModus jetzt standardmäßig 6, 3dbymicha 4 (je Kanal einstellbar).',
     'Je Kanal festlegen, was Claude als Clips rausholen soll – MichaModus: Funny Moments, Ärger/Rage, Fails, Reaktionen, alles was Zuschauer bindet.',

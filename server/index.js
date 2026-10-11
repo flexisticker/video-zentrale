@@ -510,6 +510,11 @@ async function api(req, res, url) {
     try { return send(res, 200, { ...backup.restore(buf), status: backup.status() }); }
     catch (e) { throw new HttpError(400, e.message); }
   }
+  if (p === '/api/coach' && m === 'GET') return send(res, 200, db().coach || {});
+  if (p === '/api/coach' && m === 'POST') {
+    const b = await readJson(req);
+    try { return send(res, 200, await ai.coach(b.profileId)); } catch (e) { throw new HttpError(400, e.message); }
+  }
   if (p === '/api/trash/empty' && m === 'POST') {
     let n = 0;
     for (const v of Object.values(db().videos)) if (v.folder === 'papierkorb') { purge(v); n++; }
