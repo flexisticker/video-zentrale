@@ -32,6 +32,7 @@ lib.ensureDirs();
 jobs.init();
 youtube.init();
 ai.init();
+ai.afterSuggest((v) => autocut.autoApplyTips(v));
 autocut.init();
 ver.init();
 backup.init();
@@ -446,6 +447,14 @@ async function api(req, res, url) {
       const wish = String(b.wish || '').trim();
       if (wish.length < 3) throw new HttpError(400, 'Bitte kurz beschreiben, was anders werden soll.');
       try { autocut.enqueueRevision(v, wish); } catch (e) { throw new HttpError(409, e.message); }
+      return send(res, 200, publicVideo(v));
+    }
+    // Viral-Tipps (Einstieg/Schnitt) umsetzen = Überarbeitung mit den Tipps als Wunsch
+    if (sub === '/apply-tips' && m === 'POST') {
+      const wish = autocut.tipsWish(v);
+      if (!wish) throw new HttpError(409, 'Keine Schnitt-Tipps vorhanden.');
+      try { autocut.enqueueRevision(v, wish); } catch (e) { throw new HttpError(409, e.message); }
+      v.tipsApplied = new Date().toISOString(); saveNow();
       return send(res, 200, publicVideo(v));
     }
     // Neue Fassung behalten → die vorherige wandert in den Papierkorb

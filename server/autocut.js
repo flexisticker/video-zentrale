@@ -641,6 +641,22 @@ export function revisable(out) {
   if (!db().ai.apiKey) return 'Für die Überarbeitung braucht es den Claude-Schlüssel (Einstellungen).';
   return '';
 }
+// Viral-Tipps (Einstieg/Schnitt) als Überarbeitungswunsch
+export function tipsWish(v) {
+  const x = v.viral || {};
+  const parts = [x.hook && 'Einstieg: ' + x.hook, x.edit && 'Schnitt: ' + x.edit, !x.hook && !x.edit && x.tip ? x.tip : ''].filter(Boolean);
+  return parts.length ? 'Viral-Tipps umsetzen – ' + parts.join(' · ') : '';
+}
+// Nach dem Claude-Vorschlag: Tipps einmal automatisch umsetzen (nicht bei Fassungen, die selbst schon Überarbeitungen sind)
+export function autoApplyTips(v) {
+  if (db().ai.autoTips === false || v.tipsApplied || v.revisionOf || v.folder !== 'geschnitten') return;
+  if (!v.viral?.score || v.viral.score >= 9) return;
+  const wish = tipsWish(v);
+  if (!wish || revisable(v)) return;
+  if (['queued', 'running'].includes(v.revise?.state)) return;
+  v.tipsApplied = new Date().toISOString();
+  enqueueRevision(v, wish);
+}
 export function enqueueRevision(out, wish) {
   const why = revisable(out);
   if (why) throw new Error(why);

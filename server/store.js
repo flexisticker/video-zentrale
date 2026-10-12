@@ -53,7 +53,7 @@ const empty = () => ({
   profiles: defaultProfiles(),                                   // Kanäle mit eigenen Verbindungen und Vorgaben
   youtube: { clientId: '', clientSecret: '' },                   // Google-App (für alle Kanäle gleich)
   tiktok: { clientKey: '', clientSecret: '', redirectUri: '' },  // TikTok-App (für alle Konten gleich)
-  ai: { apiKey: '', auto: true, hints: '', spent: 0, count: 0 },  // Claude (Anthropic-API)
+  ai: { apiKey: '', auto: true, autoTips: true, hints: '', spent: 0, count: 0 },  // Claude (Anthropic-API)
   fal: { key: '', count: 0, model: 'fal-ai/flux-pro/kontext', boosts: 0,     // fal.ai: Freistellen + KI-Aufwertung
     genModel: 'fal-ai/nano-banana/edit', autoThumb: true, generated: 0 },     //   + KI-Titelbild aus Foto & Standbild
   music: { enabled: true, shorts: true, long: false, source: 'mixed', level: 'mittel', lufs: -30, duck: true, duckLevel: 'leicht', longMax: 180,  // Hintergrundmusik

@@ -1,5 +1,9 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.20.0', date: '12.10.2026', items: [
+    '⚡ Viral-Tipps werden jetzt umgesetzt: Sobald Claude das fertige Video bewertet hat, schneidet die Zentrale es einmal automatisch nach den Tipps zu Einstieg und Schnitt neu – als „v2“ zum Vergleichen.',
+    'Oder von Hand: Knopf „⚡ Tipps umsetzen“ direkt beim Viral-Potenzial. Automatik abschaltbar unter Einstellungen → Claude.',
+  ] },
   { version: '1.19.0', date: '12.10.2026', items: [
     '🔁 Überarbeiten jetzt auch bei Langfassung und Kurzfassung: Claude sieht sich die ganze Aufnahme an (Gesprochenes, laute Stellen, Standbilder) und schneidet sie nach deinem Wunsch neu – als „v2“ zum Vergleichen.',
     'Schnellwahl: „Intro raus“ (Lobby, Ladebildschirm, Menü, Warten), langweilige Stellen raus, nur die besten Stellen, Teaser mit dem Höhepunkt am Anfang, weniger Pausen, Outro kürzen, mit/ohne Musik – plus Ziellänge in Minuten.',

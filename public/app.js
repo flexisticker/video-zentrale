@@ -840,7 +840,21 @@ function renderViral(v) {
       x.hook ? h('li', {}, h('b', {}, 'Einstieg: '), x.hook) : null,
       x.edit ? h('li', {}, h('b', {}, 'Schnitt: '), x.edit) : null,
       x.packaging ? h('li', {}, h('b', {}, 'Titel/Bild: '), x.packaging) : null,
-      x.nextTime ? h('li', {}, h('b', {}, 'Nächstes Mal beim Aufnehmen: '), x.nextTime) : null) : null);
+      x.nextTime ? h('li', {}, h('b', {}, 'Nächstes Mal beim Aufnehmen: '), x.nextTime) : null) : null,
+    tipsAction(v));
+}
+// Knopf „Tipps umsetzen“: schneidet nach den Viral-Tipps neu (Überarbeitung als v2)
+function tipsAction(v) {
+  const x = v.viral || {};
+  if (v.canRevise === undefined || !(x.hook || x.edit || x.tip)) return null;
+  const st = v.revise?.state;
+  if (st === 'queued' || st === 'running') return h('p', { class: 'hint' }, '⚡ Wird gerade nach den Tipps neu geschnitten …');
+  if (v.revise?.newId && v.tipsApplied && /^Viral-Tipps/.test(v.revise.wish || '')) return h('p', { class: 'ok-text' }, '⚡ Tipps umgesetzt: ', h('a', { href: '#video/' + v.revise.newId }, v.revise.newFile || 'neue Fassung öffnen'));
+  if (v.canRevise !== true) return null;
+  return h('div', { class: 'row', style: { marginTop: '8px' } }, h('button', { class: 'btn small primary', onclick: async () => {
+    try { Object.assign(v, await api('POST', `/api/videos/${v.id}/apply-tips`)); await refresh(); updateDetail(true); pollActivity(); startPolling(); toast('Claude schneidet nach den Tipps neu – die neue Fassung erscheint als v2.'); }
+    catch (e) { toast(e.message, true); }
+  } }, '⚡ Tipps umsetzen (neu schneiden)'), h('span', { class: 'hint' }, 'als v2 zum Vergleichen'));
 }
 
 function renderAi(box, v) {
@@ -981,9 +995,10 @@ function updateDetail(force) {
   if (v.hasTranscript !== detail.hasTranscript) { detail.hasTranscript = v.hasTranscript; renderTranscript(detail.transcriptBox, v); }
   const revSig = JSON.stringify([v.revise, v.edit, v.revisionOf, v.revisionKept, v.canRevise, v.folder]);
   if (force || revSig !== detail.revSig) { detail.revSig = revSig; renderRevise(detail.reviseBox, v); }
-  const aiChanged = force === true || JSON.stringify([v.ai || null, v.thumbVariantsAt || 0]) !== detail.aiSeen;
+  const aiChanged = force === true || JSON.stringify([v.ai || null, v.thumbVariantsAt || 0, v.revise || null, v.viral || null]) !== detail.aiSeen;
   if (aiChanged) {
-    detail.aiSeen = JSON.stringify([v.ai || null, v.thumbVariantsAt || 0]);
+    detail.aiSeen = JSON.stringify([v.ai || null, v.thumbVariantsAt || 0, v.revise || null, v.viral || null]);
+    Object.assign(detail.v, { revise: v.revise, tipsApplied: v.tipsApplied, canRevise: v.canRevise });
     // Vorschlag wurde serverseitig übernommen und hier ist nichts ungespeichert → Felder auffrischen
     if (v.ai?.applied && v.ai?.state === 'done' && !detail.isDirty()) {
       for (const k of ['title', 'description', 'tags', 'tiktok']) detail.f[k].value = v[k] || '';
@@ -1454,6 +1469,7 @@ async function renderSettings() {
   const a = st.ai;
   const aKey = h('input', { type: 'password', autocomplete: 'off', placeholder: a.configured ? 'gespeichert (' + a.keyHint + ') – zum Ändern neu eintragen' : 'sk-ant-…' });
   const aAuto = h('input', { type: 'checkbox', checked: a.auto });
+  const aTips = h('input', { type: 'checkbox', checked: a.autoTips !== false });
   const aHints = h('textarea', { rows: 3, value: a.hints, placeholder: 'z. B. „Ich heiße Micha“, „keine Emojis im Titel“, „immer auf Deutsch“' });
   const claudeBox = h('div', { class: 'box' }, h('h3', {}, '✨ Claude (Vorschläge für Titel & Texte)'),
     a.configured ? h('p', { class: 'ok-text' }, '✓ eingerichtet · bisher ' + a.count + ' Vorschläge, ca. ' + (a.spent || 0).toFixed(2).replace('.', ',') + ' $') : null,
@@ -1463,9 +1479,10 @@ async function renderSettings() {
       h('li', {}, 'Ein Vorschlag kostet etwa 2–6 Cent (Claude Opus 5.5 schaut 6 Standbilder an).')),
     h('label', {}, 'API-Schlüssel'), aKey,
     h('label', { class: 'check' }, aAuto, 'Neue Videos unter „Zur Freigabe“ automatisch vorschlagen lassen'),
+    h('label', { class: 'check' }, aTips, '⚡ Viral-Tipps zu Einstieg und Schnitt einmal automatisch umsetzen (neue Fassung „v2“ zum Vergleichen, kostet je Video einen weiteren Claude-Aufruf)'),
     h('label', {}, 'Allgemeine Hinweise an Claude'), aHints,
     h('div', { class: 'row', style: { marginTop: '12px' } },
-      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/ai/config', { apiKey: aKey.value, auto: aAuto.checked, hints: aHints.value }), 'Gespeichert.') }, 'Speichern'),
+      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/ai/config', { apiKey: aKey.value, auto: aAuto.checked, autoTips: aTips.checked, hints: aHints.value }), 'Gespeichert.') }, 'Speichern'),
       a.configured ? h('button', { class: 'btn ghost danger', onclick: () => confirm('API-Schlüssel entfernen?') && run(() => api('POST', '/api/ai/config', { removeKey: true }), 'Schlüssel entfernt.')() }, 'Schlüssel entfernen') : null));
 
   // ----- Automatischer Schnitt -----

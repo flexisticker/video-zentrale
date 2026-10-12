@@ -189,6 +189,10 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   concat vor die select-Fassung, Hook-ASS), Kurzfassung `renderSummary(…, teaserText, teaserLen)` (Teaser als erster Teil). Langfassung speichert jetzt
   `source.keep`. Kunde wünschte ausdrücklich „Intros rausschneiden“ → Chip + Regel im Prompt. UI: `REVISE_CHIPS_LONG`, Ziellänge (Min.).
   Getestet (Mock): 150-s-Aufnahme → Langfassung v2 1:01 mit Teaser, Intro weg, Kurzfassung v2. Ton aller Shorts/Kurzfassungen jetzt 48 kHz (`aresample`).
+- 1.20.0: Kunde fragte, warum nicht nach dem Viral-Potenzial geschnitten wird (Bewertung kommt erst nach dem Schnitt aus `ai.suggest`).
+  Jetzt `autocut.tipsWish(v)` (viral.hook/edit, sonst tip) → Überarbeitung; `ai.afterSuggest(fn)` ruft nach jedem Vorschlag `autoApplyTips(v)`:
+  nur `geschnitten`, nicht bei `revisionOf` (keine Schleife), einmal (`v.tipsApplied`), Score < 9, Schalter `db().ai.autoTips` (Standard an).
+  `POST /api/videos/:id/apply-tips`, UI `tipsAction()` in der Viral-Box. Getestet (Mock): Vorschlag → automatische v2, Knopf von Hand.
 - Beim Kunden (11.10.2026): Rechenhelfer auf dem PC (RTX 3070) eingerichtet und **online**. Echte CUDA-Spracherkennung noch nicht bestätigt.
 - Achtung `.dockerignore`: `tools` ist ausgeschlossen, nur `!tools/rechenhelfer` erlaubt (1.14.0/1.15.0-Bau schlug deshalb fehl). Neue Ordner,
   die ins Image sollen, dort freigeben.

@@ -20,7 +20,7 @@ const cfg = () => db().ai;
 
 export function status() {
   const c = cfg();
-  return { configured: !!c.apiKey, auto: c.auto, hints: c.hints, keyHint: c.apiKey ? '…' + c.apiKey.slice(-4) : '',
+  return { configured: !!c.apiKey, auto: c.auto, autoTips: c.autoTips !== false, hints: c.hints, keyHint: c.apiKey ? '…' + c.apiKey.slice(-4) : '',
     spent: c.spent || 0, count: c.count || 0 };
 }
 
@@ -33,10 +33,15 @@ export function configure(b) {
   }
   if (b.removeKey === true) c.apiKey = '';
   if (typeof b.auto === 'boolean') c.auto = b.auto;
+  if (typeof b.autoTips === 'boolean') c.autoTips = b.autoTips;
   if (typeof b.hints === 'string') c.hints = b.hints.slice(0, 3000);
   saveNow();
   autoQueue();
 }
+
+// Wird nach jedem fertigen Vorschlag aufgerufen (z. B. Viral-Tipps automatisch umsetzen – siehe autocut.autoApplyTips)
+let suggested = null;
+export function afterSuggest(fn) { suggested = fn; }
 
 export const framePath = (v, n) => path.join(FRAME_DIR, `${v.id}-${n}.jpg`);
 
@@ -481,6 +486,7 @@ async function next() {
     if (v && !v.missing) {
       v.ai = { ...v.ai, state: 'running' }; save();
       await suggest(v, job.extra);
+      try { suggested?.(v); } catch (e) { console.error('Nach dem Vorschlag:', e.message); }
     }
   } catch (e) {
     if (v) { v.ai = { ...v.ai, state: 'error', error: e.message }; saveNow(); }
