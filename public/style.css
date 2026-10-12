@@ -303,3 +303,11 @@ input[type=range] { width: 100%; accent-color: #7c5cff; }
 .act-item.muted { color: var(--muted); }
 @media (max-width: 600px) { .activity { padding: 6px 10px; font-size: 12px; } .act-box { flex: 1 1 100%; } }
 @keyframes actpulse { 50% { opacity: .25; } }
+
+/* Überarbeiten */
+.rev-new { border: 1px solid #4caf7a; border-radius: 10px; padding: 10px 12px; margin-top: 10px; }
+.rev-new p { margin: 4px 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.chip-btn { background: none; border: 1px solid var(--line); color: inherit; border-radius: 999px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+.chip-btn:hover { border-color: var(--accent, #7c5cff); }
+.section.rev textarea { width: 100%; }

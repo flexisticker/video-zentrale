@@ -11,7 +11,8 @@ import * as ai from './ai.js';
 import * as gpu from './gpu.js';
 import * as music from './music.js';
 import * as profiles from './profiles.js';
-import { buildAss, buildCalmAss } from './captions.js';
+import { buildAss, buildCalmAss, buildHookAss } from './captions.js';
+import * as fx from './cutfx.js';
 import { fileURLToPath } from 'node:url';
 
 const FONTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fonts');
@@ -37,6 +38,7 @@ export function configure(b) {
   if (b.shortMax != null && !isNaN(b.shortMax)) c.shortMax = Math.round(num(b.shortMax, c.shortMin, 180));
   if (typeof b.moveRaw === 'boolean') c.moveRaw = b.moveRaw;
   if (typeof b.longCopy === 'boolean') c.longCopy = b.longCopy;
+  if (typeof b.hookText === 'boolean') c.hookText = b.hookText;
   if (b.summary != null && !isNaN(b.summary)) c.summary = Math.round(num(b.summary, 0, 1800));
   if (b.window) {
     const t = (x) => /^([01]\d|2[0-3]):[0-5]\d$/.test(x || '');
@@ -84,19 +86,24 @@ function progressFrom(total, cb) {
 }
 
 // Lautheit (LUFS, „momentary“) je Sekunde.
-async function loudness(file, duration) {
-  const per = new Map();
-  // framelog=verbose schreibt die Werte nur bei Protokollstufe „verbose“
-  const r = await ffmpeg(['-nostats', '-loglevel', 'verbose', '-i', file, '-map', '0:a:0', '-vn', '-filter:a', 'ebur128=framelog=verbose', '-f', 'null', '-'], (l) => {
+async function loudness(file, duration, range = null) {
+  const per = new Map(), fine = [];
+  const off = range ? range.from : 0;
+  const seek = range ? ['-ss', range.from.toFixed(2), '-t', range.span.toFixed(2)] : [];
+  // framelog=verbose schreibt die Werte nur bei Protokollstufe „verbose“ (alle 0,1 s)
+  const r = await ffmpeg(['-nostats', '-loglevel', 'verbose', ...seek, '-i', file, '-map', '0:a:0', '-vn', '-filter:a', 'ebur128=framelog=verbose', '-f', 'null', '-'], (l) => {
     const m = /\bt:\s*([\d.]+)\s+TARGET.*?\bM:\s*(-?[\d.]+|-inf)/.exec(l);
     if (!m) return;
-    const sec = Math.floor(Number(m[1])), val = m[2] === '-inf' ? -70 : Math.max(-70, Number(m[2]));
+    const t = Number(m[1]) + off, val = m[2] === '-inf' ? -70 : Math.max(-70, Number(m[2]));
+    const sec = Math.floor(t);
     const a = per.get(sec) || [0, 0]; a[0] += val; a[1]++; per.set(sec, a);
+    fine[Math.floor(t * 10)] = val;   // Zehntelsekunden (für Tempo-Schnitte)
   });
   const n = Math.max(1, Math.ceil(duration || 0));
   const out = new Array(n).fill(-70);
   for (const [s, [sum, c]] of per) if (s < n) out[s] = sum / c;
-  return { values: out, hasAudio: r.code === 0 && per.size > 0 };
+  for (let i = 0; i < fine.length; i++) if (fine[i] === undefined) fine[i] = -70;
+  return { values: out, fine, hasAudio: r.code === 0 && per.size > 0 };
 }
 
 // Bildwechsel (nur Keyframes ansehen → schnell).
@@ -215,42 +222,62 @@ async function renderLong(v, file, keep, hasAudio, out, onP, track) {
 }
 
 // Short im Hochformat: Bildmitte oder Facecam oben + Spiel unten, animierte Untertitel, Grafikkarte wenn vorhanden.
+// s.parts = Abschnitte der Quelle (Hook-Vorschau, Zurückspulen, Tempo-Schnitte – siehe cutfx.js); ohne parts am Stück.
 async function renderShort(v, file, s, hasAudio, out, onP, words, track, pro = false) {
   const c = cfg();
   const vertical = v.height > v.width;
   const fc = c.facecam;
   const useCam = !pro && !vertical && fc?.enabled && fc.w > 0.02 && fc.h > 0.02;
   const n = (x) => Number(x).toFixed(4);
+  const parts = s.parts?.length ? s.parts : [{ a: s.start, b: s.end }];
+  const total = fx.totalLen(parts);
+  const base = Math.max(0, Math.min(...parts.map((p) => p.a)) - 0.5);
+  const span = Math.max(...parts.map((p) => p.b)) - base + 0.5;
   // LinkedIn: 4:5 (1080 × 1350), 1:1 (1080 × 1080) oder 16:9 (1920 × 1080, nur aus Querformat)
   const fmt = pro ? (c.linkedin?.format === '16:9' && vertical ? '4:5' : c.linkedin?.format || '4:5') : '';
   const [W, H] = fmt === '1:1' ? [1080, 1080] : fmt === '4:5' ? [1080, 1350] : fmt === '16:9' ? [1920, 1080] : [1080, 1920];
-  let graph;
-  if (pro) graph = `[0:v]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1[base]`;
-  else if (vertical) graph = '[0:v]scale=1080:-2,setsar=1[base]';
+  const even = (x) => Math.max(2, Math.round((x || 0) / 2) * 2);
+  let graph = fx.concatGraph(parts, { base, hasAudio, W0: v.width ? even(v.width) : 0, H0: v.height ? even(v.height) : 0 }) + ';';
+  if (pro) graph += `[cv]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1[base]`;
+  else if (vertical) graph += '[cv]scale=1080:-2,setsar=1[base]';
   else if (useCam) {
-    graph = `[0:v]split[a][b];[a]crop=iw*${n(fc.w)}:ih*${n(fc.h)}:iw*${n(fc.x)}:ih*${n(fc.y)},scale=1080:704:force_original_aspect_ratio=increase,crop=1080:704[top];`
+    graph += `[cv]split[a][b];[a]crop=iw*${n(fc.w)}:ih*${n(fc.h)}:iw*${n(fc.x)}:ih*${n(fc.y)},scale=1080:704:force_original_aspect_ratio=increase,crop=1080:704[top];`
       + '[b]scale=-2:1216,crop=1080:1216[bot];[top][bot]vstack,setsar=1[base]';
-  } else graph = '[0:v]crop=trunc(ih*9/16/2)*2:ih,scale=1080:1920,setsar=1[base]';
-  let ass = '';
-  const clipWords = (words || []).filter((w) => w.s >= s.start && w.e <= s.end).map((w) => ({ s: w.s - s.start, e: w.e - s.start, t: w.t }));
+  } else graph += '[cv]crop=trunc(ih*9/16/2)*2:ih,scale=1080:1920,setsar=1[base]';
+  const tmpFiles = [];
+  let last = 'base';
+  const clipWords = fx.mapWords(words, parts);
   if ((pro ? c.linkedin?.captions !== false : c.captions?.enabled) && clipWords.length) {
-    ass = path.join(TMP, `${v.id}-s${Math.round(s.start)}.ass`);
+    const ass = path.join(TMP, `${v.id}-s${Math.round(s.start)}.ass`);
     fs.writeFileSync(ass, pro ? buildCalmAss(clipWords, { width: W, height: H })
       : buildAss(clipWords, { color: c.captions.color, posY: useCam ? 0.74 : 0.7 }));
-    graph += `;[base]ass=${ass}:fontsdir=${FONTS},fps=30[v]`;
-  } else graph += ';[base]fps=30[v]';
-  let audio = hasAudio ? ['-map', '0:a:0', '-af', LOUDNORM, '-c:a', 'aac', '-b:a', '160k'] : [];
+    tmpFiles.push(ass);
+    graph += `;[${last}]ass=${ass}:fontsdir=${FONTS}[cap]`; last = 'cap';
+  }
+  const hookAss = s.hook?.text && c.hookText !== false ? buildHookAss(s.hook.text, { until: fx.hookTextUntil(parts, s.hook), width: W, height: H, pro, color: c.captions?.color }) : '';
+  if (hookAss) {
+    const f = path.join(TMP, `${v.id}-h${Math.round(s.start)}.ass`);
+    fs.writeFileSync(f, hookAss); tmpFiles.push(f);
+    graph += `;[${last}]ass=${f}:fontsdir=${FONTS}[hk]`; last = 'hk';
+  }
+  graph += `;[${last}]fps=30[v]`;
+  let audio = [];
   if (track) {
-    graph += ';' + music.mixGraph({ hasVoice: hasAudio, dur: s.end - s.start, track });
+    graph += ';' + music.mixGraph({ hasVoice: hasAudio, dur: total, track, voiceIn: 'ca' });
+    audio = ['-map', '[aout]', '-c:a', 'aac', '-b:a', '160k'];
+  } else if (hasAudio) {
+    graph += `;[ca]${LOUDNORM},aresample=48000[aout]`;
     audio = ['-map', '[aout]', '-c:a', 'aac', '-b:a', '160k'];
   }
   const mInput = track ? ['-stream_loop', '-1', '-i', track.file] : [];
-  // Musik-Eingang vor -t, damit -t für die Ausgabe gilt
-  const r = await gpu.encodeWithFallback((venc) => ffmpeg(['-ss', s.start.toFixed(2), '-i', file, ...mInput, '-t', (s.end - s.start).toFixed(2),
-    '-filter_complex', graph, '-map', '[v]', ...audio, ...venc,
-    '-movflags', '+faststart', '-progress', 'pipe:1', '-y', out], progressFrom(s.end - s.start, onP)));
-  if (ass) fs.rmSync(ass, { force: true });
+  const script = path.join(TMP, `${v.id}-s${Math.round(s.start)}.filter`);
+  fs.writeFileSync(script, graph); tmpFiles.push(script);
+  const r = await gpu.encodeWithFallback((venc) => ffmpeg(['-ss', base.toFixed(3), '-t', span.toFixed(3), '-i', file, ...mInput,
+    '-filter_complex_script', script, '-map', '[v]', ...audio, ...venc, '-t', total.toFixed(3),
+    '-movflags', '+faststart', '-progress', 'pipe:1', '-y', out], progressFrom(total, onP)));
+  for (const f of tmpFiles) fs.rmSync(f, { force: true });
   if (r.code !== 0) throw new Error('Short: ' + lastError(r));
+  return total;
 }
 
 const SEG = 15; // Länge der Bausteine einer Kurzfassung (Sekunden)
@@ -319,7 +346,7 @@ async function runCut(v) {
   if (!duration) throw new Error('Länge des Videos unbekannt (Datei beschädigt?).');
 
   step('Lautstärke messen');
-  const { values: loud, hasAudio } = await loudness(file, duration);
+  const { values: loud, fine, hasAudio } = await loudness(file, duration);
   step('Bildwechsel suchen');
   const scenes = await sceneChanges(file);
 
@@ -426,23 +453,29 @@ async function runCut(v) {
     }, v);
     outputs.push(nv.id); done++;
   }
+  const hookStyle = profile?.hookStyle || (pro ? 'cold' : 'auto');
+  const tempo = profile?.tempo || (pro ? 'ruhig' : 'normal');
   for (let i = 0; i < shorts.length; i++) {
     const s = shorts[i];
+    s.hook = fx.cleanHook(s.hook, s.start, s.end, hookStyle, pro);
+    s.parts = fx.buildParts({ start: s.start, end: s.end, hook: s.hook, words, fine: hasAudio ? fine : null, tempo });
     step(`Short ${i + 1} von ${shorts.length} schneiden`);
     const tmp = path.join(TMP, `${v.id}-short${i + 1}.mp4`);
     const label = `Short ${i + 1} von ${shorts.length} schneiden`;
-    const track = await getTrack('short', s.end - s.start, { mood: s.mood, music: s.music }, label);
+    const track = await getTrack('short', fx.totalLen(s.parts), { mood: s.mood, music: s.music }, label);
     try { await renderShort(v, file, s, hasAudio, tmp, (p) => step(label, (done + p / 100) / jobs * 100), words, track, pro); }
     catch (e) {
       if (!track) throw e;
       v.cut.warning = 'Mischen mit Musik ging nicht – Short ohne Musik.';
       await renderShort(v, file, s, hasAudio, tmp, (p) => step(label, (done + p / 100) / jobs * 100), words, null, pro);
     }
+    const how = fx.describe(s.hook, tempo, s.parts, s.start, s.end);
     const nv = publish(tmp, `${base} – ${pro ? 'LinkedIn-Clip' : 'Short'} ${i + 1}.mp4`, {
-      source: { rawId: v.id, rawFile: v.file, kind: 'short', start: s.start, end: s.end },
+      source: { rawId: v.id, rawFile: v.file, kind: 'short', start: s.start, end: s.end, hook: s.hook || null, tempo },
+      edit: { hook: s.hook || null, tempo, parts: s.parts.length, how },
       title: s.title ? s.title.slice(0, 100) : `${base} – Short ${i + 1}`,
       viral: Number.isFinite(s.viral) ? { score: s.viral, why: s.viralWhy || '', tip: s.viralTip || '', by: 'Schnitt' } : undefined,
-      note: sourceNote(s.start, s.end) + (s.reason ? ' Warum: ' + s.reason : '') + music.noteOf(track),
+      note: sourceNote(s.start, s.end) + (s.reason ? ' Warum: ' + s.reason : '') + (how ? ' ' + how + '.' : '') + music.noteOf(track),
       music: track ? { kind: track.kind, name: track.name, mood: track.mood || '' } : null,
       transcriptText: segs ? whisper.textOf(segs, s.start, s.end) : '',
     }, v);
@@ -487,15 +520,17 @@ let windowTimer = null;
 async function next() {
   if (running) return;
   // Von Hand angestoßene zuerst; sonst nur im Zeitfenster
-  let i = queue.findIndex((x) => priority.has(x));
+  let i = queue.findIndex((x) => typeof x === 'object' || priority.has(x));   // Überarbeitungen sind immer von Hand angestoßen
   if (i < 0 && !inWindow()) {
     clearTimeout(windowTimer);
     windowTimer = setTimeout(next, 60_000); // jede Minute nachsehen, ob das Fenster offen ist
     return;
   }
   if (i < 0) i = 0;
-  const [id] = queue.splice(i, 1);
-  if (!id) return;
+  const [item] = queue.splice(i, 1);
+  if (!item) return;
+  if (typeof item === 'object') return runRevision(item);
+  const id = item;
   priority.delete(id);
   running = id;
   const v = db().videos[id];
@@ -519,6 +554,93 @@ async function next() {
 let afterRun = null;
 export function onDone(fn) { afterRun = fn; }
 
+// ---------- Überarbeiten (ein Short wird nach Wunsch aus dem Rohvideo neu geschnitten) ----------
+export function revisable(out) {
+  if (out?.source?.kind !== 'short') return 'Überarbeiten geht bei Shorts und Clips aus dem automatischen Schnitt.';
+  const raw = db().videos[out.source.rawId];
+  if (!raw || raw.missing) return 'Das Rohvideo ist nicht mehr da – ohne Rohvideo kann nicht neu geschnitten werden.';
+  if (!db().ai.apiKey) return 'Für die Überarbeitung braucht es den Claude-Schlüssel (Einstellungen).';
+  return '';
+}
+export function enqueueRevision(out, wish) {
+  const why = revisable(out);
+  if (why) throw new Error(why);
+  if (['queued', 'running'].includes(out.revise?.state)) throw new Error('Wird schon überarbeitet.');
+  out.revise = { state: 'queued', wish: String(wish).slice(0, 500), at: new Date().toISOString(), step: '', progress: 0 };
+  queue.push({ revise: out.id, wish: out.revise.wish });
+  save();
+  next();
+}
+async function runRevision({ revise: outId, wish }) {
+  const out = db().videos[outId];
+  const raw = out && db().videos[out.source?.rawId];
+  running = 'rev-' + outId;
+  try {
+    if (!out) return;
+    const step = (s, progress = 0) => { out.revise = { ...out.revise, state: 'running', step: s, progress: Math.round(progress) }; save(); };
+    const why = revisable(out);
+    if (why) throw new Error(why);
+    const c = cfg();
+    const file = lib.fileOf(raw);
+    fs.mkdirSync(TMP, { recursive: true });
+    let words = whisper.loadWords(raw);
+    if (!words && c.whisper.enabled) {
+      step('Sprache erkennen');
+      try { words = await whisper.transcribe(file, raw.id, (p, eng) => step('Sprache erkennen' + (eng ? ' – ' + eng : ''), p)); whisper.saveTranscript(raw, words); }
+      catch { words = null; }
+    }
+    const segs = words ? whisper.sentences(words) : null;
+    const profile = profiles.effective(out);
+    const pro = profiles.isPro(profile);
+    step('Claude plant die neue Fassung');
+    const r = await ai.reviseShort(raw, out, wish, segs, profile, { minLen: Math.min(c.shortMin || 30, 15), maxLen: Math.max(c.shortMax || 45, 60) });
+    step('Lautstärke messen');
+    const { fine, hasAudio } = await loudness(file, raw.duration, { from: Math.max(0, r.start - 1), span: r.end - r.start + 2 });
+    let style = profile?.hookStyle || (pro ? 'cold' : 'auto');
+    if (style === 'off' && /hook|anfang|einstieg/i.test(wish)) style = 'auto';
+    const s = { start: r.start, end: r.end, hook: fx.cleanHook(r.hook, r.start, r.end, style, pro) };
+    s.parts = fx.buildParts({ start: s.start, end: s.end, hook: s.hook, words, fine: hasAudio ? fine : null, tempo: r.tempo });
+    const seconds = fx.totalLen(s.parts);
+    let track = null;
+    if (r.music && profile?.music !== false && db().music?.enabled !== false) {
+      step('Musik wählen');
+      try { track = await music.trackFor({ profile, kind: 'short', seconds, idea: { mood: out.music?.mood } }); }
+      catch (e) { out.revise.warning = 'Musik: ' + e.message; }
+    }
+    const tmp = path.join(TMP, `${raw.id}-rev-${out.id}.mp4`);
+    const onP = (p) => step('Neu schneiden', p);
+    step('Neu schneiden');
+    try { await renderShort(raw, file, s, hasAudio, tmp, onP, words, track, pro); }
+    catch (e) { if (!track) throw e; track = null; await renderShort(raw, file, s, hasAudio, tmp, onP, words, null, pro); }
+    // Versionsnummer: v2, v3 … bezogen auf die erste Fassung
+    const rootId = out.revisionRoot || out.id;
+    const root = db().videos[rootId] || out;
+    root.revCount = (root.revCount || 1) + 1;
+    const stem = path.basename(out.file, path.extname(out.file)).replace(/ v\d+$/, '');
+    const how = fx.describe(s.hook, r.tempo, s.parts, s.start, s.end);
+    const nv = publish(tmp, `${stem} v${root.revCount}.mp4`, {
+      source: { ...out.source, start: s.start, end: s.end, hook: s.hook || null, tempo: r.tempo },
+      edit: { hook: s.hook || null, tempo: r.tempo, parts: s.parts.length, how },
+      title: r.title || out.title, description: out.description, tags: out.tags, category: out.category,
+      viral: r.viral ? { score: r.viral, why: r.viralWhy, tip: r.viralTip, by: 'Überarbeitung' } : out.viral,
+      revisionOf: out.id, revisionRoot: rootId, revisionWish: wish, revisionChanges: r.changes,
+      note: `Überarbeitung (v${root.revCount}) von „${out.file}“. Wunsch: ${wish}. Claude: ${r.changes}` + (how ? ' ' + how + '.' : '') + music.noteOf(track),
+      music: track ? { kind: track.kind, name: track.name, mood: track.mood || '' } : null,
+      transcriptText: segs ? whisper.textOf(segs, s.start, s.end) : '',
+    }, { channel: out.channel || profile?.id, channelFrom: out.channelFrom || 'überarbeitung' });
+    out.revise = { ...out.revise, state: 'done', step: '', progress: 100, doneAt: new Date().toISOString(), newId: nv.id, newFile: nv.file };
+    saveNow();
+  } catch (e) {
+    console.error('Überarbeitung', out?.file, e);
+    if (out) { out.revise = { ...out.revise, state: 'error', error: e.message, step: '' }; saveNow(); }
+  } finally {
+    for (const f of fs.existsSync(TMP) ? fs.readdirSync(TMP) : []) if (raw && f.startsWith(`${raw.id}-rev-${outId}`)) fs.rmSync(path.join(TMP, f), { force: true });
+    running = null;
+    afterRun?.();
+    next();
+  }
+}
+
 // neue Rohaufnahmen automatisch schneiden (jede nur einmal)
 export function autoQueue() {
   if (!cfg().auto) return;
@@ -532,6 +654,7 @@ export function init() {
   gpu.check().then((g) => console.log('Grafikkarte:', g.nvenc ? 'NVENC aktiv' : 'nicht genutzt (' + g.error + ')'));
   for (const v of Object.values(db().videos)) {
     if (['queued', 'running'].includes(v.cut?.state)) { v.cut = { ...v.cut, state: 'queued' }; queue.push(v.id); }
+    if (['queued', 'running'].includes(v.revise?.state)) v.revise = { ...v.revise, state: 'error', error: 'Durch Neustart unterbrochen – bitte erneut anstoßen.' };
   }
   setTimeout(next, 5000);
 }

@@ -105,7 +105,8 @@ function publicVideo(v) {
   const strip = (s) => s && { ...s, history: undefined, historyCount: s.history?.length || 0 };
   return { ...v, yt: strip(v.yt), tt: strip(v.tt), suggestion: profiles.suggest(v), plan: lib.INBOXES.includes(v.folder) || v.folder === 'rohvideos' ? autocut.planOf(v) : undefined,
     transcriptText: undefined, hasTranscript: !!v.transcriptText,
-    imageVersion: v.image ? (v.imageAt || v.mtime) : v.thumbAt, hasImage: !!lib.imagePath(v) };
+    imageVersion: v.image ? (v.imageAt || v.mtime) : v.thumbAt, hasImage: !!lib.imagePath(v),
+    canRevise: v.source?.kind === 'short' ? autocut.revisable(v) || true : undefined };
 }
 
 // endgültig löschen inkl. Standbilder, Varianten und Transkript
@@ -279,6 +280,8 @@ async function api(req, res, url) {
         const viaHelper = /Rechenhelfer/.test(v.cut.step || '');
         server.push({ id: v.id, kind: 'cut', name: name(v), step: v.cut.step || 'schneidet', progress: v.cut.progress || 0, waiting: viaHelper });
       } else if (v.cut?.state === 'queued') queue.cut++;
+      if (v.revise?.state === 'running') server.push({ id: v.id, kind: 'cut', name: name(v), step: '🔁 Überarbeiten: ' + (v.revise.step || 'läuft'), progress: v.revise.progress || 0, waiting: /Rechenhelfer/.test(v.revise.step || '') });
+      else if (v.revise?.state === 'queued') queue.cut++;
       if (v.ai?.state === 'running') server.push({ id: v.id, kind: 'ai', name: name(v), step: 'Claude schreibt Vorschläge' });
       else if (v.ai?.state === 'queued') queue.ai++;
       for (const [k, label] of [['yt', 'YouTube'], ['tt', 'TikTok']]) {
@@ -435,6 +438,27 @@ async function api(req, res, url) {
       const from = v.folder;
       lib.moveVideo(v, 'papierkorb');
       v.trash = { from, at: new Date().toISOString() }; saveNow();
+      return send(res, 200, publicVideo(v));
+    }
+    // Überarbeiten: Short nach Wunsch aus dem Rohvideo neu schneiden (neue Fassung „v2“ daneben)
+    if (sub === '/revise' && m === 'POST') {
+      const b = await readJson(req);
+      const wish = String(b.wish || '').trim();
+      if (wish.length < 3) throw new HttpError(400, 'Bitte kurz beschreiben, was anders werden soll.');
+      try { autocut.enqueueRevision(v, wish); } catch (e) { throw new HttpError(409, e.message); }
+      return send(res, 200, publicVideo(v));
+    }
+    // Neue Fassung behalten → die vorherige wandert in den Papierkorb
+    if (sub === '/keep-revision' && m === 'POST') {
+      const old = v.revisionOf && db().videos[v.revisionOf];
+      if (!old) throw new HttpError(404, 'Vorherige Fassung nicht gefunden.');
+      if (old.folder !== 'papierkorb') {
+        if (isUploading(old)) throw new HttpError(409, 'Die vorherige Fassung wird gerade hochgeladen.');
+        const from = old.folder;
+        lib.moveVideo(old, 'papierkorb');
+        old.trash = { from, at: new Date().toISOString(), reason: 'durch ' + v.file + ' ersetzt' };
+      }
+      v.revisionKept = new Date().toISOString(); saveNow();
       return send(res, 200, publicVideo(v));
     }
     if (sub === '/restore' && m === 'POST') {

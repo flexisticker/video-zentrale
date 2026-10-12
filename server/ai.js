@@ -9,6 +9,7 @@ import * as profiles from './profiles.js';
 import { fileOf, setImage } from './library.js';
 import * as whisper from './whisper.js';
 import * as thumbs from './thumbs.js';
+import * as fx from './cutfx.js';
 
 const MODEL = 'claude-opus-5-5';
 const FRAMES = [0.08, 0.25, 0.42, 0.58, 0.75, 0.92];
@@ -293,6 +294,25 @@ export async function suggest(v, extra = '') {
 
 // Aus Kandidaten-Stellen eines Rohvideos die besten Shorts wählen.
 // cands: [{start, end, peak, scenes}] (Sekunden); segs: Whisper-Segmente oder null.
+// Hook: der Moment, der in den ersten 1–2 Sekunden fesselt (für Shorts – siehe cutfx.js)
+const HOOK_SCHEMA = { type: 'object', additionalProperties: false, required: ['mode', 'at', 'len', 'text'], properties: {
+  mode: { type: 'string', enum: ['preview', 'cold', 'none'], description: 'preview = Höhepunkt 1–2,5 s vorweg zeigen, dann zurückspulen und den Clip von vorn; cold = Clip direkt kurz vor dem Höhepunkt beginnen (Anlauf weg); none = Anfang ist schon stark' },
+  at: { type: 'number', description: 'Sekunde (ab Videoanfang) des stärksten Moments im Clip (Ausruf, Kill, Fail, Ergebnis)' },
+  len: { type: 'number', description: 'Länge der Vorschau in Sekunden (1–2,5)' },
+  text: { type: 'string', description: 'Hook-Text fürs erste Bild, höchstens 5 Wörter, Deutsch, neugierig machend (z. B. „Wie konnte das passieren?“); leer wenn unpassend' },
+} };
+const HOOK_RULES = (pro, profile) => {
+  const style = profile?.hookStyle || (pro ? 'cold' : 'auto');
+  if (style === 'off') return 'Hook: nicht gewünscht – gib mode "none" und leeren text.';
+  return [
+    'Hook (die ersten 1–2 Sekunden entscheiden, ob jemand weiterwischt): Bestimme je Clip den stärksten Moment (at).',
+    pro ? 'LinkedIn: kein Effekt – nimm "cold" (mit der Kernaussage bzw. dem Ergebnis einsteigen) oder "none"; Hook-Text sachlich (z. B. „So spare ich 30 % Material“).'
+      : style === 'auto' ? 'Wähle "preview", wenn der Höhepunkt erst später kommt und die Vorgeschichte zum Verständnis nötig ist; "cold", wenn der Moment ohne Anlauf wirkt; "none", wenn der Clip schon stark beginnt.'
+      : style === 'preview' ? 'Der Creator möchte möglichst "preview" (Höhepunkt vorweg, dann zurückspulen).' : 'Der Creator möchte möglichst "cold" (direkt mitten rein).',
+    profile?.hookHint ? `Hinweis zum Kanal: ${profile.hookHint}` : '',
+  ].filter(Boolean).join('\n');
+};
+
 export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
   fs.mkdirSync(FRAME_DIR, { recursive: true });
   const pro = profiles.isPro(profile);
@@ -314,6 +334,7 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
     'Schätze für jeden Clip das Viral-Potenzial ehrlich ein (1 = kaum, 10 = sehr hoch): starker Hook in den ersten 2 Sekunden, Emotion,'
       + ' Überraschung, Wiederschau- und Teilwert, Verständlichkeit ohne Kontext. Keine Gefälligkeitswerte.',
     wish ? `WICHTIG – Wunsch des Creators für diesen Schnitt: „${wish}“. Richte die Auswahl danach aus (auch wenn dadurch weniger Shorts entstehen).` : '',
+    HOOK_RULES(pro, profile),
     `Video: „${v.file}“, Länge ${whisper.fmtTime(v.duration)}. ${v.note ? 'Notiz: ' + v.note : ''}`,
     segs?.length ? 'Gesprochenes ist je Kandidat angegeben (automatisch erkannt, kann Fehler enthalten).' : 'Kein gesprochener Text verfügbar.',
     '',
@@ -335,7 +356,7 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
   }
   const schemaH = {
     type: 'object', additionalProperties: false, required: ['shorts'],
-    properties: { shorts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['candidate', 'start', 'end', 'title', 'reason', 'mood', 'music', 'viral', 'viralWhy', 'viralTip'],
+    properties: { shorts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['candidate', 'start', 'end', 'title', 'reason', 'mood', 'music', 'viral', 'viralWhy', 'viralTip', 'hook'],
       properties: {
         candidate: { type: 'integer', description: 'Nummer des Kandidaten' },
         start: { type: 'number', description: 'Start in Sekunden ab Videoanfang' },
@@ -347,6 +368,7 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
         viral: { type: 'integer', description: 'Viral-Potenzial 1–10 (ehrlich)' },
         viralWhy: { type: 'string', description: 'Ein Satz: warum diese Einschätzung' },
         viralTip: { type: 'string', description: 'Ein konkreter Tipp, wie der Clip mehr Potenzial bekommt (z. B. Hook-Text, früher einsteigen)' },
+        hook: HOOK_SCHEMA,
       } } } },
   };
   let r;
@@ -374,7 +396,8 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
     if (picked.some((p) => start < p.end && end > p.start)) continue;
     picked.push({ start: Math.round(start * 10) / 10, end: Math.round(end * 10) / 10, title: String(s.title || '').slice(0, 100), reason: String(s.reason || '').slice(0, 300),
       mood: String(s.mood || ''), music: String(s.music || '').slice(0, 200),
-      viral: Math.max(1, Math.min(10, Math.round(Number(s.viral) || 0))) || undefined, viralWhy: String(s.viralWhy || '').slice(0, 300), viralTip: String(s.viralTip || '').slice(0, 300) });
+      viral: Math.max(1, Math.min(10, Math.round(Number(s.viral) || 0))) || undefined, viralWhy: String(s.viralWhy || '').slice(0, 300), viralTip: String(s.viralTip || '').slice(0, 300),
+      hook: s.hook && typeof s.hook === 'object' ? { mode: s.hook.mode, at: Number(s.hook.at), len: Number(s.hook.len), text: String(s.hook.text || '').slice(0, 60) } : null });
   }
   return picked;
 }
@@ -519,4 +542,76 @@ export function init() {
   for (const v of Object.values(db().videos)) {
     if (['queued', 'running'].includes(v.ai?.state)) v.ai = { ...v.ai, state: v.ai.titles ? 'done' : 'error', error: v.ai.titles ? '' : 'Durch Neustart unterbrochen.' };
   }
+}
+
+// Überarbeitung eines Shorts nach Wunsch: Claude sieht den bisherigen Schnitt, das Gesprochene ringsum und Standbilder
+// und legt Start/Ende, Hook, Tempo und Musik neu fest. raw = Rohvideo, out = bisheriger Short.
+export async function reviseShort(raw, out, wish, segs, profile, { minLen = 15, maxLen = 60 } = {}) {
+  fs.mkdirSync(FRAME_DIR, { recursive: true });
+  const pro = profiles.isPro(profile);
+  const src = out.source;
+  const from = Math.max(0, src.start - 60), to = Math.min(raw.duration || src.end + 60, src.end + 60);
+  const said = (segs || []).filter((x) => x.e > from && x.s < to).map((x) => `[${x.s.toFixed(1)}–${x.e.toFixed(1)}] ${x.t}`).join('\n').slice(0, 9000);
+  const hook = out.edit?.hook || src.hook;
+  const content = [{ type: 'text', text: [
+    pro ? 'Du überarbeitest einen LinkedIn-Clip (Inhaber eines Druck- und 3D-Druck-Betriebs, als Person, professionell).'
+      : 'Du überarbeitest einen Short (TikTok/YouTube Shorts) für einen deutschen Creator. Ziel: mehr Zuschauer halten, mehr Wiederschauen.',
+    `WUNSCH DES CREATORS: „${wish}“ – setze das konsequent um.`,
+    `Bisheriger Clip: Sekunde ${src.start.toFixed(1)}–${src.end.toFixed(1)} der Rohaufnahme „${raw.file}“ (Länge ${(src.end - src.start).toFixed(0)} s), Titel „${out.title || ''}“.`,
+    hook ? `Bisheriger Hook: ${hook.mode}${hook.at != null ? ' bei Sekunde ' + hook.at : ''}${hook.text ? `, Text „${hook.text}“` : ''}.` : 'Bisher kein Hook.',
+    `Bisheriges Tempo: ${out.edit?.tempo || src.tempo || 'normal'}. Musik: ${out.music ? 'ja' : 'nein'}.`,
+    `Du darfst Start und Ende frei im Bereich Sekunde ${from.toFixed(0)}–${to.toFixed(0)} wählen; Länge ${minLen}–${maxLen} Sekunden.`,
+    'Tempo: aus = nichts herausschneiden, ruhig = nur lange Pausen, normal = Pausen + „ähm“, schnell = Jump Cuts + kurze Zooms.',
+    HOOK_RULES(pro, profile),
+    profile?.clipHints ? `Worauf der Creator bei diesem Kanal Wert legt: ${profile.clipHints}` : '',
+    said ? 'Gesprochenes in diesem Bereich (Sekunden ab Videoanfang, automatisch erkannt):\n' + said : 'Kein gesprochener Text verfügbar.',
+    '', 'Standbilder (Sekunde steht jeweils davor):',
+  ].filter(Boolean).join('\n') }];
+  const times = [...new Set([src.start + 1, hook?.at, (src.start + src.end) / 2, src.end - 1, from + 5, to - 5]
+    .filter((t) => Number.isFinite(t) && t >= 0).map((t) => Math.round(t)))].slice(0, 6);
+  for (const t of times) {
+    const file = path.join(FRAME_DIR, `${raw.id}-r${t}.jpg`);
+    const ok = await ffmpeg(['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(t), '-i', fileOf(raw),
+      '-vf', "scale='if(gt(iw,ih),min(640,iw),-2)':'if(gt(iw,ih),-2,min(640,ih))'", '-frames:v', '1', '-q:v', '5', file]);
+    content.push({ type: 'text', text: `Sekunde ${t}:` });
+    if (ok && fs.existsSync(file)) {
+      content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: fs.readFileSync(file).toString('base64') } });
+      fs.rmSync(file, { force: true });
+    }
+  }
+  const schema = { type: 'object', additionalProperties: false,
+    required: ['start', 'end', 'title', 'hook', 'tempo', 'music', 'changes', 'viral', 'viralWhy', 'viralTip'], properties: {
+      start: { type: 'number', description: 'neuer Start (Sekunde ab Videoanfang)' },
+      end: { type: 'number', description: 'neues Ende (Sekunde ab Videoanfang)' },
+      title: { type: 'string', description: 'Titel (höchstens 70 Zeichen)' },
+      hook: HOOK_SCHEMA,
+      tempo: { type: 'string', enum: ['aus', 'ruhig', 'normal', 'schnell'] },
+      music: { type: 'boolean', description: 'Hintergrundmusik ja/nein' },
+      changes: { type: 'string', description: 'Ein bis zwei Sätze auf Deutsch (Du-Form an den Creator): was du geändert hast und warum' },
+      viral: { type: 'integer', description: 'Viral-Potenzial 1–10 der neuen Fassung (ehrlich)' },
+      viralWhy: { type: 'string' },
+      viralTip: { type: 'string' },
+    } };
+  let r;
+  try {
+    r = await api().beta.messages.create({
+      model: MODEL, max_tokens: 8000,
+      betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
+      output_config: { effort: 'medium', format: { type: 'json_schema', schema } },
+      messages: [{ role: 'user', content }],
+    });
+  } catch (e) { throw new Error(friendly(e)); }
+  if (r.stop_reason === 'refusal') throw new Error('abgelehnt');
+  const o = JSON.parse(r.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
+  const cost = (r.usage?.input_tokens || 0) * PRICE.input + (r.usage?.output_tokens || 0) * PRICE.output;
+  const a = cfg(); a.spent = Math.round(((a.spent || 0) + cost) * 10000) / 10000; a.count = (a.count || 0) + 1; save();
+  let start = Math.max(from, Math.min(to - minLen, Number(o.start)));
+  if (!Number.isFinite(start)) start = src.start;
+  let end = Math.min(to, Math.max(start + minLen, Number(o.end)));
+  if (!Number.isFinite(end)) end = src.end;
+  if (end - start > maxLen) end = start + maxLen;
+  return { start: Math.round(start * 10) / 10, end: Math.round(end * 10) / 10, title: String(o.title || out.title || '').slice(0, 100),
+    hook: o.hook ? { mode: o.hook.mode, at: Number(o.hook.at), len: Number(o.hook.len), text: String(o.hook.text || '').slice(0, 60) } : null,
+    tempo: fx.TEMPO[o.tempo] !== undefined ? o.tempo : 'normal', music: !!o.music, changes: String(o.changes || '').slice(0, 500),
+    viral: Math.max(1, Math.min(10, Math.round(Number(o.viral) || 0))) || undefined, viralWhy: String(o.viralWhy || '').slice(0, 300), viralTip: String(o.viralTip || '').slice(0, 300) };
 }

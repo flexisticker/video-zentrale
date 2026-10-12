@@ -20,6 +20,7 @@ export const defaultProfiles = () => [
     musicStyle: 'modern energetic gaming background music, electronic beats, punchy drums, synth bass', musicMood: 'energisch',
     clipHints: 'Funny Moments, Stellen wo ich mich ärgere oder aufrege (Rage), laute Reaktionen, Fails, überraschende Wendungen, Clutches, '
       + 'peinliche oder absurde Momente, lustige Sprüche – alles, was Zuschauer bindet und zum Teilen/Kommentieren anregt.', shorts: 6,
+    hookStyle: 'auto', tempo: 'schnell', hookHint: 'Lieber die Reaktion/den Ausraster oder den Kill vorweg – Hook-Text frech und neugierig.',
     ...emptyConnections() },
   { id: '3dbymicha', name: '3dbymicha', color: '#25c4f4', isDefault: false, category: '28', tags: '3d-druck, 3d druck, bambu lab', footer: '',
     aiStyle: 'Gewerblicher Kanal rund um 3D-Druck (Bambu Lab A1 / A1 mini) und Druck von Flexisticker (Tassen, Textilien): '
@@ -29,6 +30,7 @@ export const defaultProfiles = () => [
       + 'tasse, tassen, sublimation, dtf, plotter, textildruck, werkstatt',
     musicStyle: 'light upbeat corporate background music, acoustic and soft electronic, positive, modern workshop vibe', musicMood: 'fröhlich',
     clipHints: 'Satisfying-Momente (Druck entsteht, Tasse kommt aus der Presse), Vorher/Nachher, überraschende Ergebnisse, kurze Tipps, Fehler und wie ich sie löse.', shorts: 4,
+    hookStyle: 'auto', tempo: 'normal', hookHint: 'Das fertige Ergebnis (Druck, Tasse, Teil) zuerst zeigen, danach wie es entsteht.',
     ...emptyConnections() },
   linkedinProfile(),
 ];
@@ -40,6 +42,7 @@ export const linkedinProfile = () => ({ id: 'linkedin', name: 'LinkedIn', color:
     + 'Er postet als Person in der Ich-Form: professionell, seriös, sachlich, mit echtem Mehrwert für Geschäftskunden, Einkäufer und Unternehmer – '
     + 'Einblicke in die Werkstatt, gelöste Kundenaufgaben, Ergebnisse, Erfahrungen und Tipps. Keine Gaming-Sprache, kein Slang.',
   musicStyle: 'calm minimal corporate background music, soft piano and light electronic, unobtrusive', musicMood: 'chillig',
+  hookStyle: 'cold', tempo: 'ruhig', hookHint: 'Mit der Kernaussage oder dem Ergebnis einsteigen, sachlich.',
   ...emptyConnections() });
 
 const empty = () => ({
@@ -58,7 +61,7 @@ const empty = () => ({
   helper: { enabled: false, token: '', model: 'large-v3-turbo', lastSeen: '', name: '', gpu: '', done: 0, failed: 0 },   // Rechenhelfer-PC
   backup: { auto: true, time: '03:30', keep: 14, lastAt: '', lastFile: '', lastError: '' },        // Sicherung
   photos: [],                                                      // Fotos des Creators für Titelbilder
-  cut: { auto: true, longVersion: true, longCopy: false, summary: 0, cutPauses: true, silenceDb: -45, minPause: 20, shorts: 3, shortMin: 30, shortMax: 45,
+  cut: { auto: true, hookText: true, longVersion: true, longCopy: false, summary: 0, cutPauses: true, silenceDb: -45, minPause: 20, shorts: 3, shortMin: 30, shortMax: 45,
     moveRaw: true, whisper: { enabled: true, model: 'small', threads: 4, gpu: true },
     window: { enabled: false, from: '01:00', to: '07:00' },                          // Nachtbetrieb
     captions: { enabled: true, color: '#FFE14D' },                                   // animierte Untertitel in Shorts
@@ -125,6 +128,9 @@ function normalize(raw) {
     if (p.musicMood === undefined) p.musicMood = defaults[p.id]?.musicMood || '';
     if (p.clipHints === undefined) p.clipHints = defaults[p.id]?.clipHints || '';
     if (p.shorts === undefined && defaults[p.id]?.shorts != null) p.shorts = defaults[p.id].shorts;
+    if (p.hookStyle === undefined) p.hookStyle = defaults[p.id]?.hookStyle || (p.type === 'linkedin' ? 'cold' : 'auto');
+    if (p.tempo === undefined) p.tempo = defaults[p.id]?.tempo || (p.type === 'linkedin' ? 'ruhig' : 'normal');
+    if (p.hookHint === undefined) p.hookHint = defaults[p.id]?.hookHint || '';
   }
   return state;
 }

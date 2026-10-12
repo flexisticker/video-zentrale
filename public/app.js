@@ -244,7 +244,7 @@ function startPolling() {
       updateCounts();
     } catch { /* still */ }
     const active = S.busy || S.videos.some((v) => ['queued', 'uploading', 'processing'].includes(v.yt?.state) || ['queued', 'uploading', 'processing'].includes(v.tt?.state)
-      || ['queued', 'running'].includes(v.ai?.state) || ['queued', 'running'].includes(v.cut?.state));
+      || ['queued', 'running'].includes(v.ai?.state) || ['queued', 'running'].includes(v.cut?.state) || ['queued', 'running'].includes(v.revise?.state));
     pollTimer = setTimeout(tick, active ? 2000 : 15000);
   };
   pollTimer = setTimeout(tick, 2000);
@@ -534,6 +534,7 @@ function openDetail(id) {
   const moveBox = h('div', { class: 'row' });
   const genBox = h('div', { class: 'section gen-thumbs' });
 
+  const reviseBox = h('div');
   const left = h('div', {}, player,
     h('div', { class: 'coverbox' }, cover, h('div', { class: 'acts' },
       h('b', {}, 'Titelbild'),
@@ -543,7 +544,7 @@ function openDetail(id) {
       h('span', { class: 'hint' }, 'YouTube: 1280 × 720, max. 2 MB (wird automatisch angepasst).'), imgInput)),
     h('div', { class: 'meta', style: { marginTop: '10px' } },
       v.file, ' · ', fmtSize(v.size), v.width ? ` · ${v.width} × ${v.height}` : '', v.duration ? ' · ' + fmtDur(v.duration) : ''),
-    genBox,
+    genBox, reviseBox,
     h('div', { style: { marginTop: '10px' } }, moveBox), cutBox, transcriptBox);
 
   const aiBox = h('div', { class: 'section ai' });
@@ -586,7 +587,7 @@ function openDetail(id) {
     right.querySelector('.tt-part').style.display = pro ? 'none' : '';
     cat.parentElement.style.display = pro ? 'none' : '';
   };
-  detail = { id, cutBox, transcriptBox, v, ytBox, ttBox, moveBox, folderEl, ensureSaved, chanInfo, chan, aiBox, genBox, f, applyMode, setField, setCover, setCoverFromFrame, isDirty: () => !saveBtn.disabled, markClean: () => { saveBtn.disabled = true; }, cleanup: () => document.removeEventListener('keydown', onKey) };
+  detail = { id, cutBox, transcriptBox, v, ytBox, ttBox, moveBox, folderEl, ensureSaved, chanInfo, chan, aiBox, genBox, reviseBox, f, applyMode, setField, setCover, setCoverFromFrame, isDirty: () => !saveBtn.disabled, markClean: () => { saveBtn.disabled = true; }, cleanup: () => document.removeEventListener('keydown', onKey) };
   updateDetail();
 }
 
@@ -978,6 +979,8 @@ function updateDetail(force) {
   const cutSig = JSON.stringify([v.cut, v.folder, v.hasTranscript]);
   if (force || cutSig !== detail.cutSig) { detail.cutSig = cutSig; renderCut(detail.cutBox, v); }
   if (v.hasTranscript !== detail.hasTranscript) { detail.hasTranscript = v.hasTranscript; renderTranscript(detail.transcriptBox, v); }
+  const revSig = JSON.stringify([v.revise, v.edit, v.revisionOf, v.revisionKept, v.canRevise, v.folder]);
+  if (force || revSig !== detail.revSig) { detail.revSig = revSig; renderRevise(detail.reviseBox, v); }
   const aiChanged = force === true || JSON.stringify([v.ai || null, v.thumbVariantsAt || 0]) !== detail.aiSeen;
   if (aiChanged) {
     detail.aiSeen = JSON.stringify([v.ai || null, v.thumbVariantsAt || 0]);
@@ -1120,6 +1123,56 @@ async function uploadChunked(file, folder, bar, label, item) {
     uploadDone(label, item, file.name);
   } catch (e) { uploadFail(label, item, file.name, e.message); }
   finally { uploadsRunning--; }
+}
+
+// ---------- Schnitt-Infos + Überarbeiten (Shorts) ----------
+const REVISE_CHIPS = ['Hook stärker – mit dem Höhepunkt einsteigen', 'Kürzer und schneller', 'Länger, mehr Vorgeschichte', 'Anderes Ende – nach der Pointe aufhören',
+  'Ohne Musik', 'Andere Stelle aus dem Video nehmen', 'Weniger Schnitte, ruhiger'];
+function renderRevise(box, v) {
+  const act = (fn, msg) => async () => { try { if ((await fn()) !== false && msg) toast(msg); } catch (x) { toast(x.message, true); } };
+  const kids = [];
+  if (v.edit?.how) kids.push(h('p', { class: 'hint' }, '⚡ ' + v.edit.how));
+  // neue Fassung: vergleichen und entscheiden
+  if (v.revisionOf) {
+    const old = S.videos.find((x) => x.id === v.revisionOf);
+    kids.push(h('div', { class: 'rev-new' },
+      h('b', {}, '🔁 Überarbeitete Fassung'),
+      h('p', {}, 'Dein Wunsch: „' + (v.revisionWish || '') + '“'),
+      v.revisionChanges ? h('p', { class: 'hint' }, 'Claude: ' + v.revisionChanges) : null,
+      v.revisionKept ? h('p', { class: 'ok-text' }, '✓ Behalten – die vorherige Fassung liegt im Papierkorb.')
+        : h('div', { class: 'row' },
+          old && old.folder !== 'papierkorb' ? h('button', { class: 'btn small primary', onclick: act(async () => { await api('POST', `/api/videos/${v.id}/keep-revision`); await refresh(); updateDetail(true); }, 'Behalten – die vorherige liegt im Papierkorb.') }, '✓ Diese behalten') : null,
+          old ? h('button', { class: 'btn small', onclick: () => go('video/' + old.id) }, '◀ Vorherige ansehen') : null,
+          h('button', { class: 'btn small ghost', onclick: act(async () => { if (!confirm('Diese neue Fassung verwerfen (Papierkorb)?')) return false; await api('POST', `/api/videos/${v.id}/trash`); await refresh(); if (old) go('video/' + old.id); }, 'Neue Fassung verworfen.') }, '✗ Verwerfen'))));
+  }
+  if (v.canRevise !== undefined) {
+    const st = v.revise?.state;
+    const sec = h('div', { class: 'section rev' }, h('h3', {}, '🔁 Überarbeiten'));
+    if (st === 'queued' || st === 'running') {
+      sec.append(h('div', { class: 'status' }, (st === 'queued' ? 'Wartet …' : (v.revise.step || 'Läuft') + ' …') + (v.revise.progress ? ` ${v.revise.progress} %` : '')),
+        h('div', { class: 'bar-progress' }, h('i', { style: { width: (v.revise.progress || 0) + '%' } })),
+        h('p', { class: 'hint' }, 'Wunsch: „' + v.revise.wish + '“'));
+    } else if (v.canRevise !== true) {
+      sec.append(h('p', { class: 'hint' }, v.canRevise));
+    } else {
+      if (st === 'done' && v.revise.newId) {
+        sec.append(h('p', { class: 'ok-text' }, '✓ Neue Fassung fertig: ', h('a', { href: '#video/' + v.revise.newId }, v.revise.newFile || 'öffnen')));
+      }
+      if (st === 'error') sec.append(h('p', { class: 'err' }, '✗ ' + v.revise.error));
+      const wish = h('textarea', { rows: 2, maxlength: 500, placeholder: 'Was soll anders werden? z. B. „Fang mit dem Sniper-Kill an und lass das Gelaber am Ende weg“' });
+      const chips = h('div', { class: 'chips' }, REVISE_CHIPS.map((c) => h('button', { class: 'chip-btn', onclick: () => {
+        wish.value = wish.value.trim() ? wish.value.trim().replace(/[.;,]?$/, '; ') + c : c; wish.focus(); } }, c)));
+      sec.append(h('p', { class: 'hint' }, 'Claude schneidet den Clip aus dem Rohvideo neu. Die neue Fassung erscheint daneben als „v2“ – du entscheidest, welche bleibt.'),
+        chips, wish,
+        h('div', { class: 'row', style: { marginTop: '8px' } }, h('button', { class: 'btn primary', onclick: act(async () => {
+          if (wish.value.trim().length < 3) throw new Error('Bitte kurz beschreiben, was anders werden soll.');
+          Object.assign(v, await api('POST', `/api/videos/${v.id}/revise`, { wish: wish.value.trim() }));
+          await refresh(); updateDetail(true); pollActivity(); startPolling();
+        }, 'Überarbeitung gestartet.') }, '🔁 Überarbeiten lassen')));
+    }
+    kids.push(sec);
+  }
+  box.replaceChildren(...kids);
 }
 
 // ---------- Was läuft gerade (Zentrale / Rechenhelfer) ----------
@@ -1271,9 +1324,15 @@ async function renderSettings() {
     const proMusic = h('input', { type: 'checkbox', checked: p.music });
     const clipHints = h('textarea', { rows: 2, value: p.clipHints || '', placeholder: 'z. B. Funny Moments, wo ich mich ärgere, Fails, Clutches …' });
     const chShorts = h('input', { type: 'number', min: 0, max: 10, value: p.shorts ?? '', placeholder: 'Standard' });
+    const hookSel = h('select', {}, Object.entries({ auto: 'Claude entscheidet je Clip', preview: 'Höhepunkt vorweg + Zurückspulen', cold: 'direkt mitten rein', off: 'aus' })
+      .filter(([k]) => !isPro(p) || k !== 'preview').map(([k, n]) => h('option', { value: k, selected: (p.hookStyle || 'auto') === k }, n)));
+    const tempoSel = h('select', {}, Object.entries({ aus: 'aus (nichts herausschneiden)', ruhig: 'ruhig (nur lange Pausen)', normal: 'normal (Pausen + „ähm“)', schnell: 'schnell (Jump Cuts + Zooms)' })
+      .map(([k, n]) => h('option', { value: k, selected: (p.tempo || 'normal') === k }, n)));
+    const hookHint = h('input', { value: p.hookHint || '', placeholder: 'z. B. Reaktion zuerst; bei 3D-Druck: Ergebnis zuerst' });
     const save = run(() => api('PUT', '/api/profiles/' + p.id, { name: name.value, color: color.value, isDefault: def.checked || undefined,
       keywords: kw.value, aiStyle: style.value, category: cat.value, tags: tags.value, footer: footer.value,
       musicStyle: mStyle.value, musicMood: mMood.value, clipHints: clipHints.value, shorts: chShorts.value === '' ? null : Number(chShorts.value),
+      hookStyle: hookSel.value, tempo: tempoSel.value, hookHint: hookHint.value,
       ...(isPro(p) ? { music: proMusic.checked } : {}) }), 'Kanal gespeichert.');
 
     // YouTube
@@ -1330,6 +1389,8 @@ async function renderSettings() {
       h('label', {}, 'Text unter jeder YouTube-Beschreibung'), footer,
       h('label', {}, '✂ Was soll Claude als Clips rausholen?'), clipHints,
       h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Clips je Video (leer = Standard)'), chShorts), h('div', {})),
+      h('div', { class: 'two' }, h('div', {}, h('label', {}, '⚡ Hook am Anfang der Clips'), hookSel), h('div', {}, h('label', {}, '✂ Tempo der Clips'), tempoSel)),
+      h('label', {}, 'Hinweis zum Hook für Claude'), hookHint,
       h('div', { class: 'two' }, h('div', {}, h('label', {}, '🎵 Musikstil für KI-Musik'), mStyle), h('div', {}, h('label', {}, 'Stimmung (Langfassung)'), mMood)),
       h('p', { class: 'hint' }, `Eigene Titel: ${st.music?.counts?.[p.id] ?? 0} (Ordner musik\\${p.id} + musik)`),
       h('div', { class: 'row', style: { marginTop: '12px' } },
@@ -1408,6 +1469,7 @@ async function renderSettings() {
   const cDb = numIn(c.silenceDb, { min: -70, max: -20 }), cMin = numIn(c.minPause, { min: 5, max: 600 });
   const cShorts = numIn(c.shorts, { min: 0, max: 10 }), cSmin = numIn(c.shortMin, { min: 10, max: 170 }), cSmax = numIn(c.shortMax, { min: 10, max: 180 });
   const wOn = cb(w.enabled);
+  const hookTxt = cb(c.hookText !== false);
   const capOn = cb(c.captions?.enabled), capColor = h('input', { type: 'color', value: c.captions?.color || '#FFE14D', class: 'color small' });
   const camOn = cb(c.facecam?.enabled);
   let cam = { ...(c.facecam || {}) };
@@ -1443,6 +1505,7 @@ async function renderSettings() {
     h('div', { class: 'row' }, h('span', { class: 'hint' }, 'von'), wnFrom, h('span', { class: 'hint' }, 'bis'), wnTo,
       h('span', { class: 'hint' }, c.window?.enabled ? (c.windowOpen ? '(gerade offen)' : '(gerade zu – „Jetzt schneiden“ geht trotzdem)') : '')),
     h('label', { class: 'check' }, capOn, 'Animierte Untertitel in Shorts (Wort für Wort)'),
+    h('label', { class: 'check' }, hookTxt, '⚡ Hook-Text von Claude groß im ersten Bild der Shorts (Hook-Stil und Tempo je Kanal unter „Kanäle“)'),
     h('div', { class: 'row' }, h('span', { class: 'hint' }, 'Farbe des gesprochenen Worts:'), capColor),
     h('label', { class: 'check' }, camOn, 'Facecam-Layout für Shorts (Facecam oben, Spiel unten)'),
     h('div', { class: 'two' }, h('div', {}, h('label', {}, 'LinkedIn-Clips (Ordner eingang-profi): Format'), liFmt),
@@ -1459,7 +1522,7 @@ async function renderSettings() {
     h('div', { class: 'row', style: { marginTop: '12px' } },
       h('button', { class: 'btn', onclick: run(() => api('POST', '/api/cut/config', { auto: cAuto.checked, longVersion: cLong.checked, cutPauses: cPause.checked,
         silenceDb: Number(cDb.value), minPause: Number(cMin.value), shorts: Number(cShorts.value), shortMin: Number(cSmin.value), shortMax: Number(cSmax.value),
-        moveRaw: cMove.checked, summary: Number(cSum.value), longCopy: cCopy.checked, whisper: { enabled: wOn.checked, model: wModel.value, threads: Number(wThreads.value), gpu: wGpu.checked },
+        moveRaw: cMove.checked, summary: Number(cSum.value), longCopy: cCopy.checked, hookText: hookTxt.checked, whisper: { enabled: wOn.checked, model: wModel.value, threads: Number(wThreads.value), gpu: wGpu.checked },
         window: { enabled: wnOn.checked, from: wnFrom.value, to: wnTo.value }, linkedin: { format: liFmt.value, captions: liCap.checked },
         captions: { enabled: capOn.checked, color: capColor.value }, facecam: { enabled: camOn.checked, x: cam.x, y: cam.y, w: cam.w, h: cam.h } }), 'Gespeichert.') }, 'Speichern')));
 

@@ -122,6 +122,18 @@ http.createServer(async (req, res) => {
       return json(res, 200, { id: 'msg_s', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn',
         content: [{ type: 'text', text: JSON.stringify({ parts: parts.slice(0, 4) }) }], usage: { input_tokens: 9000, output_tokens: 300 } });
     }
+    if (j.output_config?.format?.schema?.properties?.changes) {
+      const t0 = j.messages[0].content[0].text;
+      const m = /Bisheriger Clip: Sekunde ([\d.]+)–([\d.]+)/.exec(t0);
+      const wish = /WUNSCH DES CREATORS: „([^“]*)“/.exec(t0)?.[1] || '';
+      log.push({ revise: { wish, imgs: j.messages[0].content.filter((c) => c.type === 'image').length, said: /Gesprochenes in diesem Bereich/.test(t0) } });
+      const a = Number(m[1]), b2 = Number(m[2]);
+      const out = { start: a + 2, end: b2 - 6, title: 'Neue Fassung 🔥', hook: { mode: 'preview', at: b2 - 12, len: 2.5, text: 'Achtung, gleich knallt es' },
+        tempo: 'schnell', music: !/ohne musik/i.test(wish), changes: 'Ich steige jetzt mit dem Knall ein und habe den Leerlauf am Ende gekürzt.',
+        viral: 8, viralWhy: 'Stärkerer Einstieg.', viralTip: 'Titel als Frage formulieren.' };
+      return json(res, 200, { id: 'msg_r', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn',
+        content: [{ type: 'text', text: JSON.stringify(out) }], usage: { input_tokens: 6000, output_tokens: 300 } });
+    }
     if (j.output_config?.format?.schema?.properties?.shorts) {
       const wish = /Wunsch des Creators für diesen Schnitt: „([^“]*)“/.exec(j.messages[0].content[0].text)?.[1];
       if (wish) log.push({ hlWish: wish });
@@ -132,7 +144,9 @@ http.createServer(async (req, res) => {
       if (clipHints) log.push({ clipHints: clipHints.slice(0, 60) });
       const pick = sec.slice(0, 2).map(([a, b2], i) => ({ candidate: i + 1, start: a + 1, end: b2 - 2, title: i ? 'Der Sieg 🏆' : 'Drei auf einmal?!', reason: 'lauter Moment mit Reaktion',
         mood: i ? 'episch' : 'lustig', music: i ? 'epic orchestral hybrid with big drums' : 'quirky playful pizzicato',
-        viral: i ? 6 : 9, viralWhy: i ? 'Solider Sieg-Moment, aber bekannter Ablauf.' : 'Lauter Ausraster mit Pointe – hoher Teilwert.', viralTip: 'Mit dem Ausruf direkt einsteigen.' }));
+        viral: i ? 6 : 9, viralWhy: i ? 'Solider Sieg-Moment, aber bekannter Ablauf.' : 'Lauter Ausraster mit Pointe – hoher Teilwert.', viralTip: 'Mit dem Ausruf direkt einsteigen.',
+        hook: { mode: i ? 'cold' : 'preview', at: a + 1 + Math.round((b2 - a - 3) * 0.7), len: 2, text: i ? 'Das gibt es nicht!' : 'Wie konnte das passieren?' } }));
+      log.push({ hookRules: /Hook \(die ersten/.test(texts[0]) });
       return json(res, 200, { id: 'msg_h', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn',
         content: [{ type: 'text', text: JSON.stringify({ shorts: pick }) }], usage: { input_tokens: 9000, output_tokens: 400 } });
     }

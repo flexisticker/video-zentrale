@@ -170,6 +170,19 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   (server[]: Schnitt/Claude/Uploads mit Schritt+Prozent, `waiting` = Schnitt wartet auf Helfer; queue; helper.jobs mit Video aus `job.label` = Video-ID).
   `whisper.transcribe` meldet `onProgress(p, engine)` → Schritt „Sprache erkennen – Rechenhelfer X / Zentrale, Grafikkarte / Prozessor“.
   Achtung Test: VP8/WebM lässt sich nicht per `-c:v copy` in MP4 kopieren (Langfassung „Qavg: nan“) → Testvideos als H.264-MP4.
+- 1.18.0 (12.10.2026): **Hook-Schnitt, Tempo, Überarbeiten** (`server/cutfx.js`). Short = Abschnittsliste `parts` [{a,b,hook,rev,zoom}] in Quellzeit;
+  `renderShort` schneidet per `concatGraph` (trim/atrim je Teil, `-ss base -t span` auf die Eingabe, Zoom = crop+scale auf Quellmaße, Zurückspulen =
+  reverse + setpts=PTS/3 + areverse/atempo), danach Layout wie bisher auf `[cv]`, Untertitel über `mapWords` (Füllwörter nie), Hook-Text `buildHookAss`.
+  Claude: `hook {mode preview|cold|none, at, len, text}` in `chooseHighlights` (+ `HOOK_RULES`, Profil `hookStyle` auto|preview|cold|off, `hookHint`);
+  `cleanHook()`: preview → cold wenn Höhepunkt < 3 s nach Start, cold → preview wenn danach < 60 %/20 s übrig, LinkedIn nie preview.
+  Tempo `profile.tempo` aus|ruhig|normal|schnell: `tempoKeep()` entfernt Wortlücken ≥ gap, wenn ≥ 85 % davon ≥ quiet dB unter dem Clip-Median
+  (Lautheit jetzt in 0,1 s: `loudness()` liefert `fine`, optional `range`), Prüfung erst 0,4 s nach dem Wort (M-Fenster hinkt), max. 35 % raus.
+  `v.edit {hook, tempo, parts, how}`, `source.hook/tempo`. **Überarbeiten:** `POST /api/videos/:id/revise {wish}` → Warteschlange `{revise, wish}`
+  (vor Schnitten), `runRevision` → `ai.reviseShort()` (Fenster ±60 s, Transkript mit Zeiten, 6 Standbilder, Schema start/end/hook/tempo/music/changes/viral)
+  → `<Name> vN.mp4` mit `revisionOf/revisionRoot/revisionWish/revisionChanges`, `out.revise {state, step, newId}`; `POST /keep-revision` legt die
+  vorherige in den Papierkorb. `canRevise` = true oder Grund. UI `renderRevise()` (Chips, Wunsch, v2-Kasten). Mock: Hook + `changes`-Schema,
+  `FAKE_WHISPER_DENSE`. Getestet: 35-s-Clip → 25,6 s (11,8 s Pausen raus), Hook-Text/Zoom/Zurückspulen im Bild, cold zu kurz → preview, Revision v2 ohne Musik,
+  Behalten. **Nicht getestet:** echte Claude-Hooks, echte Spielaufnahmen (Schwelle 85 %/dB evtl. nachjustieren), NVENC mit vielen Teilen.
 - Beim Kunden (11.10.2026): Rechenhelfer auf dem PC (RTX 3070) eingerichtet und **online**. Echte CUDA-Spracherkennung noch nicht bestätigt.
 - Achtung `.dockerignore`: `tools` ist ausgeschlossen, nur `!tools/rechenhelfer` erlaubt (1.14.0/1.15.0-Bau schlug deshalb fehl). Neue Ordner,
   die ins Image sollen, dort freigeben.
@@ -182,6 +195,8 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   „Add products“ (Login Kit mit Redirect URI unter Web, Content Posting API), Target Users michamodus + 3dbymicha.
   **Beide Plattformen verbunden.** App-Icon `docs/app-icon-1024.png`. Demo-Video aus der Sandbox am 11.10.2026 vom Kunden aufgenommen, Einreichung der Prüfung läuft.
   Nach Freigabe: Production-Client-Key/Secret (anders als Sandbox!) in der Zentrale eintragen, Kanäle neu verbinden.
+- **Offen – Paket 4 Zusammenstellung (angeboten, Kunde will es):** „Best of“ aus mehreren Videos (Zeitraum/Auswahl, 16:9 oder 9:16, Claude
+  ordnet Highlights, Platz-Einblendungen), später automatisch wöchentlich. Nach 1.18.0 als eigenes Paket bauen.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
   Sendeplätze je Kanal **stellt der Kunde selbst ein** (keine festen Startzeiten), „Einplanen“ auf nächsten freien Platz, Shorts
   eines Langvideos über Tage verteilen, Übersicht Heute/Woche, Lückenwarnung. YouTube `publishAt` erst nach YouTube-Audit

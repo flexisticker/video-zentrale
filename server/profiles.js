@@ -55,6 +55,7 @@ export function publicProfile(p) {
     id: p.id, name: p.name, color: p.color, isDefault: !!p.isDefault, keywords: p.keywords || '', aiStyle: p.aiStyle || '',
     musicStyle: p.musicStyle || '', musicMood: p.musicMood || '', type: p.type || '', music: p.music !== false,
     clipHints: p.clipHints || '', shorts: Number.isFinite(p.shorts) ? p.shorts : null,
+    hookStyle: p.hookStyle || 'auto', tempo: p.tempo || 'normal', hookHint: p.hookHint || '',
     category: p.category || '20', tags: p.tags || '', footer: p.footer || '',
     youtube: { connected: !!p.youtube?.refreshToken, channel: p.youtube?.channel || null },
     tiktok: { connected: !!p.tiktok?.refreshToken && (!p.tiktok.refreshExpires || Date.now() < p.tiktok.refreshExpires),
@@ -69,7 +70,9 @@ export function update(id, b) {
   if (!p) throw Object.assign(new Error('Kanal nicht gefunden.'), { status: 404 });
   if ('name' in b) { const n = str(b.name, 60).trim(); if (!n) throw Object.assign(new Error('Name fehlt.'), { status: 400 }); p.name = n; }
   if ('color' in b && /^#[0-9a-f]{6}$/i.test(b.color)) p.color = b.color;
-  for (const [k, max] of [['aiStyle', 1000], ['keywords', 3000], ['category', 4], ['tags', 500], ['footer', 2000], ['musicStyle', 500], ['clipHints', 1000]]) if (k in b) p[k] = str(b[k], max);
+  for (const [k, max] of [['aiStyle', 1000], ['keywords', 3000], ['category', 4], ['tags', 500], ['footer', 2000], ['musicStyle', 500], ['clipHints', 1000], ['hookHint', 500]]) if (k in b) p[k] = str(b[k], max);
+  if (['auto', 'preview', 'cold', 'off'].includes(b.hookStyle)) p.hookStyle = b.hookStyle;
+  if (['aus', 'ruhig', 'normal', 'schnell'].includes(b.tempo)) p.tempo = b.tempo;
   if ('shorts' in b) p.shorts = b.shorts === null || b.shorts === '' ? undefined : Math.max(0, Math.min(10, Math.round(Number(b.shorts)) || 0));
   if (typeof b.music === 'boolean') p.music = b.music;
   if ('musicMood' in b && ['', 'episch', 'lustig', 'spannend', 'chillig', 'energisch', 'fröhlich', 'traurig'].includes(b.musicMood)) p.musicMood = b.musicMood;

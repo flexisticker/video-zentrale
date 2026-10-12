@@ -1,5 +1,11 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.18.0', date: '12.10.2026', items: [
+    '⚡ Hook-Schnitt: Claude sucht in jedem Short den stärksten Moment. Entweder kommt der Höhepunkt 1–2,5 s vorweg (mit Zoom), dann wird zurückgespult und der Clip läuft von vorn – oder der Short steigt direkt mitten in der Action ein. Dazu ein großer Hook-Text im ersten Bild.',
+    '✂ Tempo: Sprechpausen und „ähm“ fliegen raus (nur wo es wirklich leise ist – Spiel-Action bleibt). Stufen je Kanal: aus / ruhig / normal / schnell (Jump Cuts + kurze Zooms). MichaModus = schnell, 3dbymicha = normal, LinkedIn = ruhig.',
+    '🔁 Überarbeiten: Bei jedem Short sagen, was anders werden soll (Schnellwahl oder eigener Wunsch). Claude schneidet aus dem Rohvideo neu, die neue Fassung erscheint daneben als „v2“ – behalten oder verwerfen.',
+    'Einstellbar unter Einstellungen → Kanäle (Hook-Stil, Tempo, Hinweis für Claude) und Automatischer Schnitt (Hook-Text an/aus). „ähm“ erscheint nie mehr in den Untertiteln.',
+  ] },
   { version: '1.17.0', date: '11.10.2026', items: [
     '👀 Neue Leiste oben: Du siehst jederzeit, was die Zentrale gerade macht (Schritt, Video, Prozent, Warteschlange) und was dein Rechenhelfer macht (Spracherkennung für welches Video, seit wann) – oder ob beide arbeiten.',
     'Bei der Spracherkennung steht jetzt dabei, wer rechnet: Rechenhelfer, Server-Grafikkarte oder Server-Prozessor. Klick auf einen Eintrag öffnet das Video.',

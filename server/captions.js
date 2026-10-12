@@ -93,3 +93,28 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   });
   return head + ev.join('\n') + '\n';
 }
+
+// Hook-Text oben im Bild für die ersten Sekunden (groß, mit Kasten, kurzer „Pop“). pro = ruhig für LinkedIn.
+export function buildHookAss(text, { until = 2.2, width = 1080, height = 1920, pro = false, color = '#FFE14D' } = {}) {
+  const t = clean(text);
+  if (!t || until <= 0) return '';
+  const size = Math.round(width * (pro ? 0.06 : 0.1));
+  const font = pro ? 'Lato' : 'Anton';
+  const box = pro ? '&H5A000000' : '&H00000000';
+  const head = `[Script Info]
+ScriptType: v4.00+
+PlayResX: ${width}
+PlayResY: ${height}
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Hook,${font},${size},&H00FFFFFF,&H00FFFFFF,${box},${box},-1,0,0,0,100,100,1,0,3,${Math.round(size * 0.28)},0,8,80,80,${Math.round(height * (pro ? 0.08 : 0.13))},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+`;
+  const anim = pro ? '{\\fad(150,200)}' : `{\\fad(0,180)\\c${assColor(color)}\\fscx60\\fscy60\\t(0,140,\\fscx108\\fscy108)\\t(140,240,\\fscx100\\fscy100)}`;
+  return head + `Dialogue: 1,${assTime(0)},${assTime(until)},Hook,,0,0,0,,${anim}${pro ? t : t.toUpperCase()}\n`;
+}
