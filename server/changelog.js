@@ -1,5 +1,9 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.24.1', date: '12.10.2026', items: [
+    'Fehler behoben: Kurzfassung brach mit „Error while processing the decoded data … Conversion failed“ ab. Lagen die Bausteine nicht in zeitlicher Reihenfolge (z. B. Höhepunkt vorne), musste ffmpeg minutenlang Bilder zwischenspeichern und lief voll. Jetzt wird jeder Baustein direkt angesprungen – schneller und ohne Speicherhunger.',
+    'Fehlermeldungen von ffmpeg zeigen jetzt die eigentliche Ursache statt nur „Conversion failed“.',
+  ] },
   { version: '1.24.0', date: '12.10.2026', items: [
     '🗂 Vorhandene Videos umstellen: Einstellungen → Ordnung bzw. Bibliothek → „Vorhandene umstellen …“ zeigt vorher genau, welches Video wie heißen und wo liegen wird – erst nach deinem Klick wird verschoben.',
     '🎮 Ältere Videos ohne erkanntes Spiel: Claude bestimmt das Spiel nachträglich aus Titel, Beschreibung und Gesprochenem (ca. 0,4 Cent je Video). In der Bibliothek kannst du das Spiel einer Aufnahme mit „✎ Spiel“ auch selbst setzen – es gilt für alles, was daraus entstanden ist.',

@@ -242,6 +242,10 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   `topicOf`: v.orgTopic › Rohvideo.orgTopic › ai.game › Rohvideo.ai.game › Kinder. Rohvideo = `!source && folder rohvideos` (ältere Videos ohne `source` in hochgeladen
   sind fertige Videos; Hochformat → „(Short)“). Wartezeit ohne Thema nach Dateizeit (`mtime`), nicht `createdAt` (Bestand wird beim ersten Scan neu angelegt).
   UI `convertDialog()`, Hinweiszeile `.alert-line` in der Bibliothek bei `pending`. **Achtung DOM:** `replaceChildren(…, null)` schreibt „null“ → vorher filtern.
+- 1.24.1: Kurzfassung „Error while processing the decoded data … Conversion failed“ beim Kunden = **Speicher voll**: `[0:v]trim` je Baustein auf der ganzen Aufnahme,
+  Bausteine nicht chronologisch → ffmpeg puffert Rohbilder (nachgestellt mit `ulimit -v`: „Cannot allocate memory“). `renderSummary` jetzt mit eigener Eingabe je
+  Baustein (`-ss/-t -i`, Graph per `-filter_complex_script`, Musik `idx = reel.length`). `lastError()` zeigt die Ursache vor „Conversion failed“.
+  **Gleiches Muster** steckt in `concatGraph` (Shorts, Hook-Vorschau vorne → Puffer bis zur Hook-Stelle, max. Clip-Spanne) – bisher ohne Fehler beim Kunden.
 - **Offen – Paket 4 Zusammenstellung (angeboten, Kunde will es):** „Best of“ aus mehreren Videos (Zeitraum/Auswahl, 16:9 oder 9:16, Claude
   ordnet Highlights, Platz-Einblendungen), später automatisch wöchentlich. Nach 1.18.0 als eigenes Paket bauen.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,

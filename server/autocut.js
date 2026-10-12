@@ -81,7 +81,12 @@ function ffmpeg(args, onLine) {
     p.on('close', (code) => resolve({ code, err }));
   });
 }
-const lastError = (r) => r.err.trim().split('\n').filter((l) => !/^\s*(frame=|size=|out_time|progress=|speed=|bitrate=|total_size|dup_frames|drop_frames|stream_)/.test(l)).slice(-2).join(' ');
+const lastError = (r) => {
+  const lines = r.err.trim().split('\n').filter((l) => !/^\s*(frame=|size=|out_time|progress=|speed=|bitrate=|total_size|dup_frames|drop_frames|stream_)/.test(l));
+  // die eigentliche Ursache steht meist vor „Conversion failed“ / „Error while processing …“
+  const cause = lines.filter((l) => !/Conversion failed|Error while processing the decoded data|Error while filtering|Terminating thread|Nothing was written/i.test(l)).slice(-2);
+  return [...cause, ...lines.slice(-1)].filter((l, i, a) => a.indexOf(l) === i).join(' ').slice(0, 600);
+};
 
 function progressFrom(total, cb) {
   return (l) => { const m = /out_time_(?:ms|us)=(\d+)/.exec(l); if (m && total > 0) cb(Math.min(100, Number(m[1]) / 1e6 / total * 100)); };
@@ -404,11 +409,17 @@ export function setPlan(v, b = {}) {
 // Kurzfassung: Stellen hintereinander, neu kodiert (Ton je Stelle kurz ein-/ausgeblendet gegen Knackser)
 async function renderSummary(v, file, reel, hasAudio, out, onP, track, teaserText = '', teaserLen = 0) {
   const total = reel.reduce((x, r) => x + r.end - r.start, 0);
+  fs.mkdirSync(TMP, { recursive: true });
+  // Jeder Baustein als eigene Eingabe (-ss/-t): früher lief die ganze Aufnahme durch alle trim-Filter – lagen die Bausteine
+  // nicht in zeitlicher Reihenfolge (Teaser/Höhepunkt vorne), puffer­te ffmpeg Minuten an Rohbildern und brach ab
+  // („Error while processing the decoded data … Conversion failed“).
+  const inputs = [];
   let g = '';
   reel.forEach((r, i) => {
-    const d = (r.end - r.start).toFixed(3);
-    g += `[0:v]trim=${r.start.toFixed(3)}:${r.end.toFixed(3)},setpts=PTS-STARTPTS[v${i}];`;
-    if (hasAudio) g += `[0:a:0]atrim=${r.start.toFixed(3)}:${r.end.toFixed(3)},asetpts=PTS-STARTPTS,afade=t=in:d=0.15,afade=t=out:st=${Math.max(0, d - 0.15)}:d=0.15[a${i}];`;
+    const d = Math.max(0.1, r.end - r.start);
+    inputs.push('-ss', Math.max(0, r.start).toFixed(3), '-t', d.toFixed(3), '-i', file);
+    g += `[${i}:v:0]setpts=PTS-STARTPTS[v${i}];`;
+    if (hasAudio) g += `[${i}:a:0]asetpts=PTS-STARTPTS,aresample=48000,apad,atrim=0:${d.toFixed(3)},afade=t=in:d=0.15,afade=t=out:st=${Math.max(0, d - 0.15).toFixed(3)}:d=0.15[a${i}];`;
   });
   g += reel.map((_, i) => `[v${i}]` + (hasAudio ? `[a${i}]` : '')).join('') + `concat=n=${reel.length}:v=1:a=${hasAudio ? 1 : 0}[cv${teaserText ? '0' : ''}]` + (hasAudio ? '[ca]' : '');
   const assFile = path.join(TMP, v.id + '-kurz-teaser.ass');
@@ -417,12 +428,15 @@ async function renderSummary(v, file, reel, hasAudio, out, onP, track, teaserTex
     g += `;[cv0]ass=${assFile}:fontsdir=${FONTS}[cv]`;
   }
   let audio = [];
-  if (track) { g += ';' + music.mixGraph({ hasVoice: hasAudio, dur: total, voiceIn: 'ca', track }); audio = ['-map', '[aout]', '-c:a', 'aac', '-b:a', '192k']; }
+  if (track) { g += ';' + music.mixGraph({ hasVoice: hasAudio, idx: reel.length, dur: total, voiceIn: 'ca', track }); audio = ['-map', '[aout]', '-c:a', 'aac', '-b:a', '192k']; }
   else if (hasAudio) { g += `;[ca]${LOUDNORM},aresample=48000[aout]`; audio = ['-map', '[aout]', '-c:a', 'aac', '-b:a', '192k']; }
   const mInput = track ? ['-stream_loop', '-1', '-i', track.file] : [];
-  const r = await gpu.encodeWithFallback((venc) => ffmpeg(['-i', file, ...mInput, '-filter_complex', g, '-map', '[cv]', ...audio, ...venc,
+  const script = path.join(TMP, v.id + '-kurz-graph.txt');
+  fs.writeFileSync(script, g);
+  const r = await gpu.encodeWithFallback((venc) => ffmpeg([...inputs, ...mInput, '-filter_complex_script', script, '-map', '[cv]', ...audio, ...venc,
     '-t', total.toFixed(2), '-movflags', '+faststart', '-progress', 'pipe:1', '-y', out], progressFrom(total, onP)));
   fs.rmSync(assFile, { force: true });
+  fs.rmSync(script, { force: true });
   if (r.code !== 0) throw new Error('Kurzfassung: ' + lastError(r));
 }
 
