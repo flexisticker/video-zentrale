@@ -11,8 +11,10 @@ import * as ai from './ai.js';
 import * as gpu from './gpu.js';
 import * as music from './music.js';
 import * as profiles from './profiles.js';
-import { buildAss, buildCalmAss, buildHookAss } from './captions.js';
+import { buildAss, buildCalmAss, buildHookAss, buildFxAss } from './captions.js';
 import * as fx from './cutfx.js';
+import * as sfx from './sfx.js';
+import * as thumbs from './thumbs.js';
 import { fileURLToPath } from 'node:url';
 
 const FONTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fonts');
@@ -239,6 +241,25 @@ async function renderLong(v, file, keep, hasAudio, out, onP, track, teaser = nul
   if (r.code !== 0) throw new Error('Langfassung: ' + lastError(r));
 }
 
+// Effekte eines Shorts vorbereiten: Freeze/Zeitlupe/Zoom in die Abschnitte, Sounds und Sticker besorgen
+async function prepareFx(s, profile, warn) {
+  const level = s.fxLevel || ai.fxLevelOf(profile);
+  const r = fx.applyFx(s.parts, s.fx, { level, start: s.start, end: s.end, stickers: ai.fxStickers(profile) });
+  s.parts = r.parts; s.events = r.events; s.fxLevel = level;
+  for (const e of s.events) {
+    if (e.sound || e.soundIdea) {
+      e.soundFile = (e.sound && await sfx.get(e.sound)) || (e.soundIdea ? await sfx.custom(e.soundIdea, 1.2) : null)
+        || (e.sound && !sfx.LIBRARY[e.sound] ? await sfx.custom(e.sound.replace(/[-_]/g, ' '), 1) : null);
+    }
+    if (e.kind === 'sticker') {
+      try { e.stickerFile = await thumbs.makeSticker(e.sticker, profile?.id); } catch (x) { warn('Sticker: ' + x.message); }
+    }
+  }
+  const missing = s.events.filter((e) => (e.sound || e.soundIdea) && !e.soundFile).length;
+  if (missing && !db().fal?.key) warn('Soundeffekte brauchen den fal.ai-Schlüssel (oder eigene Sounds in musik/sfx).');
+  return fx.describeFx(s.events);
+}
+
 // Short im Hochformat: Bildmitte oder Facecam oben + Spiel unten, animierte Untertitel, Grafikkarte wenn vorhanden.
 // s.parts = Abschnitte der Quelle (Hook-Vorschau, Zurückspulen, Tempo-Schnitte – siehe cutfx.js); ohne parts am Stück.
 async function renderShort(v, file, s, hasAudio, out, onP, words, track, pro = false) {
@@ -278,19 +299,76 @@ async function renderShort(v, file, s, hasAudio, out, onP, words, track, pro = f
     fs.writeFileSync(f, hookAss); tmpFiles.push(f);
     graph += `;[${last}]ass=${f}:fontsdir=${FONTS}[hk]`; last = 'hk';
   }
+  // Effekte (Emojis, Blitz, Wackeln, Texte, Sticker, Sounds) – Zeiten schon im fertigen Short (cutfx.applyFx)
+  const fxIn = [];
+  const firstFx = track ? 2 : 1;
+  const events = s.events || [];
+  const shakes = events.filter((e) => e.kind === 'shake');
+  if (shakes.length) {
+    const wob = (k) => shakes.map((e) => `if(between(t,${e.t.toFixed(2)},${(e.t + 0.45).toFixed(2)}),24*${k}(t*75)*(1-(t-${e.t.toFixed(2)})/0.45),0)`).join('+');
+    graph += `;[${last}]crop=w=iw-56:h=ih-56:x='28+${wob('sin')}':y='28+${wob('cos')}',scale=${W}:${H},setsar=1[shk]`; last = 'shk';
+  }
+  const texts = events.filter((e) => e.text && ['freeze', 'replay', 'text'].includes(e.kind)).map((e) => ({ t: e.t, dur: Math.min(1.5, e.dur || 1.1), text: e.text }));
+  const fxAss = buildFxAss(texts, { width: W, height: H, color: c.captions?.color });
+  if (fxAss) {
+    const f = path.join(TMP, `${v.id}-fx${Math.round(s.start)}.ass`);
+    fs.writeFileSync(f, fxAss); tmpFiles.push(f);
+    graph += `;[${last}]ass=${f}:fontsdir=${FONTS}[fxt]`; last = 'fxt';
+  }
+  let k = 0;
+  for (const e of events) {
+    if (e.kind === 'flash') {
+      graph += `;color=c=white:s=${W}x${H}:r=30:d=0.35,format=rgba,fade=t=out:st=0:d=0.35:alpha=1,setpts=PTS-STARTPTS+${e.t.toFixed(3)}/TB[fl${k}]`
+        + `;[${last}][fl${k}]overlay=enable='between(t,${e.t.toFixed(3)},${(e.t + 0.35).toFixed(3)})':eof_action=pass[o${k}]`;
+      last = 'o' + k++; continue;
+    }
+    const img = e.kind === 'emoji' ? fx.emojiFile(e.emoji) : e.kind === 'sticker' ? e.stickerFile : null;
+    if (!img) continue;
+    const D = e.dur || (e.kind === 'sticker' ? 1.6 : 1.4);
+    const S = Math.round(W * (e.big ? 0.36 : e.kind === 'sticker' ? 0.46 : 0.26) / 2) * 2;
+    const [px, py] = fx.POSITIONS[e.pos] || fx.POSITIONS.mitte;
+    const idx = firstFx + fxIn.length;
+    fxIn.push({ img, D });
+    graph += `;[${idx}:v]format=rgba,scale=256:256:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000,`
+      + `zoompan=z='if(lt(on,5),1+on*0.25,if(lt(on,10),2.25-(on-5)*0.05,2))':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s=${S}x${S}:fps=30,format=rgba,`
+      + `rotate=a='0.16*sin(t*14)*exp(-t*3)':c=0x00000000,fade=t=out:st=${Math.max(0.2, D - 0.3).toFixed(2)}:d=0.3:alpha=1,setpts=PTS-STARTPTS+${e.t.toFixed(3)}/TB[em${k}]`
+      + `;[${last}][em${k}]overlay=x=${Math.round(W * px)}-overlay_w/2:y=${Math.round(H * py)}-overlay_h/2:enable='between(t,${e.t.toFixed(3)},${(e.t + D).toFixed(3)})':eof_action=pass[o${k}]`;
+    last = 'o' + k++;
+  }
   graph += `;[${last}]fps=30[v]`;
   let audio = [];
+  let aMain = '';
   if (track) {
     graph += ';' + music.mixGraph({ hasVoice: hasAudio, dur: total, track, voiceIn: 'ca' });
-    audio = ['-map', '[aout]', '-c:a', 'aac', '-b:a', '160k'];
+    aMain = 'aout';
   } else if (hasAudio) {
     graph += `;[ca]${LOUDNORM},aresample=48000[aout]`;
-    audio = ['-map', '[aout]', '-c:a', 'aac', '-b:a', '160k'];
+    aMain = 'aout';
   }
+  // Sounds dazumischen (feste Lautstärke je Effekt-Stufe; Sounds sind auf −16 LUFS normalisiert)
+  const sounds = events.filter((e) => e.soundFile);
+  const sIn = [];
+  if (sounds.length) {
+    const vol = fx.FX_LEVELS[s.fxLevel]?.vol || 0.6;
+    if (!aMain) { graph += `;aevalsrc=0|0:s=48000:d=${total.toFixed(3)}[aout]`; aMain = 'aout'; }
+    graph += `;[${aMain}]anull[amain]`;
+    const labels = ['[amain]'];
+    sounds.forEach((e, i) => {
+      const idx = firstFx + fxIn.length + i;
+      sIn.push(e.soundFile);
+      const ms = Math.round(e.t * 1000);
+      graph += `;[${idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=${vol},adelay=${ms}|${ms}[sx${i}]`;
+      labels.push(`[sx${i}]`);
+    });
+    graph += `;${labels.join('')}amix=inputs=${labels.length}:duration=first:normalize=0,alimiter=limit=0.95[afx]`;
+    aMain = 'afx';
+  }
+  if (aMain) audio = ['-map', `[${aMain}]`, '-c:a', 'aac', '-b:a', '160k'];
   const mInput = track ? ['-stream_loop', '-1', '-i', track.file] : [];
+  const extraIn = [...fxIn.flatMap((x) => ['-loop', '1', '-framerate', '30', '-t', x.D.toFixed(2), '-i', x.img]), ...sIn.flatMap((f) => ['-i', f])];
   const script = path.join(TMP, `${v.id}-s${Math.round(s.start)}.filter`);
   fs.writeFileSync(script, graph); tmpFiles.push(script);
-  const r = await gpu.encodeWithFallback((venc) => ffmpeg(['-ss', base.toFixed(3), '-t', span.toFixed(3), '-i', file, ...mInput,
+  const r = await gpu.encodeWithFallback((venc) => ffmpeg(['-ss', base.toFixed(3), '-t', span.toFixed(3), '-i', file, ...mInput, ...extraIn,
     '-filter_complex_script', script, '-map', '[v]', ...audio, ...venc, '-t', total.toFixed(3),
     '-movflags', '+faststart', '-progress', 'pipe:1', '-y', out], progressFrom(total, onP)));
   for (const f of tmpFiles) fs.rmSync(f, { force: true });
@@ -483,6 +561,7 @@ async function runCut(v) {
     const s = shorts[i];
     s.hook = fx.cleanHook(s.hook, s.start, s.end, hookStyle, pro);
     s.parts = fx.buildParts({ start: s.start, end: s.end, hook: s.hook, words, fine: hasAudio ? fine : null, tempo });
+    const fxHow = await prepareFx(s, profile, (m) => { v.cut.warning = m; });
     step(`Short ${i + 1} von ${shorts.length} schneiden`);
     const tmp = path.join(TMP, `${v.id}-short${i + 1}.mp4`);
     const label = `Short ${i + 1} von ${shorts.length} schneiden`;
@@ -493,10 +572,10 @@ async function runCut(v) {
       v.cut.warning = 'Mischen mit Musik ging nicht – Short ohne Musik.';
       await renderShort(v, file, s, hasAudio, tmp, (p) => step(label, (done + p / 100) / jobs * 100), words, null, pro);
     }
-    const how = fx.describe(s.hook, tempo, s.parts, s.start, s.end);
+    const how = [fx.describe(s.hook, tempo, s.parts, s.start, s.end), fxHow].filter(Boolean).join(' · ');
     const nv = publish(tmp, `${base} – ${pro ? 'LinkedIn-Clip' : 'Short'} ${i + 1}.mp4`, {
-      source: { rawId: v.id, rawFile: v.file, kind: 'short', start: s.start, end: s.end, hook: s.hook || null, tempo },
-      edit: { hook: s.hook || null, tempo, parts: s.parts.length, how },
+      source: { rawId: v.id, rawFile: v.file, kind: 'short', start: s.start, end: s.end, hook: s.hook || null, tempo, fx: s.fx || [] },
+      edit: { hook: s.hook || null, tempo, parts: s.parts.length, how, fxHow, fxLevel: s.fxLevel },
       title: s.title ? s.title.slice(0, 100) : `${base} – Short ${i + 1}`,
       viral: Number.isFinite(s.viral) ? { score: s.viral, why: s.viralWhy || '', tip: s.viralTip || '', by: 'Schnitt' } : undefined,
       note: sourceNote(s.start, s.end) + (s.reason ? ' Warum: ' + s.reason : '') + (how ? ' ' + how + '.' : '') + music.noteOf(track),
@@ -696,6 +775,9 @@ async function runRevision({ revise: outId, wish }) {
     if (style === 'off' && /hook|anfang|einstieg/i.test(wish)) style = 'auto';
     const s = { start: r.start, end: r.end, hook: fx.cleanHook(r.hook, r.start, r.end, style, pro) };
     s.parts = fx.buildParts({ start: s.start, end: s.end, hook: s.hook, words, fine: hasAudio ? fine : null, tempo: r.tempo });
+    s.fx = r.fx; s.fxLevel = r.fxLevel;
+    step('Effekte vorbereiten');
+    const fxHow = await prepareFx(s, profile, (m) => { out.revise.warning = m; });
     const seconds = fx.totalLen(s.parts);
     let track = null;
     if (r.music && profile?.music !== false && db().music?.enabled !== false) {
@@ -710,10 +792,10 @@ async function runRevision({ revise: outId, wish }) {
     catch (e) { if (!track) throw e; track = null; await renderShort(raw, file, s, hasAudio, tmp, onP, words, null, pro); }
     // Versionsnummer: v2, v3 … bezogen auf die erste Fassung
     const { rootId, n, name } = nextVersionName(out);
-    const how = fx.describe(s.hook, r.tempo, s.parts, s.start, s.end);
+    const how = [fx.describe(s.hook, r.tempo, s.parts, s.start, s.end), fxHow].filter(Boolean).join(' · ');
     const nv = publish(tmp, name, {
-      source: { ...out.source, start: s.start, end: s.end, hook: s.hook || null, tempo: r.tempo },
-      edit: { hook: s.hook || null, tempo: r.tempo, parts: s.parts.length, how },
+      source: { ...out.source, start: s.start, end: s.end, hook: s.hook || null, tempo: r.tempo, fx: s.fx || [] },
+      edit: { hook: s.hook || null, tempo: r.tempo, parts: s.parts.length, how, fxHow, fxLevel: s.fxLevel },
       title: r.title || out.title, description: out.description, tags: out.tags, category: out.category,
       viral: r.viral ? { score: r.viral, why: r.viralWhy, tip: r.viralTip, by: 'Überarbeitung' } : out.viral,
       revisionOf: out.id, revisionRoot: rootId, revisionWish: wish, revisionChanges: r.changes,

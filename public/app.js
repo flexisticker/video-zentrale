@@ -355,6 +355,11 @@ function renderMain() {
   if (keepFocus) { const s = document.getElementById('search'); s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
 }
 
+// Gibt es zu diesem Video eine neuere Fassung (v2, v3 …), die nicht im Papierkorb liegt? → „v2“ usw.
+function hasNewer(v) {
+  const n = S.videos.filter((x) => x.revisionOf === v.id && x.folder !== 'papierkorb' && !x.missing);
+  return n.length ? n.map((x) => / (v\d+)\.[^.]+$/.exec(x.file)?.[1] || 'neu').join(', ') : '';
+}
 function card(v) {
   const thumb = h('span', { class: 'thumb' });
   if (v.hasImage) thumb.style.backgroundImage = `url("${imgUrl(v)}")`;
@@ -375,6 +380,9 @@ function card(v) {
         v.cut?.state === 'done' ? h('span', { class: 'chip ok' }, `✂ ${v.cut.outputs?.length || 0} Videos`) : null,
         v.folder === 'eingang-profi' ? h('span', { class: 'chip li' }, 'Profi') : null,
         viralChip(v),
+        v.revisionOf ? h('span', { class: 'chip ver', title: 'Überarbeitete Fassung' + (v.revisionWish ? ': ' + v.revisionWish : '') }, '🔁 ' + (/ v(\d+)\.[^.]+$/.exec(v.file)?.[0].replace(/\.[^.]+$/, '').trim() || 'neu') + (v.revisionKept ? ' ✓' : '')) : null,
+        hasNewer(v) ? h('span', { class: 'chip', title: 'Es gibt eine überarbeitete Fassung' }, '↳ hat ' + hasNewer(v)) : null,
+        ['queued', 'running'].includes(v.revise?.state) ? h('span', { class: 'chip run' }, '🔁 wird überarbeitet') : null,
         v.folder === 'papierkorb' ? h('span', { class: 'chip bad' }, '🗑 ' + fmtDate(v.trash?.at)) : null,
         ...(isPro(channelOf(v)) ? [stateChip('LinkedIn', v.li)] : [stateChip('YouTube', v.yt), stateChip('TikTok', v.tt)])),
       running ? h('div', { class: 'bar-progress' }, h('i', { style: { width: (running.progress || 0) + '%' } })) : null));
@@ -1142,7 +1150,7 @@ async function uploadChunked(file, folder, bar, label, item) {
 
 // ---------- Schnitt-Infos + Überarbeiten (Shorts) ----------
 const REVISE_CHIPS = ['Hook stärker – mit dem Höhepunkt einsteigen', 'Kürzer und schneller', 'Länger, mehr Vorgeschichte', 'Anderes Ende – nach der Pointe aufhören',
-  'Ohne Musik', 'Andere Stelle aus dem Video nehmen', 'Weniger Schnitte, ruhiger'];
+  'Ohne Musik', 'Andere Stelle aus dem Video nehmen', 'Weniger Schnitte, ruhiger', 'Mehr Effekte (Emojis, Sounds)', 'Weniger Effekte', 'Ohne Effekte'];
 const REVISE_CHIPS_LONG = ['Intro raus (Lobby, Ladebildschirm, Menü, Warten)', 'Langweilige Stellen raus', 'Nur die besten Stellen – deutlich kürzer',
   'Teaser mit dem Höhepunkt am Anfang', 'Weniger Pausen (schneller)', 'Outro/Ende kürzen', 'Ohne Musik', 'Mit Musik'];
 function renderRevise(box, v) {
@@ -1352,10 +1360,13 @@ async function renderSettings() {
     const tempoSel = h('select', {}, Object.entries({ aus: 'aus (nichts herausschneiden)', ruhig: 'ruhig (nur lange Pausen)', normal: 'normal (Pausen + „ähm“)', schnell: 'schnell (Jump Cuts + Zooms)' })
       .map(([k, n]) => h('option', { value: k, selected: (p.tempo || 'normal') === k }, n)));
     const hookHint = h('input', { value: p.hookHint || '', placeholder: 'z. B. Reaktion zuerst; bei 3D-Druck: Ergebnis zuerst' });
+    const fxSel = h('select', {}, Object.entries({ aus: 'aus', dezent: 'dezent (wenige Emojis/Sounds)', normal: 'normal (+ Freeze, Zeitlupe, Zoom, Wackeln)', viel: 'viel (+ KI-Sticker)' })
+      .map(([k, n]) => h('option', { value: k, selected: (p.fxLevel || 'normal') === k }, n)));
+    const fxImg = h('input', { type: 'checkbox', checked: !!p.fxImages });
     const save = run(() => api('PUT', '/api/profiles/' + p.id, { name: name.value, color: color.value, isDefault: def.checked || undefined,
       keywords: kw.value, aiStyle: style.value, category: cat.value, tags: tags.value, footer: footer.value,
       musicStyle: mStyle.value, musicMood: mMood.value, clipHints: clipHints.value, shorts: chShorts.value === '' ? null : Number(chShorts.value),
-      hookStyle: hookSel.value, tempo: tempoSel.value, hookHint: hookHint.value,
+      hookStyle: hookSel.value, tempo: tempoSel.value, hookHint: hookHint.value, fxLevel: fxSel.value, fxImages: fxImg.checked,
       ...(isPro(p) ? { music: proMusic.checked } : {}) }), 'Kanal gespeichert.');
 
     // YouTube
@@ -1414,6 +1425,8 @@ async function renderSettings() {
       h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Clips je Video (leer = Standard)'), chShorts), h('div', {})),
       h('div', { class: 'two' }, h('div', {}, h('label', {}, '⚡ Hook am Anfang der Clips'), hookSel), h('div', {}, h('label', {}, '✂ Tempo der Clips'), tempoSel)),
       h('label', {}, 'Hinweis zum Hook für Claude'), hookHint,
+      h('div', { class: 'two' }, h('div', {}, h('label', {}, '🎉 Effekte in Clips (Emojis, Sounds, Freeze …)'), fxSel),
+        h('div', {}, h('label', { class: 'check', style: { marginTop: '22px' } }, fxImg, 'KI-Sticker aus meinen Fotos (Stufe „viel“, ca. 5 Cent)'))),
       h('div', { class: 'two' }, h('div', {}, h('label', {}, '🎵 Musikstil für KI-Musik'), mStyle), h('div', {}, h('label', {}, 'Stimmung (Langfassung)'), mMood)),
       h('p', { class: 'hint' }, `Eigene Titel: ${st.music?.counts?.[p.id] ?? 0} (Ordner musik\\${p.id} + musik)`),
       h('div', { class: 'row', style: { marginTop: '12px' } },
@@ -1701,9 +1714,20 @@ async function renderSettings() {
       ' · ', h('a', { href: '#', onclick: (e) => { e.preventDefault(); showChangelog(); } }, 'Was ist neu'),
       ' · ', h('a', { href: '#', onclick: async (e) => { e.preventDefault(); S.version = await api('POST', '/api/version/check'); toast(S.version.updateAvailable ? `Update ${S.version.latest.version} verfügbar – in Unraid „Check for Updates“ → „apply update“.` : S.version.latest.error ? 'Prüfung ging nicht: ' + S.version.latest.error : 'Du hast die neueste Version.', !!S.version.latest.error); render(); } }, 'Nach Updates suchen')));
 
-  const jumps = [['s-kanaele', 'Kanäle'], ['s-claude', 'Claude'], ['s-schnitt', 'Schnitt'], ['s-musik', 'Musik'], ['s-bilder', 'Titelbilder'],
+  const sx = await api('GET', '/api/sfx').catch(() => null);
+  const sfxBox = h('div', { class: 'box' }, h('h3', {}, '🔊 Soundeffekte'),
+    h('p', { class: 'hint' }, 'Claude setzt in Shorts passende Sounds (Whoosh, Bass-Boom, Zurückspulen, Pop …). Der Grundbaukasten wird einmal per KI erzeugt (fal.ai, laut Anbieter kommerziell nutzbar) und dann immer wieder verwendet. '
+      + 'Eigene Sounds (z. B. von Epidemic Sound) einfach in den Ordner „musik\\sfx“ legen – gleicher Name wie unten ersetzt den KI-Sound, andere Namen kann Claude zusätzlich nutzen. Bekannte Internet-Meme-Sounds bitte nicht verwenden (Urheberrecht).'),
+    sx ? h('p', {}, `${sx.ready} von ${sx.total} Baukasten-Sounds vorhanden`, sx.own.length ? ` · ${sx.own.length} eigene` : '', sx.custom ? ` · ${sx.custom} Sonder-Sounds` : '',
+      sx.spent ? ` · bisher ca. ${sx.spent.toFixed(2).replace('.', ',')} $` : '', sx.building ? ' · wird gerade erzeugt …' : '') : null,
+    sx && sx.ready < sx.total ? h('button', { class: 'btn primary', disabled: !sx.falKey || sx.building, onclick: run(() => api('POST', '/api/sfx/build'), 'Baukasten wird erzeugt – dauert ein paar Minuten.') },
+      sx.falKey ? `Baukasten erzeugen (${sx.total - sx.ready} Sounds, ca. 0,10 $)` : 'Erst fal.ai-Schlüssel eintragen') : null,
+    sx ? h('div', { class: 'sfx-list' }, sx.sounds.map((x) => h('button', { class: 'chip-btn' + (x.ready ? '' : ' off'), disabled: !x.ready, title: x.own ? 'eigener Sound' : x.id,
+      onclick: () => { const a = new Audio('/api/sfx/file/' + x.id); a.play().catch(() => {}); } }, (x.ready ? '▶ ' : '') + x.name + (x.own ? ' ★' : '')))) : null,
+    h('p', { class: 'hint' }, 'Fehlt ein Sound beim Schnitt, wird er automatisch erzeugt (sofern der fal.ai-Schlüssel eingetragen ist).'));
+  const jumps = [['s-kanaele', 'Kanäle'], ['s-claude', 'Claude'], ['s-schnitt', 'Schnitt'], ['s-musik', 'Musik'], ['s-sfx', 'Sounds'], ['s-bilder', 'Titelbilder'],
     ['s-helfer', 'Rechenhelfer'], ['s-google', 'YouTube-App'], ['s-tiktok', 'TikTok-App'], ['s-sicherung', 'Sicherung'], ['s-allgemein', 'Allgemein']];
-  [[claudeBox, 's-claude'], [cutBox, 's-schnitt'], [musicBox, 's-musik'], [thumbBox, 's-bilder'], [helperBox, 's-helfer'], [googleBox, 's-google'],
+  [[claudeBox, 's-claude'], [cutBox, 's-schnitt'], [musicBox, 's-musik'], [sfxBox, 's-sfx'], [thumbBox, 's-bilder'], [helperBox, 's-helfer'], [googleBox, 's-google'],
     [tiktokBox, 's-tiktok'], [backupBox, 's-sicherung'], [account, 's-allgemein']].forEach(([el, id]) => { el.id = id; el.style.scrollMarginTop = '110px'; });
   const jumpBar = h('div', { class: 'setjump' }, jumps.map(([id, label]) => h('button', { class: 'btn small', onclick: () => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, label)));
   mainEl.replaceChildren(jumpBar,
@@ -1712,7 +1736,7 @@ async function renderSettings() {
       h('button', { class: 'btn small', onclick: () => { const n = prompt('Name des neuen Kanals:'); if (n) run(() => api('POST', '/api/profiles', { name: n }), 'Kanal angelegt.')(); } }, '+ Kanal')),
     h('div', { class: 'settings' }, st.profiles.map(channelBox)),
     h('h2', { class: 'h2', style: { marginTop: '24px' } }, 'Apps & Zugang'),
-    h('div', { class: 'settings' }, claudeBox, cutBox, musicBox, thumbBox, helperBox, googleBox, tiktokBox, backupBox, account));
+    h('div', { class: 'settings' }, claudeBox, cutBox, musicBox, sfxBox, thumbBox, helperBox, googleBox, tiktokBox, backupBox, account));
 }
 
 start();

@@ -21,6 +21,7 @@ export const defaultProfiles = () => [
     clipHints: 'Funny Moments, Stellen wo ich mich ärgere oder aufrege (Rage), laute Reaktionen, Fails, überraschende Wendungen, Clutches, '
       + 'peinliche oder absurde Momente, lustige Sprüche – alles, was Zuschauer bindet und zum Teilen/Kommentieren anregt.', shorts: 6,
     hookStyle: 'auto', tempo: 'schnell', hookHint: 'Lieber die Reaktion/den Ausraster oder den Kill vorweg – Hook-Text frech und neugierig.',
+    fxLevel: 'viel', fxImages: true,
     ...emptyConnections() },
   { id: '3dbymicha', name: '3dbymicha', color: '#25c4f4', isDefault: false, category: '28', tags: '3d-druck, 3d druck, bambu lab', footer: '',
     aiStyle: 'Gewerblicher Kanal rund um 3D-Druck (Bambu Lab A1 / A1 mini) und Druck von Flexisticker (Tassen, Textilien): '
@@ -31,6 +32,7 @@ export const defaultProfiles = () => [
     musicStyle: 'light upbeat corporate background music, acoustic and soft electronic, positive, modern workshop vibe', musicMood: 'fröhlich',
     clipHints: 'Satisfying-Momente (Druck entsteht, Tasse kommt aus der Presse), Vorher/Nachher, überraschende Ergebnisse, kurze Tipps, Fehler und wie ich sie löse.', shorts: 4,
     hookStyle: 'auto', tempo: 'normal', hookHint: 'Das fertige Ergebnis (Druck, Tasse, Teil) zuerst zeigen, danach wie es entsteht.',
+    fxLevel: 'dezent', fxImages: false,
     ...emptyConnections() },
   linkedinProfile(),
 ];
@@ -43,6 +45,7 @@ export const linkedinProfile = () => ({ id: 'linkedin', name: 'LinkedIn', color:
     + 'Einblicke in die Werkstatt, gelöste Kundenaufgaben, Ergebnisse, Erfahrungen und Tipps. Keine Gaming-Sprache, kein Slang.',
   musicStyle: 'calm minimal corporate background music, soft piano and light electronic, unobtrusive', musicMood: 'chillig',
   hookStyle: 'cold', tempo: 'ruhig', hookHint: 'Mit der Kernaussage oder dem Ergebnis einsteigen, sachlich.',
+  fxLevel: 'aus', fxImages: false,
   ...emptyConnections() });
 
 const empty = () => ({
@@ -131,6 +134,8 @@ function normalize(raw) {
     if (p.hookStyle === undefined) p.hookStyle = defaults[p.id]?.hookStyle || (p.type === 'linkedin' ? 'cold' : 'auto');
     if (p.tempo === undefined) p.tempo = defaults[p.id]?.tempo || (p.type === 'linkedin' ? 'ruhig' : 'normal');
     if (p.hookHint === undefined) p.hookHint = defaults[p.id]?.hookHint || '';
+    if (p.fxLevel === undefined) p.fxLevel = defaults[p.id]?.fxLevel || (p.type === 'linkedin' ? 'aus' : 'normal');
+    if (p.fxImages === undefined) p.fxImages = !!defaults[p.id]?.fxImages;
   }
   return state;
 }

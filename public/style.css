@@ -311,3 +311,7 @@ input[type=range] { width: 100%; accent-color: #7c5cff; }
 .chip-btn { background: none; border: 1px solid var(--line); color: inherit; border-radius: 999px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
 .chip-btn:hover { border-color: var(--accent, #7c5cff); }
 .section.rev textarea { width: 100%; }
+
+.chip.ver { background: #4caf7a; color: #08130c; font-weight: 700; }
+.sfx-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.chip-btn.off { opacity: .45; }

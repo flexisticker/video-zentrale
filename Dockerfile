@@ -32,6 +32,7 @@ RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY server ./server
 COPY public ./public
 COPY fonts ./fonts
+COPY assets ./assets
 COPY tools/rechenhelfer ./tools/rechenhelfer
 # Versionierung: setzt die GitHub Action (Build-Nummer, Commit, Datum)
 ARG BUILD_NUMBER=""

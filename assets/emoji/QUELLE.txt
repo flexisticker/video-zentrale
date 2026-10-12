@@ -1,0 +1,2 @@
+Emoji-Grafiken: Noto Emoji (https://github.com/googlefonts/noto-emoji), Apache License 2.0 (siehe LICENSE-Apache-2.0.txt).
+Verkleinert auf 256 px.

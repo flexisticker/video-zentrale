@@ -118,3 +118,25 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   const anim = pro ? '{\\fad(150,200)}' : `{\\fad(0,180)\\c${assColor(color)}\\fscx60\\fscy60\\t(0,140,\\fscx108\\fscy108)\\t(140,240,\\fscx100\\fscy100)}`;
   return head + `Dialogue: 1,${assTime(0)},${assTime(until)},Hook,,0,0,0,,${anim}${pro ? t : t.toUpperCase()}\n`;
 }
+
+// Effekt-Texte (z. B. „WARTE …“ beim Freeze) mittig, groß, mit Pop. items: [{ t, dur, text }]
+export function buildFxAss(items, { width = 1080, height = 1920, color = '#FFE14D' } = {}) {
+  const list = (items || []).filter((x) => clean(x.text));
+  if (!list.length) return '';
+  const size = Math.round(width * 0.11);
+  const head = `[Script Info]
+ScriptType: v4.00+
+PlayResX: ${width}
+PlayResY: ${height}
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Fx,Anton,${size},${assColor(color)},&H00FFFFFF,&H00000000,&H64000000,0,0,0,0,100,100,2,0,1,${Math.round(size * 0.1)},${Math.round(size * 0.06)},5,60,60,0,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+`;
+  return head + list.map((x) => `Dialogue: 2,${assTime(x.t)},${assTime(x.t + (x.dur || 1))},Fx,,0,0,0,,{\\pos(${Math.round(width / 2)},${Math.round(height * 0.36)})\\fscx40\\fscy40\\t(0,120,\\fscx110\\fscy110)\\t(120,220,\\fscx100\\fscy100)\\fad(0,150)}${clean(x.text).toUpperCase()}`).join('\n') + '\n';
+}

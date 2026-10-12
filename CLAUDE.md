@@ -193,6 +193,20 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   Jetzt `autocut.tipsWish(v)` (viral.hook/edit, sonst tip) → Überarbeitung; `ai.afterSuggest(fn)` ruft nach jedem Vorschlag `autoApplyTips(v)`:
   nur `geschnitten`, nicht bei `revisionOf` (keine Schleife), einmal (`v.tipsApplied`), Score < 9, Schalter `db().ai.autoTips` (Standard an).
   `POST /api/videos/:id/apply-tips`, UI `tipsAction()` in der Viral-Box. Getestet (Mock): Vorschlag → automatische v2, Knopf von Hand.
+- 1.21.0 (12.10.2026): **Effekte** – Claude plant je Short `fx[]` (at in Quellzeit, kind emoji|sound|flash|text|shake|punch|freeze|replay|sticker,
+  emoji, sound-ID, soundIdea, text, pos, sticker) in `chooseHighlights`/`reviseShort` (`FX_SCHEMA`, `FX_RULES`, `fxLevelOf(profile, wish)`).
+  `cutfx.applyFx()`: Stufen `FX_LEVELS` (aus/dezent/normal/viel: Anzahl, Arten, Lautstärke), ≥ 1,2 s Abstand; freeze/replay/punch ändern die Abschnitte
+  (freeze = tpad-Standbild + aevalsrc-Stille, replay = speed 0.5 mit atempo, punch = Zoom 1.18; in Pause → nächster Abschnitt), sonst Zeitpunkte über `outTime()`.
+  Automatisch: Zurückspulen → Sound `rewind` + ⏪ + VHS-Look (noise/eq/drawbox), Hook-Vorschau → `boom`. `renderShort`: shake = crop mit sin-Ausdrücken,
+  Texte `buildFxAss`, Blitz = color-Quelle mit Alpha-Fade, Emojis/Sticker = PNG (`-loop 1`) → pad 512 → **zoompan** (Pop, zentriert) → rotate → fade →
+  overlay (scale eval=frame + overlay mit wechselnder Größe geht NICHT). Sounds: `adelay` + `amix normalize=0` + alimiter.
+  `server/sfx.js`: Baukasten `LIBRARY` (30, Sonilo text-to-sound-effects, 0,0018 $/s, auf −16 LUFS normalisiert → `musik/sfx/ki/<id>.m4a`), eigene
+  `musik/sfx/*.mp3` (Name = ID, Vorrang), Sonder-Sounds `x-<sha1>.m4a`; Routen `/api/sfx`, `/api/sfx/build`, `/api/sfx/file/:id`. Emojis: Noto Emoji 2D
+  (Apache 2.0, `assets/emoji/` 256 px + `emoji.json`; 3D-Variante bewusst nicht – Lizenz nicht eindeutig), Dockerfile `COPY assets`.
+  Sticker: `thumbs.makeSticker()` (nano-banana/edit mit Kanal-Foto bzw. nano-banana, dann BiRefNet, Cache `/data/sticker`). Profil `fxLevel`, `fxImages`.
+  UI: Kanal-Felder, Kasten „🔊 Soundeffekte“ (Vorhören, Baukasten erzeugen), Chips Mehr/Weniger/Ohne Effekte, **v2-Abzeichen** in der Liste (`hasNewer`).
+  Getestet (Mock): Short mit Emoji, Freeze, Zeitlupe, Wackeln, Blitz, Sticker, 7 Sounds (inkl. Sonder-Sound). **Nicht getestet:** echte Sonilo-Sounds/
+  Lautstärke-Balance mit echter Stimme, echte Sticker aus Kundenfotos, NVENC mit vielen Eingaben.
 - Beim Kunden (11.10.2026): Rechenhelfer auf dem PC (RTX 3070) eingerichtet und **online**. Echte CUDA-Spracherkennung noch nicht bestätigt.
 - Achtung `.dockerignore`: `tools` ist ausgeschlossen, nur `!tools/rechenhelfer` erlaubt (1.14.0/1.15.0-Bau schlug deshalb fehl). Neue Ordner,
   die ins Image sollen, dort freigeben.

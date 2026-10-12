@@ -20,6 +20,7 @@ import * as music from './music.js';
 import * as ver from './version.js';
 import * as backup from './backup.js';
 import * as helper from './helper.js';
+import * as sfx from './sfx.js';
 import * as ai2 from './ai.js';
 
 const PORT = Number(process.env.PORT || 8090);
@@ -662,6 +663,18 @@ async function api(req, res, url) {
   if (p === '/api/version' && m === 'GET') return send(res, 200, ver.info());
   if (p === '/api/version/check' && m === 'POST') { await ver.checkUpdate(true); return send(res, 200, ver.info()); }
   if (p === '/api/music/config' && m === 'POST') { music.configure(await readJson(req)); return send(res, 200, music.status()); }
+  // Soundeffekte: Baukasten-Status, alles erzeugen, Vorhören
+  if (p === '/api/sfx' && m === 'GET') return send(res, 200, { ...sfx.status(), building: sfx.isBuilding() });
+  if (p === '/api/sfx/build' && m === 'POST') {
+    if (!db().fal?.key) throw new HttpError(409, 'Dafür braucht es den fal.ai-Schlüssel (Einstellungen → Titelbilder & Fotos).');
+    sfx.buildLibrary().catch((e) => console.error('Sound-Baukasten:', e.message));
+    return send(res, 200, { ...sfx.status(), building: true });
+  }
+  if ((r = /^\/api\/sfx\/file\/([a-z0-9-]{1,60})$/.exec(p)) && m === 'GET') {
+    const f = sfx.fileFor(r[1]);
+    if (!f) throw new HttpError(404, 'Sound noch nicht vorhanden.');
+    return sendFile(req, res, f, f.endsWith('.mp3') ? 'audio/mpeg' : f.endsWith('.wav') ? 'audio/wav' : 'audio/mp4', '');
+  }
   if (p === '/api/cut/config' && m === 'POST') { autocut.configure(await readJson(req)); return send(res, 200, autocut.status()); }
   if (p === '/api/ai/config' && m === 'POST') { ai.configure(await readJson(req)); return send(res, 200, ai.status()); }
   if (p === '/api/profiles' && m === 'POST') return send(res, 200, profiles.publicProfile(profiles.create(await readJson(req))));

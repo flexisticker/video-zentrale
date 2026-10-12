@@ -1,5 +1,12 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.21.0', date: '12.10.2026', items: [
+    '🎉 Effekte in Shorts: Claude ist jetzt Effekt-Regisseur – animierte Emojis 😱😂🔥, Soundeffekte, Blitz, Wackeln, Zoom-Punch, Freeze mit Text („WARTE …“), Zeitlupen-Wiederholung und KI-Comic-Sticker aus deinen Fotos. Jeder Effekt sitzt auf einem echten Moment, nicht überladen.',
+    '⏪ Zurückspulen im VHS-Look mit Band-Sound, Hook-Vorschau startet mit Bass-Boom.',
+    '🔊 Sound-Baukasten (30 Sounds, einmal per KI erzeugt, kommerziell nutzbar) unter Einstellungen → Sounds, mit Vorhören. Eigene Sounds in „musik\\sfx“ haben Vorrang. Fehlende Sounds entstehen beim Schnitt automatisch.',
+    'Je Kanal einstellbar: Effekte aus / dezent / normal / viel, KI-Sticker an/aus (MichaModus = viel + Sticker, 3dbymicha = dezent, LinkedIn = aus). Beim Überarbeiten: „Mehr Effekte“, „Weniger Effekte“, „Ohne Effekte“.',
+    'In der Liste sieht man jetzt überarbeitete Fassungen: grünes „🔁 v2“ an der neuen Fassung, „↳ hat v2“ am Original.',
+  ] },
   { version: '1.20.0', date: '12.10.2026', items: [
     '⚡ Viral-Tipps werden jetzt umgesetzt: Sobald Claude das fertige Video bewertet hat, schneidet die Zentrale es einmal automatisch nach den Tipps zu Einstieg und Schnitt neu – als „v2“ zum Vergleichen.',
     'Oder von Hand: Knopf „⚡ Tipps umsetzen“ direkt beim Viral-Potenzial. Automatik abschaltbar unter Einstellungen → Claude.',

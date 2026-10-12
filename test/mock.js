@@ -83,6 +83,20 @@ http.createServer(async (req, res) => {
   }
   if (p === '/v2/post/publish/status/fetch/') return json(res, 200, { data: { status: tt.got >= tt.size ? 'SEND_TO_USER_INBOX' : 'PROCESSING_UPLOAD' }, error: { code: 'ok' } });
   // fal.ai: Freistellen (liefert Test-Person mit Transparenz) und KI-Aufwertung (liefert das Eingangsbild zurück)
+  if (p === '/sonilo/v1.1/text-to-sound-effects') {
+    if (req.headers.authorization !== 'Key fal-test') return json(res, 401, { detail: 'Unauthorized' });
+    const j = JSON.parse(b.toString());
+    log.push({ sfx: { prompt: j.prompt, duration: j.duration, format: j.audio_format } });
+    const a = { url: 'http://127.0.0.1:9300/falaudio/sfx.m4a', content_type: 'audio/mp4' };
+    return json(res, 200, { audio: a, audios: [a] });
+  }
+  if (p === '/falaudio/sfx.m4a') { res.writeHead(200, { 'Content-Type': 'audio/mp4' }); return res.end(require('fs').readFileSync(process.env.TEST_SFX || process.env.TEST_MUSIC)); }
+  if (p === '/fal-ai/nano-banana') {
+    if (req.headers.authorization !== 'Key fal-test') return json(res, 401, { detail: 'Unauthorized' });
+    log.push({ sticker: { prompt: JSON.parse(b.toString()).prompt.slice(0, 200) } });
+    falLast = require('fs').readFileSync(process.env.TEST_PERSON);
+    return json(res, 200, { images: [{ url: 'http://127.0.0.1:9300/falimg/last' }], description: '' });
+  }
   if (p === '/fal-ai/birefnet' || p.startsWith('/fal-ai/flux') || p === '/fal-ai/nano-banana/edit') {
     if (req.headers.authorization !== 'Key fal-test') return json(res, 401, { detail: 'Unauthorized' });
     const j = JSON.parse(b.toString());
@@ -155,7 +169,20 @@ http.createServer(async (req, res) => {
       const pick = sec.slice(0, 2).map(([a, b2], i) => ({ candidate: i + 1, start: a + 1, end: b2 - 2, title: i ? 'Der Sieg 🏆' : 'Drei auf einmal?!', reason: 'lauter Moment mit Reaktion',
         mood: i ? 'episch' : 'lustig', music: i ? 'epic orchestral hybrid with big drums' : 'quirky playful pizzicato',
         viral: i ? 6 : 9, viralWhy: i ? 'Solider Sieg-Moment, aber bekannter Ablauf.' : 'Lauter Ausraster mit Pointe – hoher Teilwert.', viralTip: 'Mit dem Ausruf direkt einsteigen.',
-        hook: { mode: i ? 'cold' : 'preview', at: a + 1 + Math.round((b2 - a - 3) * 0.7), len: 2, text: i ? 'Das gibt es nicht!' : 'Wie konnte das passieren?' } }));
+        hook: { mode: i ? 'cold' : 'preview', at: a + 1 + Math.round((b2 - a - 3) * 0.7), len: 2, text: i ? 'Das gibt es nicht!' : 'Wie konnte das passieren?' },
+        fx: i ? [
+          { at: a + 5, kind: 'punch', emoji: '', sound: '', soundIdea: '', text: '', pos: 'mitte', sticker: '' },
+          { at: a + 9, kind: 'flash', emoji: '', sound: 'boom', soundIdea: '', text: '', pos: 'mitte', sticker: '' },
+          { at: a + 12, kind: 'emoji', emoji: '😂', sound: '', soundIdea: '', text: '', pos: 'links-oben', sticker: '' },
+        ] : [
+          { at: a + 4, kind: 'emoji', emoji: '😱', sound: '', soundIdea: '', text: '', pos: 'rechts-oben', sticker: '' },
+          { at: a + 8, kind: 'freeze', emoji: '', sound: '', soundIdea: '', text: 'Warte …', pos: 'mitte', sticker: '' },
+          { at: a + 13, kind: 'replay', emoji: '', sound: '', soundIdea: '', text: 'Nochmal!', pos: 'mitte', sticker: '' },
+          { at: a + 17, kind: 'shake', emoji: '', sound: 'hit', soundIdea: '', text: '', pos: 'mitte', sticker: '' },
+          { at: a + 20, kind: 'sticker', emoji: '', sound: '', soundIdea: '', text: '', pos: 'rechts-unten', sticker: 'the person screaming in panic' },
+          { at: a + 24, kind: 'sound', emoji: '', sound: '', soundIdea: 'retro laser zap', text: '', pos: 'mitte', sticker: '' },
+        ] }));
+      log.push({ fxRules: /Effekt-Regisseur/.test(texts[0]), emojis: /Emojis \(nur diese\)/.test(texts[0]) });
       log.push({ hookRules: /Hook \(die ersten/.test(texts[0]) });
       return json(res, 200, { id: 'msg_h', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn',
         content: [{ type: 'text', text: JSON.stringify({ shorts: pick }) }], usage: { input_tokens: 9000, output_tokens: 400 } });

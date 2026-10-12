@@ -342,3 +342,43 @@ export async function generateAiOptions(v, framePathOf, { count = 1, text: custo
   saveNow();
   return v.thumbVariants;
 }
+
+// ---------- KI-Sticker für Shorts (Effekt „sticker“) ----------
+// Aus einem freigestellten Foto des Kanals (sonst ohne Person) ein Comic-Sticker zur Idee; freigestellt als PNG,
+// je Idee + Foto nur einmal erzeugt (/data/sticker). Kosten: Bild ca. 0,04 $ + Freistellen.
+const STICKER_DIR = path.join(DATA_DIR, 'sticker');
+export async function makeSticker(idea, channelId) {
+  const text = String(idea || '').trim().slice(0, 300);
+  if (!text || !fal().key) return null;
+  const list = photosFor(channelId);
+  // Foto passend zur Stimmung wählen (Label im Text), sonst das erste
+  const photo = list.find((p) => p.label && text.toLowerCase().includes(String(p.label).toLowerCase())) || list[0] || null;
+  const key = crypto.createHash('sha1').update(text.toLowerCase() + '|' + (photo?.id || '')).digest('hex').slice(0, 16);
+  const out = path.join(STICKER_DIR, key + '.png');
+  if (fs.existsSync(out)) return out;
+  const prompt = [
+    photo ? 'Turn the person from the image into an expressive cartoon sticker; keep his face recognizable.' : 'An expressive cartoon sticker.',
+    `Scene/idea: ${text}.`,
+    'Bold clean outlines, vivid colors, exaggerated emotion, thick white sticker border, centered, isolated on a plain solid white background. No text, no letters, no watermark.',
+  ].join(' ');
+  const model = photo ? 'fal-ai/nano-banana/edit' : 'fal-ai/nano-banana';
+  const r = await fetch(`${FAL}/${model}`, {
+    method: 'POST', headers: { Authorization: 'Key ' + fal().key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt, ...(photo ? { image_urls: [toDataUri(photoPath(photo))] } : {}), aspect_ratio: '1:1', output_format: 'png', num_images: 1 }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401 || r.status === 403) throw new Error('fal.ai-Schlüssel ungültig.');
+  if (r.status === 402 || /balance|credit|insufficient/i.test(JSON.stringify(j))) throw new Error('fal.ai: kein Guthaben mehr.');
+  const url = j.images?.[0]?.url;
+  if (!r.ok || !url) throw new Error('fal.ai-Sticker: ' + (j.detail?.[0]?.msg || j.detail || j.error || r.status));
+  const img = await fetch(url);
+  if (!img.ok) throw new Error('fal.ai-Sticker: Ergebnis nicht abrufbar.');
+  const buf = Buffer.from(await img.arrayBuffer());
+  fs.mkdirSync(STICKER_DIR, { recursive: true });
+  let png = buf;
+  try { png = await removeBackground(buf, 'image/png'); } catch (e) { console.error('Sticker freistellen:', e.message); }
+  fs.writeFileSync(out, png);
+  fal().generated = (fal().generated || 0) + 1;
+  saveNow();
+  return out;
+}

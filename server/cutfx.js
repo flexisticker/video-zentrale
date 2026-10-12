@@ -5,6 +5,23 @@
 //   { a, b, rev }       „Zurückspulen“ (rückwärts, 3-fach schnell)
 //   { ..., zoom }       leichter Punch-in (1.08–1.15) für schnelle Schnitte
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Emoji-Grafiken (Noto Emoji, Apache 2.0) – assets/emoji/emoji.json: Zeichen → Datei
+const EMOJI_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'emoji');
+let emojiMap = null;
+export function emojiList() {
+  if (!emojiMap) { try { emojiMap = JSON.parse(fs.readFileSync(path.join(EMOJI_DIR, 'emoji.json'), 'utf8')); } catch { emojiMap = {}; } }
+  return emojiMap;
+}
+export function emojiFile(ch) {
+  const m = emojiList();
+  const f = m[ch] || m[String(ch || '').replace(/\ufe0f/g, '')];
+  return f ? path.join(EMOJI_DIR, f) : null;
+}
+
 // Tempo-Stufen: Mindestlänge einer Sprechpause, die raus darf; wie viel leiser als der Clip sie sein muss (dB);
 // Füllwörter raus; Punch-in-Zoom bei jedem zweiten Schnitt.
 export const TEMPO = {
@@ -104,7 +121,7 @@ export function buildParts({ start, end, hook, words, fine, tempo = 'aus' }) {
   return parts;
 }
 
-export const partLen = (p) => (p.b - p.a) / (p.rev ? 3 : 1);
+export const partLen = (p) => p.freeze ? p.freeze : (p.b - p.a) / (p.rev ? 3 : 1) / (p.speed || 1);
 export const totalLen = (parts) => parts.reduce((s, p) => s + partLen(p), 0);
 
 // Wörter auf die neue Zeitleiste legen (Vorschau-Teil bekommt seine Wörter, Zurückspulen keine)
@@ -113,7 +130,7 @@ export function mapWords(words, parts) {
   let off = 0;
   for (const p of parts) {
     // Füllwörter („ähm“) nie als Untertitel zeigen
-    if (!p.rev) for (const w of words || []) if (w.s >= p.a && w.e <= p.b && !isFiller(w.t)) out.push({ s: off + w.s - p.a, e: off + w.e - p.a, t: w.t });
+    if (!p.rev && !p.ins) for (const w of words || []) if (w.s >= p.a && w.e <= p.b && !isFiller(w.t)) out.push({ s: off + w.s - p.a, e: off + w.e - p.a, t: w.t });
     off += partLen(p);
   }
   return out;
@@ -132,11 +149,21 @@ export function concatGraph(parts, { base, hasAudio, W0, H0 }) {
   parts.forEach((p, i) => {
     const a = (p.a - base).toFixed(3), b = (p.b - base).toFixed(3);
     const z = p.zoom && W0 && H0 ? `,crop=trunc(iw/${p.zoom}/2)*2:trunc(ih/${p.zoom}/2)*2,scale=${W0}:${H0}` : '';
-    const rev = p.rev ? ',reverse,setpts=PTS/3' : '';
-    g += `[0:v]trim=start=${a}:end=${b},setpts=PTS-STARTPTS,fps=30${z}${rev},fps=30,setsar=1[v${i}];`;
+    // Zurückspulen im VHS-Look (Rauschen, blasse Farben, wandernder heller Streifen)
+    const rev = p.rev ? ',reverse,setpts=PTS/3,noise=alls=22:allf=t+u,eq=saturation=0.45:contrast=1.15,'
+      + "drawbox=x=0:y='mod(t*1400,ih)':w=iw:h=ih/40:color=white@0.25:t=fill" : '';
+    const speed = p.speed ? `,setpts=PTS/${p.speed}` : '';
+    if (p.freeze) {
+      // Standbild: ein Bild halten, entsättigt (wirkt wie „Pause“)
+      g += `[0:v]trim=start=${a}:end=${(p.a - base + 0.05).toFixed(3)},setpts=PTS-STARTPTS,fps=30${z},eq=saturation=0.35,`
+        + `tpad=stop_mode=clone:stop_duration=${p.freeze},trim=duration=${p.freeze},setsar=1[v${i}];`;
+      if (hasAudio) g += `aevalsrc=0|0:s=48000:d=${p.freeze}[a${i}];`;
+      return;
+    }
+    g += `[0:v]trim=start=${a}:end=${b},setpts=PTS-STARTPTS,fps=30${z}${rev}${speed},fps=30,setsar=1[v${i}];`;
     if (hasAudio) {
       const d = partLen(p).toFixed(3);
-      const ar = p.rev ? ',areverse,atempo=2,atempo=1.5,volume=0.5' : '';
+      const ar = p.rev ? ',areverse,atempo=2,atempo=1.5,volume=0.5' : p.speed ? `,atempo=${Math.max(0.5, p.speed)}` : '';
       g += `[0:a:0]atrim=start=${a}:end=${b},asetpts=PTS-STARTPTS${ar},aformat=sample_rates=48000:channel_layouts=stereo,`
         + `afade=t=in:d=0.02,afade=t=out:st=${Math.max(0, d - 0.03).toFixed(3)}:d=0.03[a${i}];`;
     }
@@ -151,11 +178,125 @@ export function describe(hook, tempo, parts, start, end) {
   if (hook?.mode === 'preview') bits.push(`Hook: Höhepunkt (${String(hook.len).replace('.', ',')} s) vorweg + Zurückspulen`);
   else if (hook?.mode === 'cold') bits.push('Hook: steigt direkt mitten in der Action ein');
   if (hook?.text) bits.push(`Hook-Text „${hook.text}“`);
-  const cuts = parts.filter((p) => !p.hook && !p.rev).length - 1;
+  const cuts = parts.filter((p) => !p.hook && !p.rev && !p.ins).length - 1;
   if (tempo && tempo !== 'aus' && cuts > 0) {
-    const kept = parts.filter((p) => !p.hook && !p.rev).reduce((s, p) => s + p.b - p.a, 0);
+    const kept = parts.filter((p) => !p.hook && !p.rev && !p.ins).reduce((s, p) => s + p.b - p.a, 0);
     const from = hook?.mode === 'cold' ? Math.max(start, hook.at - 0.4) : start;
     bits.push(`Tempo ${tempo}: ${cuts} Schnitt${cuts === 1 ? '' : 'e'}, ${Math.max(0, end - from - kept).toFixed(1).replace('.', ',')} s Pausen raus`);
   }
   return bits.join(' · ');
+}
+
+// ---------- Effekte (Claude als „Effekt-Regisseur“) ----------
+// Stufen je Kanal: wie viele Effekte, welche Arten, wie laut die Sounds
+export const FX_LEVELS = {
+  aus: { max: 0, kinds: [], vol: 0, auto: false },
+  dezent: { max: 3, kinds: ['emoji', 'sound', 'flash', 'text'], vol: 0.35, auto: false },
+  normal: { max: 6, kinds: ['emoji', 'sound', 'flash', 'text', 'shake', 'punch', 'freeze', 'replay'], vol: 0.6, auto: true },
+  viel: { max: 10, kinds: ['emoji', 'sound', 'flash', 'text', 'shake', 'punch', 'freeze', 'replay', 'sticker'], vol: 0.8, auto: true },
+};
+export const FX_KINDS = ['emoji', 'sound', 'flash', 'text', 'shake', 'punch', 'freeze', 'replay', 'sticker'];
+export const POSITIONS = { oben: [0.5, 0.2], mitte: [0.5, 0.42], unten: [0.5, 0.6], 'links-oben': [0.24, 0.22], 'rechts-oben': [0.76, 0.22],
+  'links-unten': [0.24, 0.58], 'rechts-unten': [0.76, 0.58] };
+
+// Quellzeit → Zeit im fertigen Short (erste passende normale Stelle; liegt t in einer herausgeschnittenen Pause → nächster Abschnitt)
+export function outTime(parts, t) {
+  let off = 0, next = null;
+  for (const p of parts) {
+    if (!p.hook && !p.rev && !p.ins && !p.freeze) {
+      if (t >= p.a && t <= p.b) return off + (t - p.a) / (p.speed || 1);
+      if (p.a > t && next === null) next = off;
+    }
+    off += partLen(p);
+  }
+  return next;
+}
+const startOf = (parts, target) => { let off = 0; for (const p of parts) { if (p === target) return off; off += partLen(p); } return null; };
+
+// Abschnitt (normal) finden, der t enthält, und an t teilen → Index des rechten Teils
+// Liegt t in einer herausgeschnittenen Pause, rutscht der Effekt an den Anfang des nächsten Abschnitts (→ { i, t }).
+function splitAt(parts, t) {
+  const normal = (p) => !p.hook && !p.rev && !p.ins && !p.freeze;
+  const i = parts.findIndex((p) => normal(p) && t > p.a + 0.05 && t < p.b - 0.05);
+  if (i >= 0) {
+    const p = parts[i];
+    parts.splice(i, 1, { ...p, b: t }, { ...p, a: t });
+    return { i: i + 1, t };
+  }
+  const j = parts.findIndex((p) => normal(p) && p.a >= t - 0.05);
+  return j >= 0 ? { i: j, t: parts[j].a } : null;
+}
+
+// Claudes Effektliste anwenden → { parts (mit Freeze/Zeitlupe/Zoom-Punch), events (Zeiten im fertigen Short) }
+export function applyFx(parts0, fx, { level = 'normal', start, end, stickers = false } = {}) {
+  const L = FX_LEVELS[level] || FX_LEVELS.normal;
+  const parts = parts0.map((p) => ({ ...p }));
+  const events = [];
+  if (!L.max) return { parts, events };
+  const list = [];
+  for (const x of (fx || []).filter((x) => x && L.kinds.includes(x.kind) && (x.kind !== 'sticker' || stickers) && Number.isFinite(Number(x.at)))
+    .map((x) => ({ ...x, at: Number(x.at) })).filter((x) => x.at >= start && x.at <= end).sort((a, b) => a.at - b.at)) {
+    if (list.length >= L.max) break;
+    if (list.some((y) => Math.abs(y.at - x.at) < 1.2)) continue;   // nicht überladen
+    list.push(x);
+  }
+  // 1) Effekte, die die Zeitleiste verändern
+  const anchors = new Map();
+  for (const x of list) {
+    if (x.kind === 'freeze') {
+      const sp = splitAt(parts, x.at);
+      if (!sp) continue;
+      const fr = { a: sp.t, b: sp.t + 0.05, freeze: 1.0, ins: true };
+      parts.splice(sp.i, 0, fr); anchors.set(x, fr);
+    } else if (x.kind === 'replay') {
+      const sp = splitAt(parts, Math.min(end, x.at + 0.8));
+      if (!sp) continue;
+      const rp = { a: Math.max(start, sp.t - 2.3), b: sp.t, speed: 0.5, ins: true };
+      parts.splice(sp.i, 0, rp); anchors.set(x, rp);
+    } else if (x.kind === 'punch') {
+      const sp = splitAt(parts, x.at);
+      if (!sp) continue;
+      const i = sp.i;
+      const p = parts[i];
+      if (p.b - p.a > 0.8) { parts.splice(i, 1, { ...p, b: p.a + 0.6, zoom: 1.18 }, { ...p, a: p.a + 0.6 }); } else parts[i] = { ...p, zoom: 1.18 };
+      anchors.set(x, parts[i]);
+    }
+  }
+  // 2) Zeitpunkte im fertigen Short
+  const add = (e) => { if (Number.isFinite(e.t) && e.t >= 0) events.push(e); };
+  for (const x of list) {
+    const anchor = anchors.get(x);
+    if (['freeze', 'replay', 'punch'].includes(x.kind) && !anchor) continue;
+    const t = anchor ? startOf(parts, anchor) : outTime(parts, x.at);
+    if (t === null || t === undefined) continue;
+    const ev = { t, kind: x.kind, emoji: x.emoji || '', text: String(x.text || '').slice(0, 40), pos: POSITIONS[x.pos] ? x.pos : 'mitte',
+      sound: x.sound || '', soundIdea: String(x.soundIdea || '').slice(0, 200), sticker: String(x.sticker || '').slice(0, 300) };
+    if (x.kind === 'freeze') { ev.dur = anchor.freeze; if (!ev.text) ev.text = 'WARTE …'; if (!ev.sound && L.auto) ev.sound = 'scratch'; }
+    if (x.kind === 'replay') { ev.dur = partLen(anchor); if (!ev.sound && L.auto) ev.sound = 'slowmo'; add({ t, kind: 'flash' }); }
+    if (x.kind === 'punch' && !ev.sound && L.auto) ev.sound = 'hit';
+    if (x.kind === 'emoji' && !ev.sound && !ev.soundIdea) ev.sound = 'pop';
+    if (x.kind === 'sticker' && !ev.sound) ev.sound = 'whoosh';
+    add(ev);
+  }
+  // 3) automatische Begleitung: Zurückspulen klingt nach Band + ⏪, Hook-Vorschau startet mit Bass-Boom
+  let off = 0;
+  for (const p of parts) {
+    if (p.rev) { add({ t: off, kind: 'sound', sound: 'rewind' }); add({ t: off, kind: 'emoji', emoji: '⏪', pos: 'mitte', big: true, dur: partLen(p) + 0.15 }); }
+    if (p.hook && off === 0 && L.auto) add({ t: 0, kind: 'sound', sound: 'boom' });
+    off += partLen(p);
+  }
+  events.sort((a, b) => a.t - b.t);
+  return { parts, events };
+}
+
+// Kurzbeschreibung der Effekte für die Notiz
+export function describeFx(events) {
+  const n = (k) => events.filter((e) => e.kind === k).length;
+  const bits = [];
+  const em = events.filter((e) => e.kind === 'emoji' && e.emoji !== '⏪').map((e) => e.emoji).join('');
+  if (em) bits.push('Emojis ' + em);
+  for (const [k, name] of [['freeze', 'Freeze'], ['replay', 'Zeitlupe'], ['punch', 'Zoom-Punch'], ['shake', 'Wackeln'], ['flash', 'Blitz'], ['sticker', 'KI-Sticker']]) if (n(k)) bits.push(`${n(k)}× ${name}`);
+  const snd = events.filter((e) => e.sound || e.soundIdea).length;
+  if (snd) bits.push(`${snd} Sound${snd === 1 ? '' : 's'}`);
+  return bits.length ? 'Effekte: ' + bits.join(', ') : '';
 }

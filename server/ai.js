@@ -10,6 +10,7 @@ import { fileOf, setImage } from './library.js';
 import * as whisper from './whisper.js';
 import * as thumbs from './thumbs.js';
 import * as fx from './cutfx.js';
+import * as sfx from './sfx.js';
 
 const MODEL = 'claude-opus-5-5';
 const FRAMES = [0.08, 0.25, 0.42, 0.58, 0.75, 0.92];
@@ -299,6 +300,34 @@ export async function suggest(v, extra = '') {
 
 // Aus Kandidaten-Stellen eines Rohvideos die besten Shorts wählen.
 // cands: [{start, end, peak, scenes}] (Sekunden); segs: Whisper-Segmente oder null.
+// Effekt-Regie: Claude plant je Short Emojis, Sounds und Bild-Effekte (siehe cutfx.applyFx)
+const FX_SCHEMA = { type: 'array', description: 'Effekte im Clip (leer, wenn nichts passt)', items: { type: 'object', additionalProperties: false,
+  required: ['at', 'kind', 'emoji', 'sound', 'soundIdea', 'text', 'pos', 'sticker'], properties: {
+    at: { type: 'number', description: 'Sekunde ab Videoanfang (innerhalb des Clips), genau auf dem Moment' },
+    kind: { type: 'string', enum: fx.FX_KINDS },
+    emoji: { type: 'string', description: 'bei kind=emoji: genau ein Emoji aus der Liste, sonst leer' },
+    sound: { type: 'string', description: 'Sound-ID aus der Liste oder leer' },
+    soundIdea: { type: 'string', description: 'nur wenn kein Listen-Sound passt: kurze englische Beschreibung eines Soundeffekts, sonst leer' },
+    text: { type: 'string', description: 'kurzer Text (max. 3 Wörter) bei freeze/replay/text, sonst leer' },
+    pos: { type: 'string', enum: Object.keys(fx.POSITIONS) },
+    sticker: { type: 'string', description: 'bei kind=sticker: englische Idee für einen Comic-Sticker (z. B. "the person screaming in panic"), sonst leer' },
+  } } };
+const FX_RULES = (level, stickers) => {
+  const L = fx.FX_LEVELS[level] || fx.FX_LEVELS.normal;
+  if (!L.max) return 'Effekte: keine (gib fx als leere Liste).';
+  const s = sfx.available();
+  return [
+    `Effekte (fx) – du bist der Effekt-Regisseur. Stufe „${level}“: höchstens ${L.max} Effekte je Clip, erlaubt: ${L.kinds.filter((k) => k !== 'sticker' || stickers).join(', ')}.`,
+    'Stimmig statt überladen: jeder Effekt sitzt GENAU auf einem echten Moment (Kill, Ausraster, Fail, Pointe, Ergebnis), mindestens 1,5 s Abstand, nicht in den ersten 1,5 s nach einer Hook-Vorschau.',
+    'Arten: emoji = animiertes Emoji (Reaktion auf den Moment); sound = nur Soundeffekt; flash = weißer Blitz beim Einschlag; shake = Bild wackelt kurz;',
+    'punch = schneller Zoom-Punch; freeze = Standbild 1 s mit kurzem Text (z. B. „WARTE …“, „OH NEIN“) vor der Auflösung; replay = Zeitlupen-Wiederholung des Höhepunkts;',
+    'text = großer Kurztext; sticker = KI-Comic-Sticker des Creators (höchstens 1, nur beim stärksten Moment).',
+    `Emojis (nur diese): ${Object.keys(fx.emojiList()).filter((e) => e !== '⏪').join(' ')}`,
+    `Sounds (IDs): ${s.library.join(', ')}${s.own.length ? '; eigene des Creators (bevorzugen, wenn passend): ' + s.own.join(', ') : ''}. Zu Emojis passt meist pop, zu Treffern hit/boom.`,
+    'Zurückspulen und Hook-Start bekommen automatisch Sound – dafür nichts eintragen.',
+  ].join('\n');
+};
+
 // Hook: der Moment, der in den ersten 1–2 Sekunden fesselt (für Shorts – siehe cutfx.js)
 const HOOK_SCHEMA = { type: 'object', additionalProperties: false, required: ['mode', 'at', 'len', 'text'], properties: {
   mode: { type: 'string', enum: ['preview', 'cold', 'none'], description: 'preview = Höhepunkt 1–2,5 s vorweg zeigen, dann zurückspulen und den Clip von vorn; cold = Clip direkt kurz vor dem Höhepunkt beginnen (Anlauf weg); none = Anfang ist schon stark' },
@@ -340,6 +369,7 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
       + ' Überraschung, Wiederschau- und Teilwert, Verständlichkeit ohne Kontext. Keine Gefälligkeitswerte.',
     wish ? `WICHTIG – Wunsch des Creators für diesen Schnitt: „${wish}“. Richte die Auswahl danach aus (auch wenn dadurch weniger Shorts entstehen).` : '',
     HOOK_RULES(pro, profile),
+    FX_RULES(fxLevelOf(profile), fxStickers(profile)),
     `Video: „${v.file}“, Länge ${whisper.fmtTime(v.duration)}. ${v.note ? 'Notiz: ' + v.note : ''}`,
     segs?.length ? 'Gesprochenes ist je Kandidat angegeben (automatisch erkannt, kann Fehler enthalten).' : 'Kein gesprochener Text verfügbar.',
     '',
@@ -361,7 +391,7 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
   }
   const schemaH = {
     type: 'object', additionalProperties: false, required: ['shorts'],
-    properties: { shorts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['candidate', 'start', 'end', 'title', 'reason', 'mood', 'music', 'viral', 'viralWhy', 'viralTip', 'hook'],
+    properties: { shorts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['candidate', 'start', 'end', 'title', 'reason', 'mood', 'music', 'viral', 'viralWhy', 'viralTip', 'hook', 'fx'],
       properties: {
         candidate: { type: 'integer', description: 'Nummer des Kandidaten' },
         start: { type: 'number', description: 'Start in Sekunden ab Videoanfang' },
@@ -374,6 +404,7 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
         viralWhy: { type: 'string', description: 'Ein Satz: warum diese Einschätzung' },
         viralTip: { type: 'string', description: 'Ein konkreter Tipp, wie der Clip mehr Potenzial bekommt (z. B. Hook-Text, früher einsteigen)' },
         hook: HOOK_SCHEMA,
+        fx: FX_SCHEMA,
       } } } },
   };
   let r;
@@ -402,7 +433,8 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
     picked.push({ start: Math.round(start * 10) / 10, end: Math.round(end * 10) / 10, title: String(s.title || '').slice(0, 100), reason: String(s.reason || '').slice(0, 300),
       mood: String(s.mood || ''), music: String(s.music || '').slice(0, 200),
       viral: Math.max(1, Math.min(10, Math.round(Number(s.viral) || 0))) || undefined, viralWhy: String(s.viralWhy || '').slice(0, 300), viralTip: String(s.viralTip || '').slice(0, 300),
-      hook: s.hook && typeof s.hook === 'object' ? { mode: s.hook.mode, at: Number(s.hook.at), len: Number(s.hook.len), text: String(s.hook.text || '').slice(0, 60) } : null });
+      hook: s.hook && typeof s.hook === 'object' ? { mode: s.hook.mode, at: Number(s.hook.at), len: Number(s.hook.len), text: String(s.hook.text || '').slice(0, 60) } : null,
+      fx: Array.isArray(s.fx) ? s.fx.slice(0, 15) : [] });
   }
   return picked;
 }
@@ -569,6 +601,8 @@ export async function reviseShort(raw, out, wish, segs, profile, { minLen = 15, 
     `Du darfst Start und Ende frei im Bereich Sekunde ${from.toFixed(0)}–${to.toFixed(0)} wählen; Länge ${minLen}–${maxLen} Sekunden.`,
     'Tempo: aus = nichts herausschneiden, ruhig = nur lange Pausen, normal = Pausen + „ähm“, schnell = Jump Cuts + kurze Zooms.',
     HOOK_RULES(pro, profile),
+    FX_RULES(fxLevelOf(profile, wish), fxStickers(profile)),
+    out.edit?.fxHow ? `Bisherige Effekte: ${out.edit.fxHow}.` : '',
     profile?.clipHints ? `Worauf der Creator bei diesem Kanal Wert legt: ${profile.clipHints}` : '',
     said ? 'Gesprochenes in diesem Bereich (Sekunden ab Videoanfang, automatisch erkannt):\n' + said : 'Kein gesprochener Text verfügbar.',
     '', 'Standbilder (Sekunde steht jeweils davor):',
@@ -586,7 +620,8 @@ export async function reviseShort(raw, out, wish, segs, profile, { minLen = 15, 
     }
   }
   const schema = { type: 'object', additionalProperties: false,
-    required: ['start', 'end', 'title', 'hook', 'tempo', 'music', 'changes', 'viral', 'viralWhy', 'viralTip'], properties: {
+    required: ['start', 'end', 'title', 'hook', 'tempo', 'music', 'changes', 'viral', 'viralWhy', 'viralTip', 'fx'], properties: {
+      fx: FX_SCHEMA,
       start: { type: 'number', description: 'neuer Start (Sekunde ab Videoanfang)' },
       end: { type: 'number', description: 'neues Ende (Sekunde ab Videoanfang)' },
       title: { type: 'string', description: 'Titel (höchstens 70 Zeichen)' },
@@ -619,8 +654,21 @@ export async function reviseShort(raw, out, wish, segs, profile, { minLen = 15, 
   return { start: Math.round(start * 10) / 10, end: Math.round(end * 10) / 10, title: String(o.title || out.title || '').slice(0, 100),
     hook: o.hook ? { mode: o.hook.mode, at: Number(o.hook.at), len: Number(o.hook.len), text: String(o.hook.text || '').slice(0, 60) } : null,
     tempo: fx.TEMPO[o.tempo] !== undefined ? o.tempo : 'normal', music: !!o.music, changes: String(o.changes || '').slice(0, 500),
-    viral: Math.max(1, Math.min(10, Math.round(Number(o.viral) || 0))) || undefined, viralWhy: String(o.viralWhy || '').slice(0, 300), viralTip: String(o.viralTip || '').slice(0, 300) };
+    viral: Math.max(1, Math.min(10, Math.round(Number(o.viral) || 0))) || undefined, viralWhy: String(o.viralWhy || '').slice(0, 300), viralTip: String(o.viralTip || '').slice(0, 300),
+    fx: Array.isArray(o.fx) ? o.fx.slice(0, 15) : [], fxLevel: fxLevelOf(profile, wish) };
 }
+
+// Effekt-Stufe des Kanals; „mehr/weniger Effekte“ im Überarbeitungswunsch verschiebt sie um eine Stufe
+const FX_ORDER = ['aus', 'dezent', 'normal', 'viel'];
+export function fxLevelOf(profile, wish = '') {
+  let i = FX_ORDER.indexOf(profile?.fxLevel || (profiles.isPro(profile) ? 'aus' : 'normal'));
+  if (i < 0) i = 2;
+  if (/mehr effekte/i.test(wish)) i = Math.min(3, i + 1);
+  if (/weniger effekte/i.test(wish)) i = Math.max(1, i - 1);
+  if (/ohne effekte|keine effekte/i.test(wish)) i = 0;
+  return FX_ORDER[i];
+}
+export const fxStickers = (profile) => !!profile?.fxImages && !!db().fal?.key && !profiles.isPro(profile);
 
 // Überarbeitung einer Langfassung oder Kurzfassung: Claude bekommt das ganze Video als Transkript in Zeitblöcken,
 // die lautesten Stellen und Standbilder und legt fest, welche Abschnitte bleiben (+ optional Teaser vorweg).
