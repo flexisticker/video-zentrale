@@ -476,6 +476,11 @@ async function api(req, res, url) {
       v.revisionKept = new Date().toISOString(); saveNow();
       return send(res, 200, publicVideo(v));
     }
+    if (sub === '/topic' && m === 'POST') {
+      const b = await readJson(req);
+      org.setTopic(v, b.topic || '');
+      return send(res, 200, publicVideo(v));
+    }
     if (sub === '/restore' && m === 'POST') {
       if (v.folder !== 'papierkorb') throw new HttpError(409, 'Video ist nicht im Papierkorb.');
       lib.moveVideo(v, lib.FOLDERS.includes(v.trash?.from) && v.trash.from !== 'papierkorb' ? v.trash.from : 'geschnitten');
@@ -665,6 +670,9 @@ async function api(req, res, url) {
   if (p === '/api/org/config' && m === 'POST') return send(res, 200, org.configure(await readJson(req)));
   if (p === '/api/org/run' && m === 'POST') { const n = org.organizeAll({ force: true }); return send(res, 200, { moved: n, ...org.status() }); }
   if (p === '/api/org/undo' && m === 'POST') { const b = await readJson(req); try { org.undo(Number(b.index)); } catch (e) { throw new HttpError(409, e.message); } return send(res, 200, org.status()); }
+  if (p === '/api/org/plan' && m === 'GET') return send(res, 200, org.plan());
+  if (p === '/api/org/topics' && m === 'POST') return send(res, 200, org.detectTopics());
+  if (p === '/api/org/convert' && m === 'POST') return send(res, 200, { ...org.convert(), ...org.status() });
   if (p === '/api/org/cleanup' && m === 'POST') { const b = await readJson(req); return send(res, 200, org.cleanup(Array.isArray(b.ids) ? b.ids : [])); }
   // Mehrere Videos auf einmal: in den Papierkorb, wiederherstellen, endgültig löschen
   if (p === '/api/videos/bulk' && m === 'POST') {

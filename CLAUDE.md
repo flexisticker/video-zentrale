@@ -236,6 +236,12 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   Überarbeiten-Prompts sagen jetzt ausdrücklich: neu aus dem Rohvideo, Weggeschnittenes darf zurück (Short-Fenster ±120 s, Langfassung mit Abschnittsliste).
   **Regel: Rohvideo nie löschen, solange daraus noch überarbeitet werden soll** (Aufräumen nur nach Hochladen aller Kinder).
   Getestet (curl + Playwright): Ordnen, Neuscan ohne „fehlt“, Rückgängig, Mehrfach-Papierkorb/Wiederherstellen, Bibliothek 390 px. **Nicht getestet:** Unraid-Freigabe mit echten Dateien.
+- 1.24.0: **Bestand umstellen** – `org.plan()` (Vorschau moves/skipped/noTopic, `GET /api/org/plan`), `org.convert()` (`POST /api/org/convert`, `now: true` =
+  ohne Thema-Wartezeit), `org.detectTopics()` → `ai.detectTopics()` (20 Videos je Aufruf, Text: Titel/Datei/Beschreibung/Summary/Tags/Transkript, ohne Text 1 Standbild,
+  effort low, Schema items[{id enum, game}]) → `v.orgTopic` (`orgTopicBy` Claude|Hand), Stand im Plan (`topics`). `POST /api/videos/:id/topic` (✎ Spiel in der Bibliothek).
+  `topicOf`: v.orgTopic › Rohvideo.orgTopic › ai.game › Rohvideo.ai.game › Kinder. Rohvideo = `!source && folder rohvideos` (ältere Videos ohne `source` in hochgeladen
+  sind fertige Videos; Hochformat → „(Short)“). Wartezeit ohne Thema nach Dateizeit (`mtime`), nicht `createdAt` (Bestand wird beim ersten Scan neu angelegt).
+  UI `convertDialog()`, Hinweiszeile `.alert-line` in der Bibliothek bei `pending`. **Achtung DOM:** `replaceChildren(…, null)` schreibt „null“ → vorher filtern.
 - **Offen – Paket 4 Zusammenstellung (angeboten, Kunde will es):** „Best of“ aus mehreren Videos (Zeitraum/Auswahl, 16:9 oder 9:16, Claude
   ordnet Highlights, Platz-Einblendungen), später automatisch wöchentlich. Nach 1.18.0 als eigenes Paket bauen.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,

@@ -1269,6 +1269,49 @@ function renderRevise(box, v) {
   box.replaceChildren(...kids);
 }
 
+// ---------- Bestand in die neue Ordnung umstellen (Vorschau → Themen erkennen → umstellen) ----------
+async function convertDialog(after = () => {}) {
+  const close = () => { clearTimeout(timer); modal.remove(); after(); };
+  let timer = null;
+  const body = h('div', {}, h('p', { class: 'hint' }, 'Lade Vorschau …'));
+  const modal = h('div', { class: 'modal sheetmodal', onclick: (e) => { if (e.target === modal) close(); } },
+    h('div', { class: 'sheet' }, h('button', { class: 'close', onclick: close, title: 'Schließen' }, '×'), h('h2', {}, '🗂 Vorhandene Videos umstellen'), body));
+  document.body.append(modal);
+  const draw = async () => {
+    let pl;
+    try { pl = await api('GET', '/api/org/plan'); } catch (x) { body.replaceChildren(h('p', { class: 'bad' }, x.message)); return; }
+    const tj = pl.topics;
+    const running = tj?.state === 'running';
+    const byFolder = {};
+    for (const x of pl.moves) byFolder[x.folder] = (byFolder[x.folder] || 0) + 1;
+    body.replaceChildren(...[
+      h('p', {}, pl.moves.length ? `${pl.moves.length} Video(s) bekommen einen neuen Namen bzw. Platz: ` + Object.entries(byFolder).map(([f, n]) => `${n} in „${FOLDER_NAMES[f]}“`).join(', ') + '.'
+        : 'Alles ist schon an seinem Platz.'),
+      pl.noTopic ? h('div', { class: 'box', style: { margin: '10px 0' } },
+        h('p', {}, `🎮 ${pl.noTopic} Video(s) ohne erkanntes Spiel/Thema – sie landen sonst unter „Sonstiges“.`),
+        running ? h('p', { class: 'hint' }, `Claude erkennt die Themen … ${tj.done} von ${tj.total}`)
+          : h('button', { class: 'btn', onclick: async () => { try { await api('POST', '/api/org/topics'); draw(); } catch (x) { toast(x.message, true); } } },
+            `Spiel/Thema von Claude erkennen lassen (ca. ${Math.max(0.01, pl.noTopic * 0.004).toFixed(2).replace('.', ',')} $)`),
+        tj?.state === 'done' && tj.total ? h('p', { class: 'hint' }, `Zuletzt: ${tj.found} von ${tj.total} erkannt${tj.cost != null ? ` (${String(tj.cost).replace('.', ',')} $)` : ''}. Den Rest kannst du in der Bibliothek von Hand setzen (✎ Spiel).`) : null,
+        tj?.state === 'error' ? h('p', { class: 'bad' }, tj.error) : null) : null,
+      pl.moves.length ? h('div', { class: 'org-log', style: { maxHeight: '45vh' } }, pl.moves.slice(0, 300).map((x) => h('div', { class: 'org-row' },
+        h('span', { class: 'hint' }, FOLDER_NAMES[x.folder]), h('span', {}, x.from, ' → ', h('b', {}, x.to)), h('span', {})))) : null,
+      pl.moves.length > 300 ? h('p', { class: 'hint' }, `… und ${pl.moves.length - 300} weitere`) : null,
+      pl.skipped.length ? h('details', {}, h('summary', {}, `${pl.skipped.length} bleiben vorerst, wo sie sind`),
+        h('div', { class: 'org-log' }, pl.skipped.map((x) => h('div', { class: 'org-row' }, h('span', { class: 'hint' }, FOLDER_NAMES[x.folder]), h('span', {}, x.file), h('span', { class: 'hint' }, x.why))))) : null,
+      h('p', { class: 'hint' }, 'Begleitdateien (Titelbild, .json) wandern mit. Jede Verschiebung lässt sich unter Einstellungen → Ordnung einzeln rückgängig machen. „Zur Freigabe“ wird nur umbenannt, Eingang und Papierkorb bleiben unverändert.'),
+      h('div', { class: 'row', style: { flexWrap: 'wrap', marginTop: '10px' } },
+        h('button', { class: 'btn primary', disabled: !pl.moves.length || running, onclick: async (e) => {
+          e.target.disabled = true; e.target.textContent = 'Wird umgestellt …';
+          try { const r = await api('POST', '/api/org/convert'); toast(`${r.moved} Video(s) umgestellt.`); await refresh(); close(); }
+          catch (x) { toast(x.message, true); e.target.disabled = false; }
+        } }, running ? 'Erst Themen abwarten …' : `Jetzt umstellen (${pl.moves.length})`),
+        h('button', { class: 'btn ghost', onclick: close }, 'Abbrechen'))].filter(Boolean));
+    if (running) timer = setTimeout(draw, 2500);
+  };
+  draw();
+}
+
 // ---------- 📚 Bibliothek: Aufnahmen nach Thema, Speicherplatz, Aufräumen ----------
 async function renderLibrary() {
   const o = await api('GET', '/api/org').catch(() => null);
@@ -1294,8 +1337,9 @@ async function renderLibrary() {
       } }, `Ausgewählte in den Papierkorb (${gb(o.cleanup.reduce((a, x) => a + x.size, 0))})`)]
       : h('p', { class: 'hint' }, `Gerade nichts aufzuräumen. Vorschläge kommen, wenn aus einem Rohvideo alles hochgeladen ist und es älter als ${o?.rawDays || 30} Tage ist.`));
   // Aufnahmen (Rohvideos) mit allem, was daraus entstanden ist – nach Thema
-  const raws = S.videos.filter((v) => !v.source && !v.missing && v.folder !== 'papierkorb' && (!S.channel || channelOf(v)?.id === S.channel));
-  const orphanKids = S.videos.filter((v) => v.source && !v.missing && v.folder !== 'papierkorb' && !raws.some((r) => r.id === v.source.rawId) && (!S.channel || channelOf(v)?.id === S.channel));
+  const isRec = (v) => !v.source && ['rohvideos', 'eingang', 'eingang-profi'].includes(v.folder);
+  const raws = S.videos.filter((v) => isRec(v) && !v.missing && (!S.channel || channelOf(v)?.id === S.channel));
+  const orphanKids = S.videos.filter((v) => !isRec(v) && !v.missing && v.folder !== 'papierkorb' && !raws.some((r) => r.id === v.source?.rawId) && (!S.channel || channelOf(v)?.id === S.channel));
   const byTopic = new Map();
   for (const r of raws) { const t = r.topic || 'Ohne Thema'; if (!byTopic.has(t)) byTopic.set(t, []); byTopic.get(t).push(r); }
   const status = (k) => k.folder === 'hochgeladen' ? '✅ hochgeladen' : k.li?.posted ? '✅ gepostet' : k.folder === 'geschnitten' ? '🕓 zur Freigabe' : FOLDER_NAMES[k.folder] || k.folder;
@@ -1305,13 +1349,20 @@ async function renderLibrary() {
     rs.sort((a, b) => (b.mtime || 0) - (a.mtime || 0)).map((r) => {
       const kids = S.videos.filter((k) => k.source?.rawId === r.id && !k.missing && k.folder !== 'papierkorb');
       return h('div', { class: 'lib-rec' }, h('a', { href: '#video/' + r.id, class: 'lib-raw' }, `📼 ${fmtDate(r.mtime)} · ${FOLDER_NAMES[r.folder] || r.folder} · ${gb(r.size)}`),
+        h('button', { class: 'btn small ghost', title: 'Spiel/Thema dieser Aufnahme ändern (gilt für alle Videos daraus)', onclick: async () => {
+          const t = prompt('Spiel/Thema dieser Aufnahme (leer = automatisch):', r.topic || ''); if (t === null) return;
+          try { await api('POST', `/api/videos/${r.id}/topic`, { topic: t }); await refresh(); renderLibrary(); toast('Gespeichert – wird gleich neu einsortiert.'); } catch (x) { toast(x.message, true); }
+        } }, '✎ Spiel'),
         kids.length ? h('div', { class: 'lib-kids' }, kids.map(kidRow)) : h('span', { class: 'hint' }, ' noch nichts geschnitten'));
     })));
-  mainEl.replaceChildren(h('div', { class: 'bar' }, h('h2', { class: 'h2' }, '📚 Bibliothek'),
-      h('span', { class: 'hint' }, 'Jede Aufnahme mit allem, was daraus entstanden ist – sortiert nach Spiel/Thema (von Claude erkannt).')),
+  mainEl.replaceChildren(...[h('div', { class: 'bar' }, h('h2', { class: 'h2' }, '📚 Bibliothek'),
+      h('span', { class: 'hint' }, 'Jede Aufnahme mit allem, was daraus entstanden ist – sortiert nach Spiel/Thema (von Claude erkannt).'),
+      h('div', { style: { flex: '1' } }), h('button', { class: 'btn small', onclick: () => convertDialog(renderLibrary) }, '🗂 Vorhandene umstellen …')),
+    o?.pending ? h('div', { class: 'alert-line' }, `${o.pending} Video(s) liegen noch nach der alten Ordnung. `,
+      h('button', { class: 'btn small primary', onclick: () => convertDialog(renderLibrary) }, 'Ansehen & umstellen')) : null,
     h('div', { class: 'settings' }, storeBox, cleanBox),
     h('div', { class: 'lib' }, albums.length ? albums : h('p', { class: 'hint' }, 'Noch keine Aufnahmen.'),
-      orphanKids.length ? h('details', { class: 'album' }, h('summary', {}, h('b', {}, '📁 Ohne Rohvideo'), h('span', { class: 'hint' }, ` ${orphanKids.length} Videos`)), h('div', { class: 'lib-kids' }, orphanKids.map(kidRow))) : null));
+      orphanKids.length ? h('details', { class: 'album' }, h('summary', {}, h('b', {}, '📁 Ohne Rohvideo (ältere oder von Hand geschnittene)'), h('span', { class: 'hint' }, ` ${orphanKids.length} Videos`)), h('div', { class: 'lib-kids' }, orphanKids.map(kidRow))) : null)].filter(Boolean));
 }
 
 // ---------- Was läuft gerade (Zentrale / Rechenhelfer) ----------
@@ -1881,7 +1932,7 @@ async function renderSettings() {
         (() => { const i = h('input', { type: 'number', min: 1, max: 365, value: og.rawDays, style: { width: '80px' }, onchange: () => run(() => api('POST', '/api/org/config', { rawDays: Number(i.value) }), 'Gespeichert.')() }); return i; })(),
         h('span', { class: 'hint' }, 'Tagen (wenn alles daraus hochgeladen ist – Vorschläge im Reiter 📚 Bibliothek).')),
       h('div', { class: 'row', style: { alignItems: 'center', flexWrap: 'wrap' } },
-        h('button', { class: 'btn primary', onclick: run(async () => { const r = await api('POST', '/api/org/run'); toast(`${r.moved} Video(s) geordnet.`); await refresh(); }) }, 'Jetzt ordnen'),
+        h('button', { class: 'btn primary', onclick: () => convertDialog(again) }, 'Vorhandene Videos umstellen …'),
         h('span', { class: 'hint' }, og.pending ? `${og.pending} Video(s) noch nicht an ihrem Platz` : 'Alles an seinem Platz.')),
       og.log.length ? h('details', {}, h('summary', {}, `Letzte Verschiebungen (${og.log.length})`),
         h('div', { class: 'org-log' }, og.log.map((e, i) => h('div', { class: 'org-row' },

@@ -124,6 +124,15 @@ http.createServer(async (req, res) => {
   if (p.startsWith('/whisper/')) { res.writeHead(200, { 'Content-Length': 2048 }); return res.end(Buffer.alloc(2048)); }
   if (p === '/v1/messages') {
     const j = JSON.parse(b.toString());
+    if (j.output_config?.format?.schema?.properties?.items) {
+      const ids = j.output_config.format.schema.properties.items.items.properties.id.enum;
+      const txt = JSON.stringify(j.messages[0].content);
+      log.push({ topics: ids.length, images: j.messages[0].content.filter((c) => c.type === 'image').length });
+      const out = { items: ids.map((id) => { const m = new RegExp('\\[' + id + '\\][^\\[]*').exec(txt)?.[0] || '';
+        return { id, game: /minecraft/i.test(m) ? 'Minecraft' : /fortnite/i.test(m) ? 'Fortnite' : /druck/i.test(m) ? '3D-Druck' : '' }; }) };
+      return json(res, 200, { id: 'msg_t', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn',
+        content: [{ type: 'text', text: JSON.stringify(out) }], usage: { input_tokens: 2000, output_tokens: 200 } });
+    }
     if (j.output_config?.format?.schema?.properties?.ideas) {
       log.push({ coach: j.messages[0].content.slice(0, 300) });
       const out = { summary: 'Viele starke Reaktionen, aber oft langsamer Einstieg.', strengths: ['Echte Reaktionen', 'Klare Highlights'],

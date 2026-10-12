@@ -9,6 +9,7 @@ import path from 'node:path';
 import { db, save, saveNow } from './store.js';
 import * as lib from './library.js';
 import * as profiles from './profiles.js';
+import * as ai from './ai.js';
 
 const cfg = () => (db().org ||= { enabled: true, rename: true, folders: true, rawDays: 30, log: [] });
 const vids = () => Object.values(db().videos);
@@ -24,14 +25,14 @@ const rawOf = (v) => (v.source?.rawId ? db().videos[v.source.rawId] : null);
 
 // Thema eines Videos (Spiel bzw. Thema laut Claude); Rohvideo: häufigstes Thema seiner Videos
 export function topicOf(v) {
+  if (v.orgTopic) return clean(v.orgTopic, 40);          // von Hand bzw. nachträglich erkannt
+  const r = v.source?.rawId ? rawOf(v) : null;
+  if (r?.orgTopic) return clean(r.orgTopic, 40);          // Thema der Aufnahme gilt für alle Videos daraus
   if (v.ai?.game) return clean(v.ai.game, 40);
-  if (v.source?.rawId) {
-    const r = rawOf(v);
-    if (r && r.ai?.game) return clean(r.ai.game, 40);
-  }
+  if (r?.ai?.game) return clean(r.ai.game, 40);
   const kids = v.source ? [] : childrenOf(v);
   const count = {};
-  for (const k of kids) if (k.ai?.game) { const t = clean(k.ai.game, 40); count[t] = (count[t] || 0) + 1; }
+  for (const k of kids) { const g = k.orgTopic || k.ai?.game; if (g) { const t = clean(g, 40); count[t] = (count[t] || 0) + 1; } }
   return Object.entries(count).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
 }
 
@@ -49,19 +50,22 @@ function kindLabel(v) {
   if (k === 'short') return profiles.isPro(profiles.effective(v)) ? 'LinkedIn-Clip' : 'Short';
   if (k === 'long') return 'Langfassung';
   if (k === 'summary') return 'Kurzfassung';
+  if (!k && v.height && v.width && v.height > v.width) return profiles.isPro(profiles.effective(v)) ? 'LinkedIn-Clip' : 'Short';
   return '';
 }
 
 // gewünschter Name + Unterordner (oder null, wenn noch nicht genug bekannt ist)
-export function desired(v) {
+export function desired(v, { now = false } = {}) {
   const c = cfg();
   const ext = path.extname(v.file).toLowerCase();
   const d = dateOf(v);
   const topic = topicOf(v);
-  const isRaw = !v.source;
-  const ageDays = (Date.now() - (Date.parse(v.createdAt) || Date.now())) / 86400_000;
+  // Rohvideo = Aufnahme im Ordner rohvideos; ältere, von Hand geschnittene Videos (ohne Schnitt-Herkunft) sind fertige Videos
+  const isRaw = !v.source && v.folder === 'rohvideos';
+  // Alter nach Dateizeit (ältere Bestände sofort, frische Aufnahmen/Schnitte warten auf Claudes Thema)
+  const ageDays = (Date.now() - Math.min(v.mtime || Infinity, Date.parse(v.createdAt) || Infinity, Date.now())) / 86400_000;
   // ohne Thema noch warten (Claude-Vorschlag kommt meist kurz nach dem Schnitt), nach 2 Tagen trotzdem ordnen
-  if (!topic && ageDays < 2) return null;
+  if (!topic && ageDays < 2 && !now) return null;
   let name = v.file.split('/').pop();
   if (c.rename) {
     if (isRaw) name = `${ymd(d)} ${pad(d.getHours())}-${pad(d.getMinutes())} ${topic || 'Aufnahme'} – Rohvideo${ext}`;
@@ -81,8 +85,12 @@ export function desired(v) {
   return dir ? `${dir}/${name}` : name;
 }
 
+// schon richtig (auch wenn nur der Zähler „(2)“ abweicht)?
+const noCounter = (f) => f.replace(/ \(\d+\)(?=\.[^.]+$)/, '');
+const samePlace = (want, file) => !want || want === file || noCounter(want) === noCounter(file);
+
 // ein Video an seinen Platz bringen → true wenn verschoben/umbenannt
-export function organizeOne(v, { force = false } = {}) {
+export function organizeOne(v, { force = false, now = false } = {}) {
   const c = cfg();
   if (!c.enabled && !force) return false;
   if (v.missing || busy(v) || v.orgLock || !['rohvideos', 'hochgeladen', 'geschnitten'].includes(v.folder)) return false;
@@ -90,10 +98,8 @@ export function organizeOne(v, { force = false } = {}) {
   if (!v.source && childrenOf(v).some((k) => ['queued', 'running'].includes(k.revise?.state))) return false;
   // geschnittene Videos erst umbenennen, wenn Claudes Vorschlag (Titel) da ist oder du den Titel geändert hast
   if (v.folder === 'geschnitten' && !(v.ai?.state === 'done' || v.editedAt)) return false;
-  const want = desired(v);
-  if (!want || want === v.file) return false;
-  // nur der Zähler „(2)“ unterscheidet sich → nichts tun
-  if (want.replace(/ \(\d+\)(?=\.[^.]+$)/, '') === v.file.replace(/ \(\d+\)(?=\.[^.]+$)/, '')) return false;
+  const want = desired(v, { now });
+  if (samePlace(want, v.file)) return false;
   const from = v.file;
   try { lib.relocate(v, v.folder, want); }
   catch (e) { console.error('Ordnen', v.file, e.message); return false; }
@@ -103,11 +109,11 @@ export function organizeOne(v, { force = false } = {}) {
 }
 
 let running = false;
-export function organizeAll({ force = false } = {}) {
+export function organizeAll({ force = false, now = false } = {}) {
   if (running) return 0;
   running = true;
   let n = 0;
-  try { for (const v of vids()) if (organizeOne(v, { force })) n++; }
+  try { for (const v of vids()) if (organizeOne(v, { force, now })) n++; }
   finally { running = false; }
   if (n) saveNow();
   return n;
@@ -172,10 +178,63 @@ export function cleanup(ids) {
   return { moved: n, bytes };
 }
 
+// Vorschau „Bestand umstellen“: was passiert mit jedem Video (ohne etwas zu verschieben)
+const ORG_FOLDERS = ['rohvideos', 'hochgeladen', 'geschnitten'];
+export function plan() {
+  const moves = [], skipped = [], noTopic = [];
+  for (const v of vids()) {
+    if (v.missing || !ORG_FOLDERS.includes(v.folder)) continue;
+    const why = busy(v) ? 'wird gerade bearbeitet oder hochgeladen'
+      : v.orgLock ? 'von dir zurückgeholt (bleibt, wo es ist)'
+      : v.folder === 'geschnitten' && !(v.ai?.state === 'done' || v.editedAt) ? 'wartet auf Claudes Vorschlag' : '';
+    if (!topicOf(v)) noTopic.push(v.id);
+    if (why) { skipped.push({ id: v.id, folder: v.folder, file: v.file, why }); continue; }
+    let want = null;
+    try { want = desired(v, { now: true }); } catch { /* egal */ }
+    if (samePlace(want, v.file)) continue;
+    moves.push({ id: v.id, folder: v.folder, from: v.file, to: want, topic: topicOf(v) });
+  }
+  return { moves, skipped, noTopic: noTopic.length, topics: topicJob };
+}
+
+// Themen für Videos ohne Thema per Claude bestimmen (läuft im Hintergrund, Stand in topicJob)
+let topicJob = null;
+export function detectTopics() {
+  if (topicJob?.state === 'running') return topicJob;
+  // Rohvideos mit Kindern bekommen ihr Thema über die Kinder → nur die Videos fragen, die selbst keins haben
+  const list = vids().filter((v) => !v.missing && ORG_FOLDERS.includes(v.folder) && !topicOf(v));
+  topicJob = { state: 'running', done: 0, total: list.length, found: 0, at: new Date().toISOString() };
+  if (!list.length) { topicJob.state = 'done'; return topicJob; }
+  ai.detectTopics(list, (d, t) => { topicJob.done = d; topicJob.total = t; })
+    .then(({ topics, cost }) => {
+      for (const [id, t] of Object.entries(topics)) { const v = db().videos[id]; if (v && !topicOf(v)) { v.orgTopic = t; v.orgTopicBy = 'Claude'; } }
+      topicJob = { ...topicJob, state: 'done', done: topicJob.total, found: Object.keys(topics).length, cost: Math.round(cost * 100) / 100 };
+      saveNow();
+    })
+    .catch((e) => { topicJob = { ...topicJob, state: 'error', error: e.message }; });
+  return topicJob;
+}
+
+// Thema von Hand setzen (bei einer Aufnahme gilt es für alles daraus)
+export function setTopic(v, topic) {
+  const t = clean(topic, 40);
+  if (t) { v.orgTopic = t; v.orgTopicBy = 'Hand'; } else { delete v.orgTopic; delete v.orgTopicBy; }
+  saveNow();
+  soon();
+  return t;
+}
+
+// Bestand umstellen: alles an den neuen Platz, auch Videos ohne Thema (→ „Sonstiges“/„Aufnahme“)
+export function convert() {
+  const before = cfg().log.length;
+  const n = organizeAll({ force: true, now: true });
+  return { moved: n, logged: cfg().log.length - before };
+}
+
 export function status() {
   const c = cfg();
   return { enabled: c.enabled, rename: c.rename, folders: c.folders, rawDays: c.rawDays, log: c.log.slice(0, 30),
-    pending: vids().filter((v) => { try { const w = ['rohvideos', 'hochgeladen', 'geschnitten'].includes(v.folder) && !v.missing && !v.orgLock ? desired(v) : null; return w && w !== v.file; } catch { return false; } }).length };
+    pending: vids().filter((v) => { try { return ORG_FOLDERS.includes(v.folder) && !v.missing && !v.orgLock && !busy(v) && !(v.folder === 'geschnitten' && !(v.ai?.state === 'done' || v.editedAt)) && !samePlace(desired(v), v.file); } catch { return false; } }).length };
 }
 export function configure(b) {
   const c = cfg();

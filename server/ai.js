@@ -578,6 +578,51 @@ export async function coach(profileId) {
   return db().coach[prof.id];
 }
 
+// Spiel/Thema für ältere Videos nachträglich bestimmen (für die Ordnung): je Video Titel, Datei, Inhalt, Gesprochenes;
+// ohne jeden Text ein Standbild. Ein Aufruf je 20 Videos → items [{id, game}] (leer = unklar).
+export async function detectTopics(list, onProgress = () => {}) {
+  if (!cfg().apiKey) throw new Error('Für die Themen-Erkennung braucht es den Claude-Schlüssel (Einstellungen).');
+  const known = [...new Set(Object.values(db().videos).map((v) => v.orgTopic || v.ai?.game).filter(Boolean))].slice(0, 60);
+  const out = {};
+  let cost = 0;
+  for (let i = 0; i < list.length; i += 20) {
+    const batch = list.slice(i, i + 20);
+    const content = [{ type: 'text', text: [
+      'Ordne jedem Video das Spiel bzw. Thema zu (für Ordnernamen, z. B. „Fortnite“, „Minecraft“, „3D-Druck Halterung“). Kurz, 1–3 Wörter, offizielle Schreibweise.',
+      known.length ? `Schon verwendete Themen (gleiche Schreibweise nutzen, wenn passend): ${known.join(', ')}` : '',
+      'Wenn wirklich nicht erkennbar: leerer Text. Nichts erfinden.', '',
+    ].filter(Boolean).join('\n') }];
+    for (const v of batch) {
+      const text = [v.title && `Titel: ${v.title}`, `Datei: ${v.file.split('/').pop()}`, v.description && `Beschreibung: ${String(v.description).slice(0, 300)}`,
+        v.ai?.summary && `Inhalt: ${v.ai.summary}`, (v.tags || []).length ? `Tags: ${v.tags.slice(0, 10).join(', ')}` : '',
+        v.transcriptText && `Gesprochen: „${v.transcriptText.slice(0, 400)}“`].filter(Boolean);
+      content.push({ type: 'text', text: `\n[${v.id}] ` + text.join(' · ') });
+      if (!v.title && !v.ai?.summary && !v.transcriptText) {
+        try {
+          const n = (await ensureFrames(v))[2] || 1;
+          content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: fs.readFileSync(framePath(v, n)).toString('base64') } });
+        } catch { /* kein Bild */ }
+      }
+    }
+    const schemaT = { type: 'object', additionalProperties: false, required: ['items'], properties: { items: { type: 'array', items: {
+      type: 'object', additionalProperties: false, required: ['id', 'game'], properties: { id: { type: 'string', enum: batch.map((v) => v.id) }, game: { type: 'string' } } } } } };
+    let r;
+    try {
+      r = await api().beta.messages.create({ model: MODEL, max_tokens: 4000, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
+        output_config: { effort: 'low', format: { type: 'json_schema', schema: schemaT } }, messages: [{ role: 'user', content }] });
+    } catch (e) { throw new Error(friendly(e)); }
+    if (r.stop_reason !== 'refusal') {
+      const j = JSON.parse(r.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
+      for (const x of j.items || []) if (x.game?.trim()) { out[x.id] = x.game.trim().slice(0, 60); if (!known.includes(out[x.id])) known.push(out[x.id]); }
+    }
+    cost += (r.usage?.input_tokens || 0) * PRICE.input + (r.usage?.output_tokens || 0) * PRICE.output;
+    onProgress(Math.min(list.length, i + 20), list.length);
+  }
+  const a = cfg(); a.spent = Math.round(((a.spent || 0) + cost) * 10000) / 10000; a.count = (a.count || 0) + 1;
+  saveNow();
+  return { topics: out, cost };
+}
+
 export function init() {
   for (const v of Object.values(db().videos)) {
     if (['queued', 'running'].includes(v.ai?.state)) v.ai = { ...v.ai, state: v.ai.titles ? 'done' : 'error', error: v.ai.titles ? '' : 'Durch Neustart unterbrochen.' };

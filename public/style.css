@@ -350,3 +350,6 @@ select.small { padding: 4px 8px; font-size: 13px; width: auto; }
 .org-log { max-height: 320px; overflow: auto; margin-top: 6px; }
 .org-row { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 4px 0; border-top: 1px solid var(--line); font-size: 13px; word-break: break-word; }
 @media (max-width: 600px) { .org-row { grid-template-columns: 1fr; } }
+.alert-line { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 14px; margin: 0 0 14px; border-radius: 12px;
+  border: 1px solid #b8860b; background: rgba(184, 134, 11, .12); }
+.lib-rec .btn.small { margin-left: 8px; padding: 2px 8px; }

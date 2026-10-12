@@ -1,5 +1,10 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.24.0', date: '12.10.2026', items: [
+    '🗂 Vorhandene Videos umstellen: Einstellungen → Ordnung bzw. Bibliothek → „Vorhandene umstellen …“ zeigt vorher genau, welches Video wie heißen und wo liegen wird – erst nach deinem Klick wird verschoben.',
+    '🎮 Ältere Videos ohne erkanntes Spiel: Claude bestimmt das Spiel nachträglich aus Titel, Beschreibung und Gesprochenem (ca. 0,4 Cent je Video). In der Bibliothek kannst du das Spiel einer Aufnahme mit „✎ Spiel“ auch selbst setzen – es gilt für alles, was daraus entstanden ist.',
+    'Ältere, von Hand geschnittene Videos werden jetzt richtig als fertige Videos benannt (nicht als „Rohvideo“); ältere Dateien warten nicht mehr 2 Tage auf ein Thema.',
+  ] },
   { version: '1.23.0', date: '12.10.2026', items: [
     '🗂 Ordnung: Videos bekommen sprechende Namen (Datum, Spiel laut Claude, Titel, Short/Langfassung) und landen in Ordnern – Rohvideos\\Kanal\\Monat\\Spiel, Hochgeladen\\Kanal\\Jahr\\Monat. Läuft automatisch, nie während Schnitt oder Upload; jede Verschiebung lässt sich unter Einstellungen → Ordnung rückgängig machen.',
     '📚 Neuer Reiter Bibliothek: jede Aufnahme mit allem, was daraus entstanden ist (und ob es hochgeladen ist), nach Spiel sortiert, dazu Speicherplatz je Ordner und Aufräum-Vorschläge für Rohvideos, aus denen alles hochgeladen ist.',
