@@ -22,6 +22,7 @@ import * as backup from './backup.js';
 import * as helper from './helper.js';
 import * as sfx from './sfx.js';
 import * as credits from './credits.js';
+import * as org from './organize.js';
 import * as ai2 from './ai.js';
 
 const PORT = Number(process.env.PORT || 8090);
@@ -34,8 +35,9 @@ lib.ensureDirs();
 jobs.init();
 youtube.init();
 ai.init();
-ai.afterSuggest((v) => autocut.autoApplyTips(v));
+ai.afterSuggest((v) => { autocut.autoApplyTips(v); org.soon(); });
 credits.init();
+org.init();
 autocut.init();
 ver.init();
 backup.init();
@@ -110,7 +112,8 @@ function publicVideo(v) {
   return { ...v, yt: strip(v.yt), tt: strip(v.tt), suggestion: profiles.suggest(v), plan: lib.INBOXES.includes(v.folder) || v.folder === 'rohvideos' ? autocut.planOf(v) : undefined,
     transcriptText: undefined, hasTranscript: !!v.transcriptText,
     imageVersion: v.image ? (v.imageAt || v.mtime) : v.thumbAt, hasImage: !!lib.imagePath(v),
-    canRevise: ['short', 'long', 'summary'].includes(v.source?.kind) ? autocut.revisable(v) || true : undefined };
+    canRevise: ['short', 'long', 'summary'].includes(v.source?.kind) ? autocut.revisable(v) || true : undefined,
+    topic: org.topicOf(v) };
 }
 
 // endgültig löschen inkl. Standbilder, Varianten und Transkript
@@ -373,7 +376,7 @@ async function api(req, res, url) {
     const v = getVideo(r[1]);
     const sub = r[2] || '';
     if (sub === '/file' && (m === 'GET' || m === 'HEAD')) return sendFile(req, res, lib.fileOf(v), TYPES[path.extname(v.file).toLowerCase()] || 'application/octet-stream',
-      url.searchParams.get('download') ? v.file : '');
+      url.searchParams.get('download') ? path.basename(v.file) : '');
     if (sub === '/tiktok-creator' && m === 'GET') {
       const prof = profiles.effective(v);
       if (!prof?.tiktok?.refreshToken) throw new HttpError(409, 'TikTok ist für diesen Kanal nicht verbunden.');
@@ -403,7 +406,7 @@ async function api(req, res, url) {
       const b = await readJson(req);
       v.li = b.undo ? { state: 'none' } : { state: 'done', at: new Date().toISOString(), url: /^https:\/\//.test(String(b.url || '')) ? String(b.url) : '' };
       saveNow();
-      if (!b.undo && db().settings.autoArchive && v.folder === 'geschnitten') { try { lib.moveVideo(v, 'hochgeladen'); } catch (e) { console.error('Archivieren:', e.message); } }
+      if (!b.undo && db().settings.autoArchive && v.folder === 'geschnitten') { try { lib.moveVideo(v, 'hochgeladen'); org.soon(); } catch (e) { console.error('Archivieren:', e.message); } }
       return send(res, 200, publicVideo(v));
     }
     if (sub === '/image' && m === 'GET') {
@@ -656,6 +659,39 @@ async function api(req, res, url) {
   if (p === '/api/coach' && m === 'POST') {
     const b = await readJson(req);
     try { return send(res, 200, await ai.coach(b.profileId)); } catch (e) { throw new HttpError(400, e.message); }
+  }
+  // Ordnung: Status, Einstellungen, jetzt ordnen, rückgängig, Speicher, Aufräumen
+  if (p === '/api/org' && m === 'GET') return send(res, 200, { ...org.status(), storage: org.storage(), cleanup: org.cleanupCandidates() });
+  if (p === '/api/org/config' && m === 'POST') return send(res, 200, org.configure(await readJson(req)));
+  if (p === '/api/org/run' && m === 'POST') { const n = org.organizeAll({ force: true }); return send(res, 200, { moved: n, ...org.status() }); }
+  if (p === '/api/org/undo' && m === 'POST') { const b = await readJson(req); try { org.undo(Number(b.index)); } catch (e) { throw new HttpError(409, e.message); } return send(res, 200, org.status()); }
+  if (p === '/api/org/cleanup' && m === 'POST') { const b = await readJson(req); return send(res, 200, org.cleanup(Array.isArray(b.ids) ? b.ids : [])); }
+  // Mehrere Videos auf einmal: in den Papierkorb, wiederherstellen, endgültig löschen
+  if (p === '/api/videos/bulk' && m === 'POST') {
+    const b = await readJson(req, 256 * 1024);
+    const ids = (Array.isArray(b.ids) ? b.ids : []).slice(0, 500);
+    const done = [], skipped = [];
+    for (const id of ids) {
+      const v = db().videos[id];
+      if (!v) continue;
+      try {
+        if (b.action === 'trash') {
+          if (v.folder === 'papierkorb') continue;
+          if (isUploading(v) || ['queued', 'running'].includes(v.cut?.state) || ['queued', 'running'].includes(v.revise?.state)) { skipped.push(v.title || v.file); continue; }
+          const from = v.folder; lib.moveVideo(v, 'papierkorb'); v.trash = { from, at: new Date().toISOString() };
+        } else if (b.action === 'restore') {
+          if (v.folder !== 'papierkorb') continue;
+          lib.moveVideo(v, lib.FOLDERS.includes(v.trash?.from) && v.trash.from !== 'papierkorb' ? v.trash.from : 'geschnitten'); delete v.trash;
+        } else if (b.action === 'delete') {
+          if (v.folder !== 'papierkorb') { skipped.push(v.title || v.file); continue; }   // endgültig nur aus dem Papierkorb
+          purge(v);
+        } else throw new HttpError(400, 'Unbekannte Aktion.');
+        done.push(id);
+      } catch (e) { if (e instanceof HttpError) throw e; skipped.push(v.title || v.file); }
+    }
+    saveNow();
+    if (b.action === 'restore') org.soon();
+    return send(res, 200, { done: done.length, skipped });
   }
   if (p === '/api/trash/empty' && m === 'POST') {
     let n = 0;

@@ -225,7 +225,17 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   „Add products“ (Login Kit mit Redirect URI unter Web, Content Posting API), Target Users michamodus + 3dbymicha.
   **Beide Plattformen verbunden.** App-Icon `docs/app-icon-1024.png`. Demo-Video aus der Sandbox am 11.10.2026 vom Kunden aufgenommen, Einreichung der Prüfung läuft.
   Nach Freigabe: Production-Client-Key/Secret (anders als Sandbox!) in der Zentrale eintragen, Kanäle neu verbinden.
-- **Offen – Organisation (Kunde 12.10.: „fertige Videos organisieren, Rohvideos sauber ablegen, am besten durch KI“):** Plan erklärt, wartet auf „leg los“.
+- 1.23.0 (12.10.2026): **Ordnung** (`server/organize.js`, `db().org {enabled, rename, folders, rawDays, log[]}`): Videos dürfen in Unterordnern liegen
+  (`v.file` relativ mit `/`, `library.walk` bis 4 Ebenen, `relocate()` verschiebt samt Begleitdateien, leere Ordner weg; extern verschobene Dateien
+  über Name+Größe wiedererkannt). `desired(v)`: Rohvideo `rohvideos/<Kanal>/<JJJJ-MM>/<Thema>/JJJJ-MM-TT HH-MM <Thema> – Rohvideo`, Ausgaben
+  `JJJJ-MM-TT [Thema – ]Titel (Short|Langfassung|Kurzfassung|LinkedIn-Clip)[ vN]`, hochgeladen `<Kanal>/<JJJJ>/<MM>`, geschnitten nur umbenennen.
+  Thema = `ai.game` (Rohvideo: häufigstes der Kinder), ohne Thema bis 2 Tage warten. Nie bei Upload/Schnitt/Überarbeitung, `orgLock` nach Rückgängig.
+  Läuft nach Vorschlag/Upload (`org.soon`) + stündlich. Aufräumen: Rohvideos älter `rawDays`, alle Kinder hochgeladen/Papierkorb/gepostet → Papierkorb.
+  Routen `/api/org[/config|/run|/undo|/cleanup]`, `/api/videos/bulk {action trash|restore|delete, ids}`. UI: Reiter 📚 Bibliothek (`renderLibrary`),
+  Einstellungen → Ordnung, Mehrfachauswahl (`S.sel`, `.selbar`), Filter Thema/Monat, Gruppierung (`localStorage vz-group`).
+  Überarbeiten-Prompts sagen jetzt ausdrücklich: neu aus dem Rohvideo, Weggeschnittenes darf zurück (Short-Fenster ±120 s, Langfassung mit Abschnittsliste).
+  **Regel: Rohvideo nie löschen, solange daraus noch überarbeitet werden soll** (Aufräumen nur nach Hochladen aller Kinder).
+  Getestet (curl + Playwright): Ordnen, Neuscan ohne „fehlt“, Rückgängig, Mehrfach-Papierkorb/Wiederherstellen, Bibliothek 390 px. **Nicht getestet:** Unraid-Freigabe mit echten Dateien.
 - **Offen – Paket 4 Zusammenstellung (angeboten, Kunde will es):** „Best of“ aus mehreren Videos (Zeitraum/Auswahl, 16:9 oder 9:16, Claude
   ordnet Highlights, Platz-Einblendungen), später automatisch wöchentlich. Nach 1.18.0 als eigenes Paket bauen.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,

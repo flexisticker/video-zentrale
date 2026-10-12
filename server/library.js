@@ -17,6 +17,10 @@ const SETTLE_MS = 60_000; // Datei wird evtl. noch kopiert
 
 export const dirOf = (folder) => path.join(VIDEO_DIR, folder);
 export const fileOf = (v) => path.join(dirOf(v.folder), v.file);
+// v.file darf Unterordner enthalten (z. B. „MichaModus/2026-10/Fortnite/2026-10-11 Fortnite – Clutch.mp4“, immer mit /)
+const relDir = (file) => { const d = path.posix.dirname(String(file).replace(/\\/g, '/')); return d === '.' ? '' : d; };
+const relJoin = (dir, name) => (dir ? dir + '/' + name : name);
+const stemOf = (file) => path.basename(file, path.extname(file));
 
 export function ensureDirs() {
   for (const f of FOLDERS) fs.mkdirSync(dirOf(f), { recursive: true });
@@ -30,22 +34,34 @@ export function safeName(name) {
   return n.slice(0, 180);
 }
 
-export function freeName(folder, name) {
-  const ext = path.extname(name), base = path.basename(name, ext);
+// freier Name im Ordner (name darf einen Unterordner enthalten) – „Titel (2).mp4“ usw.
+export function freeName(folder, name, ignore = null) {
+  const dir = relDir(name), ext = path.extname(name), base = stemOf(name);
   let n = name, i = 2;
-  while (fs.existsSync(path.join(dirOf(folder), n))) n = `${base} (${i++})${ext}`;
+  while (fs.existsSync(path.join(dirOf(folder), n)) && path.join(dirOf(folder), n) !== ignore) n = relJoin(dir, `${base} (${i++})${ext}`);
   return n;
 }
 
 function sidecars(folder, file) {
-  const base = path.basename(file, path.extname(file));
+  const dir = relDir(file), base = stemOf(file);
   const out = { image: null, json: null };
   for (const e of IMAGE_EXT) {
-    const p = path.join(dirOf(folder), base + e);
-    if (fs.existsSync(p)) { out.image = base + e; break; }
+    if (fs.existsSync(path.join(dirOf(folder), relJoin(dir, base + e)))) { out.image = relJoin(dir, base + e); break; }
   }
-  const j = path.join(dirOf(folder), base + '.json');
-  if (fs.existsSync(j)) out.json = base + '.json';
+  if (fs.existsSync(path.join(dirOf(folder), relJoin(dir, base + '.json')))) out.json = relJoin(dir, base + '.json');
+  return out;
+}
+
+// alle Videos eines Ordners, auch in Unterordnern (bis 4 Ebenen) → relative Pfade mit /
+function walk(folder, sub = '', depth = 0, out = []) {
+  let list = [];
+  try { list = fs.readdirSync(path.join(dirOf(folder), sub), { withFileTypes: true }); } catch { return out; }
+  for (const e of list) {
+    if (e.name.startsWith('.')) continue;
+    const rel = relJoin(sub, e.name);
+    if (e.isDirectory() && depth < 4) walk(folder, rel, depth + 1, out);
+    else if (e.isFile() && VIDEO_EXT.includes(path.extname(e.name).toLowerCase())) out.push(rel);
+  }
   return out;
 }
 
@@ -70,7 +86,7 @@ export function newVideo(folder, file) {
   const id = crypto.randomBytes(8).toString('hex');
   const v = {
     id, folder, file, createdAt: new Date().toISOString(),
-    title: path.basename(file, path.extname(file)).slice(0, 100),
+    title: stemOf(file).slice(0, 100),
     // leer = Vorgabe des Kanals (Tags, Kategorie) beim Upload
     description: '', tags: '', category: '', tiktok: '', note: '', channel: '', channelFrom: '',
     size: 0, mtime: 0, duration: null, width: null, height: null, image: null, thumbAt: 0,
@@ -93,10 +109,7 @@ async function doScan() {
   const now = Date.now();
   let changed = false;
   for (const folder of FOLDERS) {
-    let names = [];
-    try { names = fs.readdirSync(dirOf(folder)); } catch { continue; }
-    for (const name of names) {
-      if (!VIDEO_EXT.includes(path.extname(name).toLowerCase()) || name.startsWith('.')) continue;
+    for (const name of walk(folder)) {
       let st;
       try { st = fs.statSync(path.join(dirOf(folder), name)); } catch { continue; }
       if (!st.isFile() || st.size === 0) continue;
@@ -104,8 +117,8 @@ async function doScan() {
       if (!v) {
         if (now - st.mtimeMs < SETTLE_MS) continue; // noch im Kopieren
         // Von außen verschoben? Gleicher Name + Größe in anderem Ordner, dort verschwunden.
-        v = Object.values(videos).find((x) => x.file === name && x.size === st.size && !fs.existsSync(fileOf(x)));
-        if (v) v.folder = folder; else v = newVideo(folder, name);
+        v = Object.values(videos).find((x) => path.basename(x.file) === path.basename(name) && x.size === st.size && !fs.existsSync(fileOf(x)));
+        if (v) { v.folder = folder; v.file = name; } else v = newVideo(folder, name);
         // Ordner „eingang-profi“: gehört zum LinkedIn-Kanal (geschäftlich, professioneller Stil)
         if (folder === 'eingang-profi' && !v.channel) { const pro = profiles.proProfile(); if (pro) { v.channel = pro.id; v.channelFrom = 'ordner'; } }
         changed = true;
@@ -193,41 +206,65 @@ export function moveFile(src, dst) {
 
 // Endgültig löschen (nur aus dem Papierkorb): Video, Begleitdateien (Titelbild, .json) und alle Zwischendateien der Zentrale.
 export function deleteVideo(v, extraFiles = []) {
-  const base = path.basename(v.file, path.extname(v.file));
-  const files = [fileOf(v), ...[...IMAGE_EXT, '.json'].map((e) => path.join(dirOf(v.folder), base + e)), thumbPath(v), ...extraFiles];
+  const dir = relDir(v.file), base = stemOf(v.file);
+  const files = [fileOf(v), ...[...IMAGE_EXT, '.json'].map((e) => path.join(dirOf(v.folder), relJoin(dir, base + e))), thumbPath(v), ...extraFiles];
   for (const f of files) fs.rmSync(f, { force: true });
+  removeEmptyDirs(v.folder, dir);
   delete db().videos[v.id];
   save();
 }
 
-// Video samt Begleitdateien verschieben.
-export function moveVideo(v, folder) {
-  if (!FOLDERS.includes(folder) || folder === v.folder) return;
-  const base = path.basename(v.file, path.extname(v.file));
-  const target = freeName(folder, v.file);
-  const newBase = path.basename(target, path.extname(target));
-  moveFile(fileOf(v), path.join(dirOf(folder), target));
+// leere Unterordner nach dem Verschieben aufräumen (nie den Hauptordner selbst)
+function removeEmptyDirs(folder, dir) {
+  while (dir) {
+    const full = path.join(dirOf(folder), dir);
+    try { if (fs.readdirSync(full).length) return; fs.rmdirSync(full); } catch { return; }
+    dir = relDir(dir);
+  }
+}
+
+// Video samt Begleitdateien an einen neuen Ort (Ordner + relativer Pfad, auch umbenennen) → neuer relativer Pfad
+export function relocate(v, folder, rel) {
+  if (!FOLDERS.includes(folder)) throw new Error('Ordner nicht erlaubt.');
+  rel = String(rel).replace(/\\/g, '/').split('/').map((x) => safeName(x)).filter(Boolean).join('/');
+  if (!rel || !VIDEO_EXT.includes(path.extname(rel).toLowerCase())) throw new Error('Ungültiger Dateiname.');
+  if (folder === v.folder && rel === v.file) return v.file;
+  const src = fileOf(v);
+  const target = freeName(folder, rel, src);
+  const oldDir = relDir(v.file), oldBase = stemOf(v.file);
+  const newDir = relDir(target), newBase = stemOf(target);
+  fs.mkdirSync(path.join(dirOf(folder), newDir), { recursive: true });
+  moveFile(src, path.join(dirOf(folder), target));
   for (const e of [...IMAGE_EXT, '.json']) {
-    const src = path.join(dirOf(v.folder), base + e);
-    if (fs.existsSync(src)) {
-      const dst = path.join(dirOf(folder), newBase + e);
-      if (!fs.existsSync(dst)) moveFile(src, dst);
+    const s = path.join(dirOf(v.folder), relJoin(oldDir, oldBase + e));
+    if (fs.existsSync(s)) {
+      const d = path.join(dirOf(folder), relJoin(newDir, newBase + e));
+      if (!fs.existsSync(d)) moveFile(s, d);
     }
   }
+  const oldFolder = v.folder;
   v.folder = folder; v.file = target;
-  if (v.image) v.image = newBase + path.extname(v.image);
+  if (v.image) v.image = relJoin(newDir, newBase + path.extname(v.image));
+  removeEmptyDirs(oldFolder, oldDir);
   save();
+  return target;
+}
+
+// Video samt Begleitdateien in einen anderen Hauptordner (flach; die Ordnung übernimmt organize.js)
+export function moveVideo(v, folder) {
+  if (!FOLDERS.includes(folder) || folder === v.folder) return;
+  relocate(v, folder, path.basename(v.file));
 }
 
 // Titelbild als Begleitdatei speichern (ersetzt ein vorhandenes).
 export function setImage(v, buf, ext) {
-  const base = path.basename(v.file, path.extname(v.file));
+  const dir = relDir(v.file), base = stemOf(v.file);
   for (const e of IMAGE_EXT) {
-    const p = path.join(dirOf(v.folder), base + e);
+    const p = path.join(dirOf(v.folder), relJoin(dir, base + e));
     if (fs.existsSync(p)) fs.unlinkSync(p);
   }
-  fs.writeFileSync(path.join(dirOf(v.folder), base + ext), buf);
-  v.image = base + ext;
+  fs.writeFileSync(path.join(dirOf(v.folder), relJoin(dir, base + ext)), buf);
+  v.image = relJoin(dir, base + ext);
   v.imageAt = Date.now();
   save();
 }

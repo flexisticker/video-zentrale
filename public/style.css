@@ -324,3 +324,29 @@ input[type=range] { width: 100%; accent-color: #7c5cff; }
 .cr-row { border-top: 1px solid var(--line); padding: 10px 0; }
 .cr-row.low b { color: #f2b33d; }
 .cr-row p { margin: 4px 0; }
+
+/* Auswahl, Gruppen, Bibliothek */
+.card.picked { outline: 3px solid var(--accent, #7c5cff); }
+.thumb .pick { position: absolute; top: 8px; left: 8px; width: 26px; height: 26px; border-radius: 50%; border: 2px solid #fff; background: rgba(0,0,0,.45);
+  display: grid; place-items: center; font-weight: 800; color: #fff; }
+.thumb .pick.on { background: var(--accent, #7c5cff); }
+.selbar { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; margin: 0 0 12px;
+  border: 1px solid var(--accent, #7c5cff); border-radius: 12px; background: var(--bg, #111); }
+.vgroup { margin-bottom: 18px; }
+.vgroup-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin: 6px 0 8px; }
+select.small { padding: 4px 8px; font-size: 13px; width: auto; }
+.stor-row { display: grid; grid-template-columns: minmax(110px, 1fr) 2fr auto; gap: 10px; align-items: center; margin: 4px 0; }
+.stor-bar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
+.stor-bar i { display: block; height: 100%; background: var(--accent, #7c5cff); }
+.lib { margin-top: 16px; }
+.album { border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; margin-bottom: 10px; }
+.album summary { cursor: pointer; }
+.lib-rec { border-top: 1px solid var(--line); padding: 8px 0; }
+.lib-raw { font-weight: 600; }
+.lib-kids { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 0 18px; }
+.lib-kid { display: flex; justify-content: space-between; gap: 10px; text-decoration: none; color: inherit; padding: 2px 0; }
+.lib-kid:hover span:first-child { text-decoration: underline; }
+@media (max-width: 600px) { .stor-row { grid-template-columns: 1fr auto; } .stor-bar { grid-column: 1 / -1; } .lib-kids { margin-left: 6px; } .lib-kid { flex-direction: column; } }
+.org-log { max-height: 320px; overflow: auto; margin-top: 6px; }
+.org-row { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 4px 0; border-top: 1px solid var(--line); font-size: 13px; word-break: break-word; }
+@media (max-width: 600px) { .org-row { grid-template-columns: 1fr; } }

@@ -1,5 +1,11 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.23.0', date: '12.10.2026', items: [
+    '🗂 Ordnung: Videos bekommen sprechende Namen (Datum, Spiel laut Claude, Titel, Short/Langfassung) und landen in Ordnern – Rohvideos\\Kanal\\Monat\\Spiel, Hochgeladen\\Kanal\\Jahr\\Monat. Läuft automatisch, nie während Schnitt oder Upload; jede Verschiebung lässt sich unter Einstellungen → Ordnung rückgängig machen.',
+    '📚 Neuer Reiter Bibliothek: jede Aufnahme mit allem, was daraus entstanden ist (und ob es hochgeladen ist), nach Spiel sortiert, dazu Speicherplatz je Ordner und Aufräum-Vorschläge für Rohvideos, aus denen alles hochgeladen ist.',
+    '☑ Mehrfachauswahl: „Auswählen“ → Videos antippen → gemeinsam in den Papierkorb legen, wiederherstellen oder endgültig löschen. Filter nach Spiel und Monat, Ansicht „Nach Aufnahme“ gruppiert.',
+    '🔁 Überarbeiten schneidet immer neu aus dem kompletten Rohvideo – Claude darf früher weggeschnittene Stellen zurückholen (Shorts jetzt ±2 Minuten um den Clip), es geht also nichts nach und nach verloren.',
+  ] },
   { version: '1.22.0', date: '12.10.2026', items: [
     '💳 Guthaben-Warnung: Oben erscheint ein Hinweis, wenn das Guthaben von fal.ai (Bilder, Musik, Sounds) oder Claude knapp wird oder ein Dienst „kein Guthaben“ meldet – mit Link zum Aufladen.',
     'fal.ai: echtes Guthaben über einen zusätzlichen Nur-Lese-Schlüssel (alle 6 Stunden abgefragt). Claude: Stand nach dem Aufladen eintragen, die Zentrale zieht ihren Verbrauch ab. Schwellen einstellbar unter Einstellungen → Guthaben.',

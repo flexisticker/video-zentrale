@@ -590,7 +590,7 @@ export async function reviseShort(raw, out, wish, segs, profile, { minLen = 15, 
   fs.mkdirSync(FRAME_DIR, { recursive: true });
   const pro = profiles.isPro(profile);
   const src = out.source;
-  const from = Math.max(0, src.start - 60), to = Math.min(raw.duration || src.end + 60, src.end + 60);
+  const from = Math.max(0, src.start - 120), to = Math.min(raw.duration || src.end + 120, src.end + 120);
   const said = (segs || []).filter((x) => x.e > from && x.s < to).map((x) => `[${x.s.toFixed(1)}–${x.e.toFixed(1)}] ${x.t}`).join('\n').slice(0, 9000);
   const hook = out.edit?.hook || src.hook;
   const content = [{ type: 'text', text: [
@@ -601,6 +601,7 @@ export async function reviseShort(raw, out, wish, segs, profile, { minLen = 15, 
     hook ? `Bisheriger Hook: ${hook.mode}${hook.at != null ? ' bei Sekunde ' + hook.at : ''}${hook.text ? `, Text „${hook.text}“` : ''}.` : 'Bisher kein Hook.',
     `Bisheriges Tempo: ${out.edit?.tempo || src.tempo || 'normal'}. Musik: ${out.music ? 'ja' : 'nein'}.`,
     `Du darfst Start und Ende frei im Bereich Sekunde ${from.toFixed(0)}–${to.toFixed(0)} wählen; Länge ${minLen}–${maxLen} Sekunden.`,
+    'Geschnitten wird neu aus der Rohaufnahme (nicht aus dem bisherigen Clip): Was vorher fehlte – Vorgeschichte, Reaktion danach, herausgekürzte Pausen –, kannst du zurückholen.',
     'Tempo: aus = nichts herausschneiden, ruhig = nur lange Pausen, normal = Pausen + „ähm“, schnell = Jump Cuts + kurze Zooms.',
     HOOK_RULES(pro, profile),
     FX_RULES(fxLevelOf(profile, wish), fxStickers(profile)),
@@ -696,7 +697,7 @@ export async function reviseLong(raw, out, wish, segs, loud, profile) {
     for (const [i, val] of win.sort((a, b) => b[1] - a[1]).slice(0, 25).sort((a, b) => a[0] - b[0])) peaks.push(`${i}–${i + 5} s (${val.toFixed(0)} LUFS)`);
   }
   const cur = summary ? (src.parts || []).map(([a, b]) => `${Math.round(a)}–${Math.round(b)}`).join(', ')
-    : src.keep?.length ? `${src.keep.length} Abschnitte, ${t(src.keep.reduce((x, [a, b]) => x + b - a, 0))} lang (ruhige Pausen entfernt)`
+    : src.keep?.length ? `${src.keep.length} Abschnitte, ${t(src.keep.reduce((x, [a, b]) => x + b - a, 0))} lang (Sekunden: ${src.keep.slice(0, 200).map(([a, b]) => `${Math.round(a)}–${Math.round(b)}`).join(', ')})`
     : `ganze Aufnahme ohne ruhige Abschnitte${src.removed ? ` (${t(src.removed)} entfernt)` : ''}`;
   const content = [{ type: 'text', text: [
     pro ? 'Du überarbeitest ein professionelles LinkedIn-Video (Inhaber eines Druck- und 3D-Druck-Betriebs, als Person).'
@@ -704,6 +705,7 @@ export async function reviseLong(raw, out, wish, segs, loud, profile) {
     `WUNSCH DES CREATORS: „${wish}“ – setze das konsequent um.`,
     `Rohaufnahme „${raw.file}“, Länge ${t(dur)} (${Math.round(dur)} s). Bisherige Fassung: ${cur}; Titel „${out.title || ''}“, Musik: ${out.music ? 'ja' : 'nein'}.`,
     'Gib die Abschnitte an, die im neuen Video bleiben (Sekunden ab Anfang der Rohaufnahme, zeitlich sortiert, ohne Überschneidung, je mind. 3 s).',
+    'Geschnitten wird immer neu aus der kompletten Rohaufnahme, nicht aus der bisherigen Fassung: Stellen, die bisher fehlten, darfst und sollst du zurückholen, wenn sie gut sind oder der Wunsch es verlangt. Nichts geht durch frühere Überarbeitungen verloren.',
     'Schneide sauber an Satzgrenzen. Typisch rauszuschneiden: Intro/Lobby/Ladebildschirm/Menü/Warten am Anfang, Leerlauf, Wiederholungen, Outro-Gelaber.',
     'Teaser (optional, sehr wirksam auf YouTube): ein 3–8 s langer Höhepunkt, der ganz vorne läuft, bevor das Video normal beginnt; dazu ein kurzer Text (max. 5 Wörter).',
     'Tempo innerhalb der Abschnitte: aus = nichts, ruhig = nur lange Pausen, normal = Pausen + „ähm“, schnell = auch kurze Pausen.',

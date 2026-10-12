@@ -11,6 +11,7 @@ const TABS = [
   ['eingang', 'Eingang (roh)'],
   ['hochgeladen', 'Hochgeladen'],
   ['rohvideos', 'Rohvideos'],
+  ['bibliothek', '📚 Bibliothek'],
   ['papierkorb', '🗑 Papierkorb'],
   ['einstellungen', 'Einstellungen'],
 ];
@@ -18,7 +19,8 @@ const TABS = [
 const INBOXES = ['eingang', 'eingang-profi'];
 const inTab = (v, tab) => v.folder === tab || (tab === 'eingang' && v.folder === 'eingang-profi');
 const FOLDER_NAMES = { papierkorb: 'Papierkorb', eingang: 'Eingang (roh)', 'eingang-profi': 'Eingang Profi (LinkedIn)', geschnitten: 'Zur Freigabe', hochgeladen: 'Hochgeladen', rohvideos: 'Rohvideos (Originale)' };
-const S = { videos: [], busy: false, tab: 'geschnitten', search: '', channel: '', openId: null, settings: null, version: '' };
+const S = { videos: [], busy: false, tab: 'geschnitten', search: '', channel: '', openId: null, settings: null, version: '',
+  topic: '', month: '', group: (() => { try { return !!localStorage.getItem('vz-group'); } catch { return false; } })(), sel: new Set(), selMode: false, selTab: '' };
 try { S.channel = localStorage.getItem('vz-channel') || ''; } catch { /* egal */ }
 const app = document.getElementById('app');
 
@@ -256,7 +258,7 @@ let mainEl, countEls = {};
 function render() {
   countEls = {};
   const tabs = h('nav', { class: 'tabs' }, TABS.map(([id, label]) => {
-    const c = ['einstellungen', 'coach'].includes(id) ? null : h('span', { class: 'count' });
+    const c = ['einstellungen', 'coach', 'bibliothek'].includes(id) ? null : h('span', { class: 'count' });
     if (c) countEls[id] = c;
     return h('button', { class: 'tab' + (S.tab === id && !S.openId ? ' on' : ''), onclick: () => go(id) }, label, c);
   }));
@@ -269,7 +271,7 @@ function render() {
     const c = id === 'coach' ? null : h('span', { class: 'bcount' });
     if (c) countEls['b-' + id] = c;
     return h('button', { class: 'bn' + (S.tab === id && !S.openId ? ' on' : ''), onclick: () => go(id) }, h('span', { class: 'bi' }, icon, c), h('span', {}, label));
-  }), h('button', { class: 'bn' + (['hochgeladen', 'rohvideos', 'papierkorb', 'einstellungen'].includes(S.tab) && !S.openId ? ' on' : ''), onclick: () => moreSheet(fileInput) },
+  }), h('button', { class: 'bn' + (['bibliothek', 'hochgeladen', 'rohvideos', 'papierkorb', 'einstellungen'].includes(S.tab) && !S.openId ? ' on' : ''), onclick: () => moreSheet(fileInput) },
     h('span', { class: 'bi' }, '☰'), h('span', {}, 'Mehr')));
   app.replaceChildren(
     h('header', { class: 'top' },
@@ -301,7 +303,7 @@ function moreSheet(fileInput) {
     h('div', { class: 'sheet narrow more' },
       h('button', { class: 'close', onclick: close, title: 'Schließen' }, '×'),
       h('h2', {}, 'Mehr'),
-      item('hochgeladen', '📦 Hochgeladen (Archiv)'), item('rohvideos', '🎞 Rohvideos'), item('papierkorb', '🗑 Papierkorb'), item('einstellungen', '⚙ Einstellungen'),
+      item('bibliothek', '📚 Bibliothek'), item('hochgeladen', '📦 Hochgeladen (Archiv)'), item('rohvideos', '🎞 Rohvideos'), item('papierkorb', '🗑 Papierkorb'), item('einstellungen', '⚙ Einstellungen'),
       h('button', { class: 'btn big', onclick: () => { close(); fileInput.click(); } }, '⤒ Video/Bild hochladen'),
       installHint(),
       h('p', { class: 'hint' }, APP_NAME + ' ' + versionText())));
@@ -313,9 +315,12 @@ function renderMain() {
   if (S.tab === 'einstellungen') return renderSettings();
   if (S.tab === 'posten') return renderPosting();
   if (S.tab === 'coach') return renderCoach();
+  if (S.tab === 'bibliothek') return renderLibrary();
   const q = S.search.toLowerCase();
-  const list = S.videos.filter((v) => inTab(v, S.tab) && (!q || (v.title + ' ' + v.file + ' ' + v.tags).toLowerCase().includes(q))
-    && (!S.channel || channelOf(v)?.id === S.channel));
+  if (S.selTab !== S.tab) { S.sel = new Set(); S.selMode = false; S.selTab = S.tab; }
+  const inTabList = S.videos.filter((v) => inTab(v, S.tab) && !v.missing);
+  const list = S.videos.filter((v) => inTab(v, S.tab) && (!q || (v.title + ' ' + v.file + ' ' + v.tags + ' ' + (v.topic || '')).toLowerCase().includes(q))
+    && (!S.channel || channelOf(v)?.id === S.channel) && (!S.topic || v.topic === S.topic) && (!S.month || monthOf(v) === S.month));
   const setChannel = (id) => { S.channel = id; try { localStorage.setItem('vz-channel', id); } catch { /* egal */ } renderMain(); };
   const filter = profilesList().length > 1 ? h('div', { class: 'filter' },
     h('button', { class: 'btn small' + (!S.channel ? ' on' : ''), onclick: () => setChannel('') }, 'Alle Kanäle'),
@@ -340,11 +345,45 @@ function renderMain() {
     if (!confirm(`Papierkorb leeren?\n\n${n} Video(s) werden endgültig gelöscht – samt Titelbild und Texten. Das lässt sich nicht rückgängig machen.`)) return;
     try { const r = await api('POST', '/api/trash/empty'); toast(`${r.deleted} Video(s) endgültig gelöscht.`); await refresh(); renderMain(); updateCounts(); } catch (x) { toast(x.message, true); }
   } }, '🗑 Papierkorb leeren') : null;
-  const grid = h('div', { class: 'grid' }, list.filter((v) => !v.missing).map(card));
+  // Thema/Monat-Filter (aus Claudes Spiel/Thema bzw. Aufnahmedatum) und Gruppieren nach Aufnahme
+  const topics = [...new Set(inTabList.map((v) => v.topic).filter(Boolean))].sort();
+  const months = [...new Set(inTabList.map(monthOf))].sort().reverse();
+  const topicSel = topics.length ? h('select', { class: 'small', onchange: (e) => { S.topic = e.target.value; renderMain(); } },
+    h('option', { value: '' }, 'Alle Themen'), topics.map((t) => h('option', { value: t, selected: S.topic === t }, t))) : null;
+  const monthSel = months.length > 1 ? h('select', { class: 'small', onchange: (e) => { S.month = e.target.value; renderMain(); } },
+    h('option', { value: '' }, 'Alle Monate'), months.map((m) => h('option', { value: m, selected: S.month === m }, fmtMonth(m)))) : null;
+  const groupBtn = ['geschnitten', 'hochgeladen', 'papierkorb'].includes(S.tab) ? h('button', { class: 'btn small' + (S.group ? ' on' : ''), title: 'Videos einer Aufnahme zusammen zeigen',
+    onclick: () => { S.group = !S.group; try { localStorage.setItem('vz-group', S.group ? '1' : ''); } catch { /* egal */ } renderMain(); } }, '🗂 Nach Aufnahme') : null;
+  const selBtn = h('button', { class: 'btn small' + (S.selMode ? ' on' : ''), onclick: () => { S.selMode = !S.selMode; if (!S.selMode) S.sel.clear(); renderMain(); } }, S.selMode ? '✕ Auswahl beenden' : '☑ Auswählen');
+  const shown = list.filter((v) => !v.missing);
+  let grid;
+  if (S.group) {
+    const groups = new Map();
+    for (const v of shown) { const k = v.source?.rawId || v.id; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(v); }
+    grid = h('div', {}, [...groups.entries()].map(([rawId, vs]) => {
+      const raw = S.videos.find((x) => x.id === rawId && !x.source);
+      const name = raw ? (raw.topic ? raw.topic + ' · ' : '') + fmtDate(raw.mtime) : vs[0].source?.rawFile || 'Einzelne Videos';
+      return h('div', { class: 'vgroup' }, h('div', { class: 'vgroup-head' }, h('b', {}, '🎬 ' + name),
+        h('span', { class: 'hint' }, `${vs.length} Video${vs.length === 1 ? '' : 's'}`),
+        raw ? h('a', { href: '#video/' + raw.id, class: 'hint' }, 'Rohvideo öffnen') : null),
+        h('div', { class: 'grid' }, vs.map(card)));
+    }));
+  } else grid = h('div', { class: 'grid' }, shown.map(card));
+  // Leiste für die Mehrfachauswahl
+  const selBar = S.selMode ? h('div', { class: 'selbar' },
+    h('b', {}, `${S.sel.size} ausgewählt`),
+    h('button', { class: 'btn small', onclick: () => { shown.forEach((v) => S.sel.add(v.id)); renderMain(); } }, 'Alle'),
+    h('button', { class: 'btn small', onclick: () => { S.sel.clear(); renderMain(); } }, 'Keine'),
+    h('div', { style: { flex: '1' } }),
+    S.tab === 'papierkorb' ? [
+      h('button', { class: 'btn small', disabled: !S.sel.size, onclick: () => bulk('restore') }, '↩ Wiederherstellen'),
+      h('button', { class: 'btn small danger', disabled: !S.sel.size, onclick: () => bulk('delete') }, '✕ Endgültig löschen'),
+    ] : h('button', { class: 'btn small danger', disabled: !S.sel.size, onclick: () => bulk('trash') }, '🗑 In den Papierkorb')) : null;
   mainEl.replaceChildren(...[
-    h('div', { class: 'bar' }, search, filter, h('span', { class: 'hint' }, hints[S.tab]),
+    h('div', { class: 'bar' }, search, filter, topicSel, monthSel, groupBtn, selBtn, h('span', { class: 'hint' }, hints[S.tab]),
       h('div', { style: { flex: '1' } }), emptyTrash,
       h('button', { class: 'btn small ghost', onclick: async () => { await api('POST', '/api/scan'); await refresh(); renderMain(); updateCounts(); toast('Ordner neu eingelesen.'); } }, '↻ Ordner prüfen')),
+    selBar,
     list.some((v) => !v.missing) ? grid : h('div', { class: 'empty' },
       h('b', {}, q ? 'Nichts gefunden.' : 'Noch keine Videos hier.'),
       S.tab === 'geschnitten' ? 'Geschnittene Videos in den Ordner „geschnitten“ legen oder hierher ziehen (Video + gleichnamiges .jpg/.png als Titelbild).' : ''),
@@ -353,6 +392,24 @@ function renderMain() {
       missing.map((v) => h('div', { class: 'row' }, h('span', {}, v.file),
         h('button', { class: 'btn small', onclick: async () => { await api('POST', `/api/videos/${v.id}/forget`); await refresh(); renderMain(); } }, 'Eintrag entfernen')))) : null].filter(Boolean));
   if (keepFocus) { const s = document.getElementById('search'); s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
+}
+
+const monthOf = (v) => { const d = new Date(v.mtime || Date.parse(v.createdAt) || Date.now()); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+const fmtMonth = (m) => { const [y, mo] = m.split('-'); return ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'][Number(mo) - 1] + ' ' + y; };
+
+// Mehrere Videos auf einmal (in den Papierkorb / wiederherstellen / endgültig löschen)
+async function bulk(action) {
+  const ids = [...S.sel];
+  if (!ids.length) return;
+  const text = { trash: `${ids.length} Video(s) in den Papierkorb legen?\n\nDu kannst sie dort wiederherstellen.`, restore: `${ids.length} Video(s) wiederherstellen?`,
+    delete: `${ids.length} Video(s) endgültig löschen?\n\nVideo, Titelbild und Texte werden vom Server entfernt. Das lässt sich nicht rückgängig machen.` }[action];
+  if (!confirm(text)) return;
+  try {
+    const r = await api('POST', '/api/videos/bulk', { action, ids });
+    toast(`${r.done} erledigt.` + (r.skipped.length ? ` Übersprungen (wird gerade bearbeitet/hochgeladen): ${r.skipped.slice(0, 3).join(', ')}${r.skipped.length > 3 ? ' …' : ''}` : ''), !!r.skipped.length);
+    S.sel.clear(); S.selMode = false;
+    await refresh(); renderMain(); updateCounts();
+  } catch (x) { toast(x.message, true); }
 }
 
 // Gibt es zu diesem Video eine neuere Fassung (v2, v3 …), die nicht im Papierkorb liegt? → „v2“ usw.
@@ -367,7 +424,13 @@ function card(v) {
   if (v.duration) thumb.append(h('span', { class: 'dur' }, fmtDur(v.duration)));
   if (isVertical(v)) thumb.append(h('span', { class: 'fmt' }, 'Hochformat'));
   const running = ['uploading'].includes(v.yt?.state) ? v.yt : ['uploading'].includes(v.tt?.state) ? v.tt : null;
-  return h('button', { class: 'card', onclick: () => go('video/' + v.id) }, thumb,
+  const picked = S.selMode && S.sel.has(v.id);
+  if (S.selMode) thumb.append(h('span', { class: 'pick' + (picked ? ' on' : '') }, picked ? '✓' : ''));
+  return h('button', { class: 'card' + (picked ? ' picked' : ''), onclick: () => {
+    if (!S.selMode) return go('video/' + v.id);
+    if (S.sel.has(v.id)) S.sel.delete(v.id); else S.sel.add(v.id);
+    renderMain();
+  } }, thumb,
     h('div', { class: 'body' },
       h('div', { class: 'title' }, v.title || v.file),
       h('div', { class: 'meta' }, fmtDate(v.mtime), ' · ', fmtSize(v.size)),
@@ -615,7 +678,7 @@ function linkedinBox(box, v) {
   };
   const kids = [h('h3', {}, h('span', { class: 'dot', style: { background: '#0a66c2' } }), 'LinkedIn', h('span', { class: 'meta' }, ' → als Person (Ich-Form) · Upload machst du selbst')),
     h('div', { class: 'row' },
-      h('a', { class: 'btn primary', href: `/api/videos/${v.id}/file?download=1`, download: v.file }, '⤓ Video herunterladen'),
+      h('a', { class: 'btn primary', href: `/api/videos/${v.id}/file?download=1`, download: v.file.split('/').pop() }, '⤓ Video herunterladen'),
       v.hasImage ? h('a', { class: 'btn', href: imgUrl(v) + '&download=1', download: '' }, '⤓ Titelbild') : null,
       h('button', { class: 'btn', onclick: async () => { await detail.ensureSaved().catch(() => {}); copy(postText()); toast('Beitrag mit Hashtags kopiert.'); } }, '⧉ Beitrag kopieren')),
     h('p', { class: 'hint' }, 'Auf linkedin.com → „Beitrag beginnen“ → Video hinzufügen → Text einfügen. Das Titelbild kannst du dort unter „Miniaturansicht“ hochladen. Untertitel sind eingebrannt (LinkedIn läuft meist ohne Ton).')];
@@ -1206,6 +1269,51 @@ function renderRevise(box, v) {
   box.replaceChildren(...kids);
 }
 
+// ---------- 📚 Bibliothek: Aufnahmen nach Thema, Speicherplatz, Aufräumen ----------
+async function renderLibrary() {
+  const o = await api('GET', '/api/org').catch(() => null);
+  if (S.tab !== 'bibliothek' || S.openId) return;
+  const gb = (b) => b == null ? '–' : b < 1024 ** 3 ? Math.max(1, Math.round(b / 1024 ** 2)) + ' MB' : (b / 1024 ** 3).toFixed(1).replace('.', ',') + ' GB';
+  const st = o?.storage || { folders: {} };
+  const used = Object.values(st.folders).reduce((a, b) => a + b, 0);
+  const storeBox = h('div', { class: 'box' }, h('h3', {}, '💾 Speicherplatz'),
+    h('div', { class: 'stor' }, Object.entries(FOLDER_NAMES).filter(([k]) => st.folders[k]).map(([k, n]) =>
+      h('div', { class: 'stor-row' }, h('span', {}, n), h('div', { class: 'stor-bar' }, h('i', { style: { width: Math.max(2, Math.round((st.folders[k] / Math.max(1, used)) * 100)) + '%' } })), h('b', {}, gb(st.folders[k]))))),
+    st.free != null ? h('p', { class: 'hint' }, `Frei auf dem Laufwerk: ${gb(st.free)} von ${gb(st.total)}`) : null);
+  const picks = new Set((o?.cleanup || []).map((x) => x.id));
+  const cleanBox = h('div', { class: 'box' }, h('h3', {}, '🧹 Aufräumen'),
+    o?.cleanup?.length ? [
+      h('p', { class: 'hint' }, `Rohvideos, aus denen alles hochgeladen bzw. aussortiert ist und die älter als ${o.rawDays} Tage sind. Sie wandern in den Papierkorb (dort ${S.settings?.settings?.trashDays || 30} Tage wiederherstellbar). Ist ein Rohvideo endgültig weg, kann aus ihm nicht mehr neu geschnitten oder überarbeitet werden.`),
+      ...o.cleanup.map((x) => { const c = h('input', { type: 'checkbox', checked: true, onchange: (e) => { if (e.target.checked) picks.add(x.id); else picks.delete(x.id); } });
+        return h('label', { class: 'check' }, c, `${x.file.split('/').pop()} · ${gb(x.size)} · ${x.kids} Videos daraus · vor ${x.age} Tagen geschnitten`); }),
+      h('button', { class: 'btn primary', style: { marginTop: '8px' }, onclick: async () => {
+        const sum = o.cleanup.filter((x) => picks.has(x.id)).reduce((a, x) => a + x.size, 0);
+        if (!picks.size || !confirm(`${picks.size} Rohvideo(s) (${gb(sum)}) in den Papierkorb legen?`)) return;
+        try { const r = await api('POST', '/api/org/cleanup', { ids: [...picks] }); toast(`${r.moved} Rohvideo(s) in den Papierkorb – ${gb(r.bytes)} frei, sobald der Papierkorb geleert ist.`); await refresh(); renderLibrary(); updateCounts(); }
+        catch (x) { toast(x.message, true); }
+      } }, `Ausgewählte in den Papierkorb (${gb(o.cleanup.reduce((a, x) => a + x.size, 0))})`)]
+      : h('p', { class: 'hint' }, `Gerade nichts aufzuräumen. Vorschläge kommen, wenn aus einem Rohvideo alles hochgeladen ist und es älter als ${o?.rawDays || 30} Tage ist.`));
+  // Aufnahmen (Rohvideos) mit allem, was daraus entstanden ist – nach Thema
+  const raws = S.videos.filter((v) => !v.source && !v.missing && v.folder !== 'papierkorb' && (!S.channel || channelOf(v)?.id === S.channel));
+  const orphanKids = S.videos.filter((v) => v.source && !v.missing && v.folder !== 'papierkorb' && !raws.some((r) => r.id === v.source.rawId) && (!S.channel || channelOf(v)?.id === S.channel));
+  const byTopic = new Map();
+  for (const r of raws) { const t = r.topic || 'Ohne Thema'; if (!byTopic.has(t)) byTopic.set(t, []); byTopic.get(t).push(r); }
+  const status = (k) => k.folder === 'hochgeladen' ? '✅ hochgeladen' : k.li?.posted ? '✅ gepostet' : k.folder === 'geschnitten' ? '🕓 zur Freigabe' : FOLDER_NAMES[k.folder] || k.folder;
+  const kidRow = (k) => h('a', { class: 'lib-kid', href: '#video/' + k.id }, h('span', {}, (k.revisionOf ? '🔁 ' : '') + (k.title || k.file.split('/').pop())), h('span', { class: 'hint' }, status(k)));
+  const albums = [...byTopic.entries()].sort((a, b) => b[1].length - a[1].length).map(([t, rs]) => h('details', { class: 'album', open: byTopic.size <= 3 },
+    h('summary', {}, h('b', {}, '🎮 ' + t), h('span', { class: 'hint' }, ` ${rs.length} Aufnahme${rs.length === 1 ? '' : 'n'}`)),
+    rs.sort((a, b) => (b.mtime || 0) - (a.mtime || 0)).map((r) => {
+      const kids = S.videos.filter((k) => k.source?.rawId === r.id && !k.missing && k.folder !== 'papierkorb');
+      return h('div', { class: 'lib-rec' }, h('a', { href: '#video/' + r.id, class: 'lib-raw' }, `📼 ${fmtDate(r.mtime)} · ${FOLDER_NAMES[r.folder] || r.folder} · ${gb(r.size)}`),
+        kids.length ? h('div', { class: 'lib-kids' }, kids.map(kidRow)) : h('span', { class: 'hint' }, ' noch nichts geschnitten'));
+    })));
+  mainEl.replaceChildren(h('div', { class: 'bar' }, h('h2', { class: 'h2' }, '📚 Bibliothek'),
+      h('span', { class: 'hint' }, 'Jede Aufnahme mit allem, was daraus entstanden ist – sortiert nach Spiel/Thema (von Claude erkannt).')),
+    h('div', { class: 'settings' }, storeBox, cleanBox),
+    h('div', { class: 'lib' }, albums.length ? albums : h('p', { class: 'hint' }, 'Noch keine Aufnahmen.'),
+      orphanKids.length ? h('details', { class: 'album' }, h('summary', {}, h('b', {}, '📁 Ohne Rohvideo'), h('span', { class: 'hint' }, ` ${orphanKids.length} Videos`)), h('div', { class: 'lib-kids' }, orphanKids.map(kidRow))) : null));
+}
+
 // ---------- Was läuft gerade (Zentrale / Rechenhelfer) ----------
 let actEl = null, actTimer = null, actData = null;
 const ACT_ICON = { cut: '✂', ai: '🤖', upload: '⤒' };
@@ -1761,9 +1869,29 @@ async function renderSettings() {
     sx ? h('div', { class: 'sfx-list' }, sx.sounds.map((x) => h('button', { class: 'chip-btn' + (x.ready ? '' : ' off'), disabled: !x.ready, title: x.own ? 'eigener Sound' : x.id,
       onclick: () => { const a = new Audio('/api/sfx/file/' + x.id); a.play().catch(() => {}); } }, (x.ready ? '▶ ' : '') + x.name + (x.own ? ' ★' : '')))) : null,
     h('p', { class: 'hint' }, 'Fehlt ein Sound beim Schnitt, wird er automatisch erzeugt (sofern der fal.ai-Schlüssel eingetragen ist).'));
-  const jumps = [['s-kanaele', 'Kanäle'], ['s-claude', 'Claude'], ['s-schnitt', 'Schnitt'], ['s-musik', 'Musik'], ['s-sfx', 'Sounds'], ['s-guthaben', 'Guthaben'], ['s-bilder', 'Titelbilder'],
+  const og = await api('GET', '/api/org').catch(() => null);
+  const orgBox = h('div', { class: 'box' }, h('h3', {}, '🗂 Ordnung'),
+    h('p', { class: 'hint' }, 'Die Zentrale benennt Videos sprechend um (Datum, Spiel/Thema laut Claude, Titel, Art) und legt sie in Ordner: '
+      + 'Rohvideos\\Kanal\\JJJJ-MM\\Spiel, Hochgeladen\\Kanal\\JJJJ\\MM. „Zur Freigabe“ wird nur umbenannt. Nie während Schnitt oder Upload; jede Verschiebung lässt sich rückgängig machen.'),
+    og ? [
+      ...[['enabled', 'Automatisch ordnen (nach Schnitt, Claude-Vorschlag und Upload, sonst stündlich)'], ['rename', 'Dateien sprechend umbenennen'], ['folders', 'Unterordner anlegen (Kanal / Monat / Spiel)']].map(([k, label]) =>
+        h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!og[k], onchange: (e) => run(() => api('POST', '/api/org/config', { [k]: e.target.checked }), 'Gespeichert.')() }), label)),
+      h('div', { class: 'row', style: { alignItems: 'center', flexWrap: 'wrap' } },
+        h('span', { class: 'hint' }, 'Rohvideos zum Aufräumen vorschlagen nach'),
+        (() => { const i = h('input', { type: 'number', min: 1, max: 365, value: og.rawDays, style: { width: '80px' }, onchange: () => run(() => api('POST', '/api/org/config', { rawDays: Number(i.value) }), 'Gespeichert.')() }); return i; })(),
+        h('span', { class: 'hint' }, 'Tagen (wenn alles daraus hochgeladen ist – Vorschläge im Reiter 📚 Bibliothek).')),
+      h('div', { class: 'row', style: { alignItems: 'center', flexWrap: 'wrap' } },
+        h('button', { class: 'btn primary', onclick: run(async () => { const r = await api('POST', '/api/org/run'); toast(`${r.moved} Video(s) geordnet.`); await refresh(); }) }, 'Jetzt ordnen'),
+        h('span', { class: 'hint' }, og.pending ? `${og.pending} Video(s) noch nicht an ihrem Platz` : 'Alles an seinem Platz.')),
+      og.log.length ? h('details', {}, h('summary', {}, `Letzte Verschiebungen (${og.log.length})`),
+        h('div', { class: 'org-log' }, og.log.map((e, i) => h('div', { class: 'org-row' },
+          h('span', { class: 'hint' }, fmtDate(e.at)), h('span', {}, e.from, ' → ', h('b', {}, e.to)),
+          h('button', { class: 'btn small ghost', title: 'Zurück an den alten Platz; das Video wird danach nicht mehr automatisch verschoben.',
+            onclick: run(async () => { await api('POST', '/api/org/undo', { index: i }); await refresh(); }, 'Rückgängig gemacht.') }, '↶ Rückgängig'))))) : null,
+    ] : null);
+  const jumps = [['s-kanaele', 'Kanäle'], ['s-claude', 'Claude'], ['s-schnitt', 'Schnitt'], ['s-musik', 'Musik'], ['s-sfx', 'Sounds'], ['s-guthaben', 'Guthaben'], ['s-ordnung', 'Ordnung'], ['s-bilder', 'Titelbilder'],
     ['s-helfer', 'Rechenhelfer'], ['s-google', 'YouTube-App'], ['s-tiktok', 'TikTok-App'], ['s-sicherung', 'Sicherung'], ['s-allgemein', 'Allgemein']];
-  [[claudeBox, 's-claude'], [cutBox, 's-schnitt'], [musicBox, 's-musik'], [sfxBox, 's-sfx'], [creditBox, 's-guthaben'], [thumbBox, 's-bilder'], [helperBox, 's-helfer'], [googleBox, 's-google'],
+  [[claudeBox, 's-claude'], [cutBox, 's-schnitt'], [musicBox, 's-musik'], [sfxBox, 's-sfx'], [creditBox, 's-guthaben'], [orgBox, 's-ordnung'], [thumbBox, 's-bilder'], [helperBox, 's-helfer'], [googleBox, 's-google'],
     [tiktokBox, 's-tiktok'], [backupBox, 's-sicherung'], [account, 's-allgemein']].forEach(([el, id]) => { el.id = id; el.style.scrollMarginTop = '110px'; });
   const jumpBar = h('div', { class: 'setjump' }, jumps.map(([id, label]) => h('button', { class: 'btn small', onclick: () => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, label)));
   mainEl.replaceChildren(jumpBar,
@@ -1772,7 +1900,7 @@ async function renderSettings() {
       h('button', { class: 'btn small', onclick: () => { const n = prompt('Name des neuen Kanals:'); if (n) run(() => api('POST', '/api/profiles', { name: n }), 'Kanal angelegt.')(); } }, '+ Kanal')),
     h('div', { class: 'settings' }, st.profiles.map(channelBox)),
     h('h2', { class: 'h2', style: { marginTop: '24px' } }, 'Apps & Zugang'),
-    h('div', { class: 'settings' }, claudeBox, cutBox, musicBox, sfxBox, creditBox, thumbBox, helperBox, googleBox, tiktokBox, backupBox, account));
+    h('div', { class: 'settings' }, claudeBox, cutBox, musicBox, sfxBox, creditBox, orgBox, thumbBox, helperBox, googleBox, tiktokBox, backupBox, account));
 }
 
 start();
