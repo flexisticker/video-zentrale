@@ -183,6 +183,12 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   vorherige in den Papierkorb. `canRevise` = true oder Grund. UI `renderRevise()` (Chips, Wunsch, v2-Kasten). Mock: Hook + `changes`-Schema,
   `FAKE_WHISPER_DENSE`. Getestet: 35-s-Clip → 25,6 s (11,8 s Pausen raus), Hook-Text/Zoom/Zurückspulen im Bild, cold zu kurz → preview, Revision v2 ohne Musik,
   Behalten. **Nicht getestet:** echte Claude-Hooks, echte Spielaufnahmen (Schwelle 85 %/dB evtl. nachjustieren), NVENC mit vielen Teilen.
+- 1.19.0: Überarbeiten auch für `source.kind` long/summary: `ai.reviseLong()` (Transkript in ~20-s-Blöcken bis 120k Zeichen, 25 lauteste 5-s-Fenster,
+  4–10 Standbilder, Schema segments[]/teaser{use,at,len,text}/tempo/music/title/changes; Abschnitte sortiert+zusammengeführt, ≥ 3 s) →
+  `reviseLongVersion()`: Lautheit ganze Datei, `tempoKeep` je Abschnitt, Langfassung `renderLong(…, teaser)` (Teaser = 2. Eingabe `-ss at -t len`,
+  concat vor die select-Fassung, Hook-ASS), Kurzfassung `renderSummary(…, teaserText, teaserLen)` (Teaser als erster Teil). Langfassung speichert jetzt
+  `source.keep`. Kunde wünschte ausdrücklich „Intros rausschneiden“ → Chip + Regel im Prompt. UI: `REVISE_CHIPS_LONG`, Ziellänge (Min.).
+  Getestet (Mock): 150-s-Aufnahme → Langfassung v2 1:01 mit Teaser, Intro weg, Kurzfassung v2. Ton aller Shorts/Kurzfassungen jetzt 48 kHz (`aresample`).
 - Beim Kunden (11.10.2026): Rechenhelfer auf dem PC (RTX 3070) eingerichtet und **online**. Echte CUDA-Spracherkennung noch nicht bestätigt.
 - Achtung `.dockerignore`: `tools` ist ausgeschlossen, nur `!tools/rechenhelfer` erlaubt (1.14.0/1.15.0-Bau schlug deshalb fehl). Neue Ordner,
   die ins Image sollen, dort freigeben.

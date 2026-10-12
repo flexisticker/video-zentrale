@@ -106,7 +106,7 @@ function publicVideo(v) {
   return { ...v, yt: strip(v.yt), tt: strip(v.tt), suggestion: profiles.suggest(v), plan: lib.INBOXES.includes(v.folder) || v.folder === 'rohvideos' ? autocut.planOf(v) : undefined,
     transcriptText: undefined, hasTranscript: !!v.transcriptText,
     imageVersion: v.image ? (v.imageAt || v.mtime) : v.thumbAt, hasImage: !!lib.imagePath(v),
-    canRevise: v.source?.kind === 'short' ? autocut.revisable(v) || true : undefined };
+    canRevise: ['short', 'long', 'summary'].includes(v.source?.kind) ? autocut.revisable(v) || true : undefined };
 }
 
 // endgültig löschen inkl. Standbilder, Varianten und Transkript

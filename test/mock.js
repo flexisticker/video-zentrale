@@ -122,6 +122,16 @@ http.createServer(async (req, res) => {
       return json(res, 200, { id: 'msg_s', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn',
         content: [{ type: 'text', text: JSON.stringify({ parts: parts.slice(0, 4) }) }], usage: { input_tokens: 9000, output_tokens: 300 } });
     }
+    if (j.output_config?.format?.schema?.properties?.segments) {
+      const t0 = j.messages[0].content[0].text;
+      const dur = Number(/Länge [\d:]+ \((\d+) s\)/.exec(t0)?.[1] || 120);
+      const wish = /WUNSCH DES CREATORS: „([^“]*)“/.exec(t0)?.[1] || '';
+      log.push({ reviseLong: { wish, imgs: j.messages[0].content.filter((c) => c.type === 'image').length, said: /Gesprochenes \(Sekunden/.test(t0), peaks: /Lauteste Stellen/.test(t0), dur } });
+      const out = { segments: [{ start: 20, end: 60 }, { start: 80, end: 115 }, { start: 58, end: 70 }], teaser: { use: true, at: 100, len: 5, text: 'Das Finale eskaliert' },
+        tempo: 'normal', music: /mit musik/i.test(wish), title: 'Langfassung – kompakt', changes: 'Intro raus, zwei starke Abschnitte, Teaser vorne – neue Länge ca. 1:20.' };
+      return json(res, 200, { id: 'msg_rl', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn',
+        content: [{ type: 'text', text: JSON.stringify(out) }], usage: { input_tokens: 20000, output_tokens: 400 } });
+    }
     if (j.output_config?.format?.schema?.properties?.changes) {
       const t0 = j.messages[0].content[0].text;
       const m = /Bisheriger Clip: Sekunde ([\d.]+)–([\d.]+)/.exec(t0);

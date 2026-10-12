@@ -1,5 +1,10 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.19.0', date: '12.10.2026', items: [
+    '🔁 Überarbeiten jetzt auch bei Langfassung und Kurzfassung: Claude sieht sich die ganze Aufnahme an (Gesprochenes, laute Stellen, Standbilder) und schneidet sie nach deinem Wunsch neu – als „v2“ zum Vergleichen.',
+    'Schnellwahl: „Intro raus“ (Lobby, Ladebildschirm, Menü, Warten), langweilige Stellen raus, nur die besten Stellen, Teaser mit dem Höhepunkt am Anfang, weniger Pausen, Outro kürzen, mit/ohne Musik – plus Ziellänge in Minuten.',
+    'Teaser: ein 3–8 s Höhepunkt läuft ganz vorne mit großem Text, danach beginnt das Video.',
+  ] },
   { version: '1.18.0', date: '12.10.2026', items: [
     '⚡ Hook-Schnitt: Claude sucht in jedem Short den stärksten Moment. Entweder kommt der Höhepunkt 1–2,5 s vorweg (mit Zoom), dann wird zurückgespult und der Clip läuft von vorn – oder der Short steigt direkt mitten in der Action ein. Dazu ein großer Hook-Text im ersten Bild.',
     '✂ Tempo: Sprechpausen und „ähm“ fliegen raus (nur wo es wirklich leise ist – Spiel-Action bleibt). Stufen je Kanal: aus / ruhig / normal / schnell (Jump Cuts + kurze Zooms). MichaModus = schnell, 3dbymicha = normal, LinkedIn = ruhig.',

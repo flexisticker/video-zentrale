@@ -185,12 +185,14 @@ function probeFps(file) {
   });
 }
 
-async function renderLong(v, file, keep, hasAudio, out, onP, track) {
-  const total = keep.reduce((s, [a, b]) => s + b - a, 0);
+// teaser = { at, len, text }: Höhepunkt vorweg (aus der Überarbeitung), danach die Langfassung
+async function renderLong(v, file, keep, hasAudio, out, onP, track, teaser = null) {
+  const main = keep.reduce((s, [a, b]) => s + b - a, 0);
+  const total = main + (teaser ? teaser.len : 0);
   const mInput = track ? ['-stream_loop', '-1', '-i', track.file] : [];
   const whole = keep.length === 1 && keep[0][0] === 0;
   // Schnell ohne Neukodieren nur, wenn nichts geschnitten wird oder ausdrücklich gewünscht (setzt an Keyframes an → kann ruckeln)
-  if (whole || cfg().longCopy) {
+  if (!teaser && (whole || cfg().longCopy)) {
     const audio = track ? ['-filter_complex', music.mixGraph({ hasVoice: hasAudio, dur: total, track }), '-map', '[aout]', '-c:a', 'aac', '-b:a', '192k', '-t', total.toFixed(2)]
       : hasAudio ? ['-map', '0:a:0', '-af', LOUDNORM, '-c:a', 'aac', '-b:a', '192k'] : [];
     let args;
@@ -208,16 +210,32 @@ async function renderLong(v, file, keep, hasAudio, out, onP, track) {
   // Bildgenau und flüssig: gleichmäßige Bildrate, behaltene Abschnitte auswählen, Zeitstempel neu, Grafikkarte wenn möglich
   const fps = await probeFps(file);
   const expr = keep.map(([a, b]) => `between(t,${a.toFixed(3)},${b.toFixed(3)})`).join('+');
-  let g = `[0:v]fps=${fps},select='${expr}',setpts=N/(${fps}*TB)[v]`;
-  if (hasAudio) g += `;[0:a:0]aselect='${expr}',asetpts=N/SR/TB[va]`;
+  let g = `[0:v]fps=${fps},select='${expr}',setpts=N/(${fps}*TB)` + (teaser ? ',setsar=1[mv]' : '[v]');
+  if (hasAudio) g += `;[0:a:0]aselect='${expr}',asetpts=N/SR/TB` + (teaser ? ',aformat=sample_rates=48000:channel_layouts=stereo[ma]' : '[va]');
+  const tInput = [];
+  if (teaser) {
+    // Teaser als eigene Eingabe (gleiche Datei, nur die paar Sekunden) → vor die Langfassung setzen
+    const ti = track ? 2 : 1;
+    tInput.push('-ss', teaser.at.toFixed(3), '-t', teaser.len.toFixed(3), '-i', file);
+    g += `;[${ti}:v]fps=${fps},setpts=PTS-STARTPTS,setsar=1[tv]`;
+    if (hasAudio) g += `;[${ti}:a:0]asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo,afade=t=out:st=${Math.max(0, teaser.len - 0.15).toFixed(2)}:d=0.15[ta]`;
+    g += `;[tv]${hasAudio ? '[ta]' : ''}[mv]${hasAudio ? '[ma]' : ''}concat=n=2:v=1:a=${hasAudio ? 1 : 0}[cv0]` + (hasAudio ? '[va]' : '');
+    const hookAss = teaser.text && v.width ? buildHookAss(teaser.text, { until: Math.min(teaser.len, 4), width: v.width, height: v.height }) : '';
+    if (hookAss) {
+      const f = path.join(TMP, v.id + '-teaser.ass');
+      fs.writeFileSync(f, hookAss);
+      g += `;[cv0]ass=${f}:fontsdir=${FONTS}[v]`;
+    } else g += ';[cv0]null[v]';
+  }
   if (track) g += ';' + music.mixGraph({ hasVoice: hasAudio, dur: total, track, voiceIn: 'va' });
-  else if (hasAudio) g += `;[va]${LOUDNORM}[aout]`;
+  else if (hasAudio) g += `;[va]${LOUDNORM},aresample=48000[aout]`;
   const script = path.join(TMP, v.id + '-lang.filter');
   fs.writeFileSync(script, g);
   const audioMap = track || hasAudio ? ['-map', '[aout]', '-c:a', 'aac', '-b:a', '192k'] : [];
-  const r = await gpu.encodeWithFallback((venc) => ffmpeg(['-i', file, ...mInput, '-filter_complex_script', script, '-map', '[v]', ...audioMap, ...venc,
+  const r = await gpu.encodeWithFallback((venc) => ffmpeg(['-i', file, ...mInput, ...tInput, '-filter_complex_script', script, '-map', '[v]', ...audioMap, ...venc,
     '-t', total.toFixed(2), '-movflags', '+faststart', '-progress', 'pipe:1', '-y', out], progressFrom(total, onP)));
   fs.rmSync(script, { force: true });
+  fs.rmSync(path.join(TMP, v.id + '-teaser.ass'), { force: true });
   if (r.code !== 0) throw new Error('Langfassung: ' + lastError(r));
 }
 
@@ -306,7 +324,7 @@ export function setPlan(v, b = {}) {
 }
 
 // Kurzfassung: Stellen hintereinander, neu kodiert (Ton je Stelle kurz ein-/ausgeblendet gegen Knackser)
-async function renderSummary(v, file, reel, hasAudio, out, onP, track) {
+async function renderSummary(v, file, reel, hasAudio, out, onP, track, teaserText = '', teaserLen = 0) {
   const total = reel.reduce((x, r) => x + r.end - r.start, 0);
   let g = '';
   reel.forEach((r, i) => {
@@ -314,13 +332,19 @@ async function renderSummary(v, file, reel, hasAudio, out, onP, track) {
     g += `[0:v]trim=${r.start.toFixed(3)}:${r.end.toFixed(3)},setpts=PTS-STARTPTS[v${i}];`;
     if (hasAudio) g += `[0:a:0]atrim=${r.start.toFixed(3)}:${r.end.toFixed(3)},asetpts=PTS-STARTPTS,afade=t=in:d=0.15,afade=t=out:st=${Math.max(0, d - 0.15)}:d=0.15[a${i}];`;
   });
-  g += reel.map((_, i) => `[v${i}]` + (hasAudio ? `[a${i}]` : '')).join('') + `concat=n=${reel.length}:v=1:a=${hasAudio ? 1 : 0}[cv]` + (hasAudio ? '[ca]' : '');
+  g += reel.map((_, i) => `[v${i}]` + (hasAudio ? `[a${i}]` : '')).join('') + `concat=n=${reel.length}:v=1:a=${hasAudio ? 1 : 0}[cv${teaserText ? '0' : ''}]` + (hasAudio ? '[ca]' : '');
+  const assFile = path.join(TMP, v.id + '-kurz-teaser.ass');
+  if (teaserText) {
+    fs.writeFileSync(assFile, buildHookAss(teaserText, { until: Math.min(4, teaserLen || 4), width: v.width || 1920, height: v.height || 1080 }));
+    g += `;[cv0]ass=${assFile}:fontsdir=${FONTS}[cv]`;
+  }
   let audio = [];
   if (track) { g += ';' + music.mixGraph({ hasVoice: hasAudio, dur: total, voiceIn: 'ca', track }); audio = ['-map', '[aout]', '-c:a', 'aac', '-b:a', '192k']; }
-  else if (hasAudio) { g += `;[ca]${LOUDNORM}[aout]`; audio = ['-map', '[aout]', '-c:a', 'aac', '-b:a', '192k']; }
+  else if (hasAudio) { g += `;[ca]${LOUDNORM},aresample=48000[aout]`; audio = ['-map', '[aout]', '-c:a', 'aac', '-b:a', '192k']; }
   const mInput = track ? ['-stream_loop', '-1', '-i', track.file] : [];
   const r = await gpu.encodeWithFallback((venc) => ffmpeg(['-i', file, ...mInput, '-filter_complex', g, '-map', '[cv]', ...audio, ...venc,
     '-t', total.toFixed(2), '-movflags', '+faststart', '-progress', 'pipe:1', '-y', out], progressFrom(total, onP)));
+  fs.rmSync(assFile, { force: true });
   if (r.code !== 0) throw new Error('Kurzfassung: ' + lastError(r));
 }
 
@@ -446,7 +470,7 @@ async function runCut(v) {
     }
     const removed = Math.round(cut.reduce((s, [a, b]) => s + b - a, 0));
     const nv = publish(tmp, `${base} – Langfassung.mp4`, {
-      source: { rawId: v.id, rawFile: v.file, kind: 'long', removed },
+      source: { rawId: v.id, rawFile: v.file, kind: 'long', removed, keep: keep.map(([a, b]) => [Math.round(a * 10) / 10, Math.round(b * 10) / 10]) },
       note: sourceNote() + (removed ? ` ${whisper.fmtTime(removed)} ruhige Abschnitte entfernt.` : '') + music.noteOf(track),
       music: track ? { kind: track.kind, name: track.name, mood: track.mood || '' } : null,
       transcriptText: segs ? whisper.textOf(segs).slice(0, 20000) : '',
@@ -555,8 +579,63 @@ let afterRun = null;
 export function onDone(fn) { afterRun = fn; }
 
 // ---------- Überarbeiten (ein Short wird nach Wunsch aus dem Rohvideo neu geschnitten) ----------
+// Versionsnummer v2, v3 … bezogen auf die erste Fassung
+function nextVersionName(out) {
+  const rootId = out.revisionRoot || out.id;
+  const root = db().videos[rootId] || out;
+  root.revCount = (root.revCount || 1) + 1;
+  const stem = path.basename(out.file, path.extname(out.file)).replace(/ v\d+$/, '');
+  return { rootId, n: root.revCount, name: `${stem} v${root.revCount}.mp4` };
+}
+
+// Lang-/Kurzfassung nach Wunsch neu schneiden (Abschnitte, Teaser, Tempo, Musik)
+async function reviseLongVersion(out, raw, wish, words, segs, profile, step) {
+  const file = lib.fileOf(raw);
+  const summary = out.source.kind === 'summary';
+  step('Lautstärke messen');
+  const { values: loud, fine, hasAudio } = await loudness(file, raw.duration);
+  step('Claude plant die neue Fassung');
+  const r = await ai.reviseLong(raw, out, wish, segs, hasAudio ? loud : null, profile);
+  // Tempo innerhalb der Abschnitte
+  let keep = [];
+  for (const [a, b] of r.segments) keep.push(...(r.tempo !== 'aus' && hasAudio ? fx.tempoKeep(words, fine, a, b, r.tempo) : [[a, b]]));
+  keep = keep.filter(([a, b]) => b - a >= 0.2);
+  const main = keep.reduce((x, [a, b]) => x + b - a, 0);
+  const seconds = main + (r.teaser ? r.teaser.len : 0);
+  let track = null;
+  if (r.music && profile?.music !== false && db().music?.enabled !== false) {
+    step('Musik wählen');
+    try { track = await music.trackFor({ profile, kind: 'long', seconds, idea: {} }); } catch (e) { out.revise.warning = 'Musik: ' + e.message; }
+  }
+  const tmp = path.join(TMP, `${raw.id}-rev-${out.id}.mp4`);
+  const label = summary ? 'Kurzfassung neu schneiden' : 'Langfassung neu schneiden';
+  const onP = (p) => step(label, p);
+  step(label);
+  const render = async (t) => {
+    if (summary) {
+      const reel = [...(r.teaser ? [{ start: r.teaser.at, end: r.teaser.at + r.teaser.len }] : []), ...keep.map(([a, b]) => ({ start: a, end: b }))];
+      await renderSummary(raw, file, reel, hasAudio, tmp, onP, t, r.teaser?.text || '', r.teaser?.len || 0);
+    } else await renderLong(raw, file, keep, hasAudio, tmp, onP, t, r.teaser);
+  };
+  try { await render(track); } catch (e) { if (!track) throw e; track = null; await render(null); }
+  const { rootId, n, name } = nextVersionName(out);
+  const how = [r.teaser ? `Teaser ${String(r.teaser.len).replace('.', ',')} s vorweg${r.teaser.text ? ` „${r.teaser.text}“` : ''}` : '',
+    `${r.segments.length} Abschnitt${r.segments.length === 1 ? '' : 'e'}, neue Länge ${whisper.fmtTime(seconds)}${out.duration ? ` (vorher ${whisper.fmtTime(out.duration)})` : ''}`,
+    r.tempo !== 'aus' ? `Tempo ${r.tempo}` : ''].filter(Boolean).join(' · ');
+  const nv = publish(tmp, name, {
+    source: { ...out.source, ...(summary ? { parts: keep } : { keep }), teaser: r.teaser, tempo: r.tempo },
+    edit: { teaser: r.teaser, tempo: r.tempo, parts: keep.length, how },
+    title: r.title || out.title, description: out.description, tags: out.tags, category: out.category, viral: out.viral,
+    revisionOf: out.id, revisionRoot: rootId, revisionWish: wish, revisionChanges: r.changes,
+    note: `Überarbeitung (v${n}) von „${out.file}“. Wunsch: ${wish}. Claude: ${r.changes} ${how}.` + music.noteOf(track),
+    music: track ? { kind: track.kind, name: track.name, mood: track.mood || '' } : null,
+    transcriptText: segs ? r.segments.map(([a, b]) => whisper.textOf(segs, a, b)).join(' … ').slice(0, 20000) : '',
+  }, { channel: out.channel || profile?.id, channelFrom: out.channelFrom || 'überarbeitung' });
+  out.revise = { ...out.revise, state: 'done', step: '', progress: 100, doneAt: new Date().toISOString(), newId: nv.id, newFile: nv.file };
+  saveNow();
+}
 export function revisable(out) {
-  if (out?.source?.kind !== 'short') return 'Überarbeiten geht bei Shorts und Clips aus dem automatischen Schnitt.';
+  if (!['short', 'long', 'summary'].includes(out?.source?.kind)) return 'Überarbeiten geht bei Videos aus dem automatischen Schnitt (Shorts, Lang- und Kurzfassung).';
   const raw = db().videos[out.source.rawId];
   if (!raw || raw.missing) return 'Das Rohvideo ist nicht mehr da – ohne Rohvideo kann nicht neu geschnitten werden.';
   if (!db().ai.apiKey) return 'Für die Überarbeitung braucht es den Claude-Schlüssel (Einstellungen).';
@@ -592,6 +671,7 @@ async function runRevision({ revise: outId, wish }) {
     const segs = words ? whisper.sentences(words) : null;
     const profile = profiles.effective(out);
     const pro = profiles.isPro(profile);
+    if (out.source.kind !== 'short') return await reviseLongVersion(out, raw, wish, words, segs, profile, step);
     step('Claude plant die neue Fassung');
     const r = await ai.reviseShort(raw, out, wish, segs, profile, { minLen: Math.min(c.shortMin || 30, 15), maxLen: Math.max(c.shortMax || 45, 60) });
     step('Lautstärke messen');
@@ -613,18 +693,15 @@ async function runRevision({ revise: outId, wish }) {
     try { await renderShort(raw, file, s, hasAudio, tmp, onP, words, track, pro); }
     catch (e) { if (!track) throw e; track = null; await renderShort(raw, file, s, hasAudio, tmp, onP, words, null, pro); }
     // Versionsnummer: v2, v3 … bezogen auf die erste Fassung
-    const rootId = out.revisionRoot || out.id;
-    const root = db().videos[rootId] || out;
-    root.revCount = (root.revCount || 1) + 1;
-    const stem = path.basename(out.file, path.extname(out.file)).replace(/ v\d+$/, '');
+    const { rootId, n, name } = nextVersionName(out);
     const how = fx.describe(s.hook, r.tempo, s.parts, s.start, s.end);
-    const nv = publish(tmp, `${stem} v${root.revCount}.mp4`, {
+    const nv = publish(tmp, name, {
       source: { ...out.source, start: s.start, end: s.end, hook: s.hook || null, tempo: r.tempo },
       edit: { hook: s.hook || null, tempo: r.tempo, parts: s.parts.length, how },
       title: r.title || out.title, description: out.description, tags: out.tags, category: out.category,
       viral: r.viral ? { score: r.viral, why: r.viralWhy, tip: r.viralTip, by: 'Überarbeitung' } : out.viral,
       revisionOf: out.id, revisionRoot: rootId, revisionWish: wish, revisionChanges: r.changes,
-      note: `Überarbeitung (v${root.revCount}) von „${out.file}“. Wunsch: ${wish}. Claude: ${r.changes}` + (how ? ' ' + how + '.' : '') + music.noteOf(track),
+      note: `Überarbeitung (v${n}) von „${out.file}“. Wunsch: ${wish}. Claude: ${r.changes}` + (how ? ' ' + how + '.' : '') + music.noteOf(track),
       music: track ? { kind: track.kind, name: track.name, mood: track.mood || '' } : null,
       transcriptText: segs ? whisper.textOf(segs, s.start, s.end) : '',
     }, { channel: out.channel || profile?.id, channelFrom: out.channelFrom || 'überarbeitung' });

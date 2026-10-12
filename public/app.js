@@ -1128,6 +1128,8 @@ async function uploadChunked(file, folder, bar, label, item) {
 // ---------- Schnitt-Infos + Überarbeiten (Shorts) ----------
 const REVISE_CHIPS = ['Hook stärker – mit dem Höhepunkt einsteigen', 'Kürzer und schneller', 'Länger, mehr Vorgeschichte', 'Anderes Ende – nach der Pointe aufhören',
   'Ohne Musik', 'Andere Stelle aus dem Video nehmen', 'Weniger Schnitte, ruhiger'];
+const REVISE_CHIPS_LONG = ['Intro raus (Lobby, Ladebildschirm, Menü, Warten)', 'Langweilige Stellen raus', 'Nur die besten Stellen – deutlich kürzer',
+  'Teaser mit dem Höhepunkt am Anfang', 'Weniger Pausen (schneller)', 'Outro/Ende kürzen', 'Ohne Musik', 'Mit Musik'];
 function renderRevise(box, v) {
   const act = (fn, msg) => async () => { try { if ((await fn()) !== false && msg) toast(msg); } catch (x) { toast(x.message, true); } };
   const kids = [];
@@ -1159,11 +1161,17 @@ function renderRevise(box, v) {
         sec.append(h('p', { class: 'ok-text' }, '✓ Neue Fassung fertig: ', h('a', { href: '#video/' + v.revise.newId }, v.revise.newFile || 'öffnen')));
       }
       if (st === 'error') sec.append(h('p', { class: 'err' }, '✗ ' + v.revise.error));
-      const wish = h('textarea', { rows: 2, maxlength: 500, placeholder: 'Was soll anders werden? z. B. „Fang mit dem Sniper-Kill an und lass das Gelaber am Ende weg“' });
-      const chips = h('div', { class: 'chips' }, REVISE_CHIPS.map((c) => h('button', { class: 'chip-btn', onclick: () => {
-        wish.value = wish.value.trim() ? wish.value.trim().replace(/[.;,]?$/, '; ') + c : c; wish.focus(); } }, c)));
-      sec.append(h('p', { class: 'hint' }, 'Claude schneidet den Clip aus dem Rohvideo neu. Die neue Fassung erscheint daneben als „v2“ – du entscheidest, welche bleibt.'),
+      const isShort = v.source?.kind === 'short';
+      const wish = h('textarea', { rows: 2, maxlength: 500, placeholder: isShort ? 'Was soll anders werden? z. B. „Fang mit dem Sniper-Kill an und lass das Gelaber am Ende weg“'
+        : 'Was soll anders werden? z. B. „Intro raus, nur die besten 10 Minuten, mit Teaser vorne“' });
+      const add = (c) => { wish.value = wish.value.trim() ? wish.value.trim().replace(/[.;,]?$/, '; ') + c : c; wish.focus(); };
+      const chips = h('div', { class: 'chips' }, (isShort ? REVISE_CHIPS : REVISE_CHIPS_LONG).map((c) => h('button', { class: 'chip-btn', onclick: () => add(c) }, c)));
+      const target = isShort ? null : h('input', { type: 'number', min: 1, max: 120, placeholder: 'z. B. 10', style: { width: '90px' } });
+      sec.append(h('p', { class: 'hint' }, (isShort ? 'Claude schneidet den Clip aus dem Rohvideo neu.' : 'Claude sieht sich die ganze Aufnahme an und schneidet die Fassung aus dem Rohvideo neu.')
+          + ' Die neue Fassung erscheint daneben als „v2“ – du entscheidest, welche bleibt.'),
         chips, wish,
+        target ? h('div', { class: 'row', style: { marginTop: '6px', alignItems: 'center' } }, h('span', { class: 'hint' }, 'Ziellänge (Minuten, optional):'), target,
+          h('button', { class: 'chip-btn', onclick: () => target.value && add(`Ziellänge ca. ${target.value} Minuten`) }, 'übernehmen')) : null,
         h('div', { class: 'row', style: { marginTop: '8px' } }, h('button', { class: 'btn primary', onclick: act(async () => {
           if (wish.value.trim().length < 3) throw new Error('Bitte kurz beschreiben, was anders werden soll.');
           Object.assign(v, await api('POST', `/api/videos/${v.id}/revise`, { wish: wish.value.trim() }));

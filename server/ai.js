@@ -615,3 +615,96 @@ export async function reviseShort(raw, out, wish, segs, profile, { minLen = 15, 
     tempo: fx.TEMPO[o.tempo] !== undefined ? o.tempo : 'normal', music: !!o.music, changes: String(o.changes || '').slice(0, 500),
     viral: Math.max(1, Math.min(10, Math.round(Number(o.viral) || 0))) || undefined, viralWhy: String(o.viralWhy || '').slice(0, 300), viralTip: String(o.viralTip || '').slice(0, 300) };
 }
+
+// Überarbeitung einer Langfassung oder Kurzfassung: Claude bekommt das ganze Video als Transkript in Zeitblöcken,
+// die lautesten Stellen und Standbilder und legt fest, welche Abschnitte bleiben (+ optional Teaser vorweg).
+export async function reviseLong(raw, out, wish, segs, loud, profile) {
+  fs.mkdirSync(FRAME_DIR, { recursive: true });
+  const pro = profiles.isPro(profile);
+  const src = out.source, dur = raw.duration || 0;
+  const summary = src.kind === 'summary';
+  const t = (x) => whisper.fmtTime(x);
+  // Gesprochenes in ~20-s-Blöcken (spart Platz bei langen Aufnahmen)
+  const blocks = [];
+  for (const x of segs || []) {
+    const last = blocks[blocks.length - 1];
+    if (last && x.s - last.s < 20) { last.e = x.e; last.t += ' ' + x.t; } else blocks.push({ s: x.s, e: x.e, t: x.t });
+  }
+  let said = blocks.map((b) => `[${Math.floor(b.s)}–${Math.ceil(b.e)}] ${b.t}`).join('\n');
+  if (said.length > 120000) said = said.slice(0, 120000) + '\n[… gekürzt]';
+  // lauteste 5-s-Fenster als Hinweise auf Action
+  const peaks = [];
+  if (loud?.length) {
+    const win = [];
+    for (let i = 0; i + 5 <= loud.length; i += 5) win.push([i, loud.slice(i, i + 5).reduce((a, b) => a + b, 0) / 5]);
+    for (const [i, val] of win.sort((a, b) => b[1] - a[1]).slice(0, 25).sort((a, b) => a[0] - b[0])) peaks.push(`${i}–${i + 5} s (${val.toFixed(0)} LUFS)`);
+  }
+  const cur = summary ? (src.parts || []).map(([a, b]) => `${Math.round(a)}–${Math.round(b)}`).join(', ')
+    : src.keep?.length ? `${src.keep.length} Abschnitte, ${t(src.keep.reduce((x, [a, b]) => x + b - a, 0))} lang (ruhige Pausen entfernt)`
+    : `ganze Aufnahme ohne ruhige Abschnitte${src.removed ? ` (${t(src.removed)} entfernt)` : ''}`;
+  const content = [{ type: 'text', text: [
+    pro ? 'Du überarbeitest ein professionelles LinkedIn-Video (Inhaber eines Druck- und 3D-Druck-Betriebs, als Person).'
+      : `Du überarbeitest eine ${summary ? 'Kurzfassung (Best-of)' : 'Langfassung'} für YouTube von einem deutschen Creator. Ziel: Zuschauer halten (Watchtime), kein Leerlauf.`,
+    `WUNSCH DES CREATORS: „${wish}“ – setze das konsequent um.`,
+    `Rohaufnahme „${raw.file}“, Länge ${t(dur)} (${Math.round(dur)} s). Bisherige Fassung: ${cur}; Titel „${out.title || ''}“, Musik: ${out.music ? 'ja' : 'nein'}.`,
+    'Gib die Abschnitte an, die im neuen Video bleiben (Sekunden ab Anfang der Rohaufnahme, zeitlich sortiert, ohne Überschneidung, je mind. 3 s).',
+    'Schneide sauber an Satzgrenzen. Typisch rauszuschneiden: Intro/Lobby/Ladebildschirm/Menü/Warten am Anfang, Leerlauf, Wiederholungen, Outro-Gelaber.',
+    'Teaser (optional, sehr wirksam auf YouTube): ein 3–8 s langer Höhepunkt, der ganz vorne läuft, bevor das Video normal beginnt; dazu ein kurzer Text (max. 5 Wörter).',
+    'Tempo innerhalb der Abschnitte: aus = nichts, ruhig = nur lange Pausen, normal = Pausen + „ähm“, schnell = auch kurze Pausen.',
+    profile?.clipHints ? `Worauf der Creator bei diesem Kanal Wert legt: ${profile.clipHints}` : '',
+    peaks.length ? 'Lauteste Stellen (oft Action/Reaktion): ' + peaks.join(', ') : '',
+    said ? 'Gesprochenes (Sekunden ab Anfang, automatisch erkannt):\n' + said : 'Kein gesprochener Text verfügbar – orientiere dich an Lautstärke und Standbildern.',
+    '', 'Standbilder (Sekunde steht davor):',
+  ].filter(Boolean).join('\n') }];
+  const n = Math.min(10, Math.max(4, Math.round(dur / 120)));
+  for (let i = 0; i < n; i++) {
+    const at = Math.round(dur * (i + 0.5) / n);
+    const file = path.join(FRAME_DIR, `${raw.id}-l${at}.jpg`);
+    const ok = await ffmpeg(['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(at), '-i', fileOf(raw),
+      '-vf', "scale='if(gt(iw,ih),min(512,iw),-2)':'if(gt(iw,ih),-2,min(512,ih))'", '-frames:v', '1', '-q:v', '6', file]);
+    content.push({ type: 'text', text: `Sekunde ${at}:` });
+    if (ok && fs.existsSync(file)) {
+      content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: fs.readFileSync(file).toString('base64') } });
+      fs.rmSync(file, { force: true });
+    }
+  }
+  const schema = { type: 'object', additionalProperties: false,
+    required: ['segments', 'teaser', 'tempo', 'music', 'title', 'changes'], properties: {
+      segments: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['start', 'end'],
+        properties: { start: { type: 'number' }, end: { type: 'number' } } } },
+      teaser: { type: 'object', additionalProperties: false, required: ['use', 'at', 'len', 'text'], properties: {
+        use: { type: 'boolean' }, at: { type: 'number', description: 'Start des Höhepunkts (Sekunde)' },
+        len: { type: 'number', description: '3–8 Sekunden' }, text: { type: 'string', description: 'höchstens 5 Wörter, leer wenn unpassend' } } },
+      tempo: { type: 'string', enum: ['aus', 'ruhig', 'normal', 'schnell'] },
+      music: { type: 'boolean' },
+      title: { type: 'string', description: 'Titel (höchstens 100 Zeichen)' },
+      changes: { type: 'string', description: 'Ein bis zwei Sätze auf Deutsch (Du-Form an den Creator): was du geändert hast und warum, mit neuer Länge' },
+    } };
+  let r;
+  try {
+    r = await api().beta.messages.create({
+      model: MODEL, max_tokens: 16000,
+      betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
+      output_config: { effort: 'medium', format: { type: 'json_schema', schema } },
+      messages: [{ role: 'user', content }],
+    });
+  } catch (e) { throw new Error(friendly(e)); }
+  if (r.stop_reason === 'refusal') throw new Error('abgelehnt');
+  const o = JSON.parse(r.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
+  const cost = (r.usage?.input_tokens || 0) * PRICE.input + (r.usage?.output_tokens || 0) * PRICE.output;
+  const a = cfg(); a.spent = Math.round(((a.spent || 0) + cost) * 10000) / 10000; a.count = (a.count || 0) + 1; save();
+  // Abschnitte prüfen: in der Aufnahme, sortiert, zusammengeführt, mind. 3 s
+  const segsOut = [];
+  for (const x of (o.segments || []).map((x) => [Math.max(0, Number(x.start)), Math.min(dur, Number(x.end))])
+    .filter(([s, e]) => Number.isFinite(s) && Number.isFinite(e) && e - s >= 3).sort((p, q) => p[0] - q[0])) {
+    const last = segsOut[segsOut.length - 1];
+    if (last && x[0] <= last[1] + 0.5) last[1] = Math.max(last[1], x[1]); else segsOut.push(x);
+  }
+  if (!segsOut.length) throw new Error('Claude hat keine brauchbaren Abschnitte geliefert.');
+  const tz = o.teaser;
+  const teaser = tz?.use && Number.isFinite(Number(tz.at)) && !pro
+    ? { at: Math.max(0, Math.min(dur - 3, Number(tz.at))), len: Math.max(3, Math.min(8, Number(tz.len) || 5)), text: String(tz.text || '').slice(0, 60) } : null;
+  return { segments: segsOut.map(([s, e]) => [Math.round(s * 10) / 10, Math.round(e * 10) / 10]), teaser,
+    tempo: fx.TEMPO[o.tempo] !== undefined ? o.tempo : 'aus', music: !!o.music, title: String(o.title || out.title || '').slice(0, 100),
+    changes: String(o.changes || '').slice(0, 600) };
+}
