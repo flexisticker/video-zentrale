@@ -21,6 +21,7 @@ import * as ver from './version.js';
 import * as backup from './backup.js';
 import * as helper from './helper.js';
 import * as sfx from './sfx.js';
+import * as credits from './credits.js';
 import * as ai2 from './ai.js';
 
 const PORT = Number(process.env.PORT || 8090);
@@ -34,6 +35,7 @@ jobs.init();
 youtube.init();
 ai.init();
 ai.afterSuggest((v) => autocut.autoApplyTips(v));
+credits.init();
 autocut.init();
 ver.init();
 backup.init();
@@ -294,7 +296,7 @@ async function api(req, res, url) {
     const byId = Object.fromEntries(vids.map((v) => [v.id, v]));
     const helperJobs = hp.open.map((j) => ({ name: name(byId[j.label]), id: j.label || '', state: j.state,
       since: j.takenAt || j.createdAt || 0, step: j.state === 'taken' ? 'Spracherkennung' : 'wartet auf Abholung' }));
-    return send(res, 200, { server, queue, helper: { enabled: hp.enabled, online: hp.online, seen: hp.seen, paused: hp.paused,
+    return send(res, 200, { server, queue, credits: credits.status().warnings, helper: { enabled: hp.enabled, online: hp.online, seen: hp.seen, paused: hp.paused,
       name: hp.name, status: hp.status, jobs: helperJobs }, now: Date.now() });
   }
 
@@ -663,6 +665,11 @@ async function api(req, res, url) {
   if (p === '/api/version' && m === 'GET') return send(res, 200, ver.info());
   if (p === '/api/version/check' && m === 'POST') { await ver.checkUpdate(true); return send(res, 200, ver.info()); }
   if (p === '/api/music/config' && m === 'POST') { music.configure(await readJson(req)); return send(res, 200, music.status()); }
+  // Guthaben der KI-Dienste (Warnung oben, Einstellungen → Guthaben)
+  if (p === '/api/credits' && m === 'GET') return send(res, 200, credits.status());
+  if (p === '/api/credits' && m === 'POST') return send(res, 200, credits.configure(await readJson(req)));
+  if (p === '/api/credits/check' && m === 'POST') { await credits.checkFal(); return send(res, 200, credits.status()); }
+  if (p === '/api/credits/dismiss' && m === 'POST') { const b = await readJson(req); if (credits.PROVIDERS[b.provider]) credits.clear(b.provider); return send(res, 200, credits.status()); }
   // Soundeffekte: Baukasten-Status, alles erzeugen, Vorhören
   if (p === '/api/sfx' && m === 'GET') return send(res, 200, { ...sfx.status(), building: sfx.isBuilding() });
   if (p === '/api/sfx/build' && m === 'POST') {

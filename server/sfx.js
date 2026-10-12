@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
+import * as credits from './credits.js';
 import { db, saveNow } from './store.js';
 import * as lib from './library.js';
 
@@ -93,8 +94,7 @@ async function generate(prompt, seconds, file) {
     body: JSON.stringify({ prompt, duration, audio_format: 'aac' }),
   });
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401 || r.status === 403) throw new Error('fal.ai-Schlüssel ungültig.');
-  if (r.status === 402 || /balance|credit|insufficient/i.test(JSON.stringify(j))) throw new Error('fal.ai: kein Guthaben mehr.');
+  { const fe = credits.falError(r.status, j); if (fe) throw new Error(fe); }
   const url = j.audio?.url || j.audios?.[0]?.url;
   if (!r.ok || !url) throw new Error('fal.ai-Sound: ' + (j.detail?.[0]?.msg || j.detail || j.error || r.status));
   const a = await fetch(url);

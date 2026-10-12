@@ -315,3 +315,12 @@ input[type=range] { width: 100%; accent-color: #7c5cff; }
 .chip.ver { background: #4caf7a; color: #08130c; font-weight: 700; }
 .sfx-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .chip-btn.off { opacity: .45; }
+
+/* Guthaben */
+.act-warn { flex: 1 1 100%; padding: 6px 10px; border-radius: 10px; font-weight: 600; }
+.act-warn.warn { background: rgba(242, 179, 61, .15); border: 1px solid #f2b33d; }
+.act-warn.bad { background: rgba(230, 70, 70, .15); border: 1px solid #e64646; }
+.act-warn a { color: inherit; text-decoration: underline; }
+.cr-row { border-top: 1px solid var(--line); padding: 10px 0; }
+.cr-row.low b { color: #f2b33d; }
+.cr-row p { margin: 4px 0; }

@@ -1,5 +1,10 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.22.0', date: '12.10.2026', items: [
+    '💳 Guthaben-Warnung: Oben erscheint ein Hinweis, wenn das Guthaben von fal.ai (Bilder, Musik, Sounds) oder Claude knapp wird oder ein Dienst „kein Guthaben“ meldet – mit Link zum Aufladen.',
+    'fal.ai: echtes Guthaben über einen zusätzlichen Nur-Lese-Schlüssel (alle 6 Stunden abgefragt). Claude: Stand nach dem Aufladen eintragen, die Zentrale zieht ihren Verbrauch ab. Schwellen einstellbar unter Einstellungen → Guthaben.',
+    'Fehler behoben: Ein gesperrtes fal.ai-Konto (Guthaben leer) wurde als „Schlüssel ungültig“ gemeldet.',
+  ] },
   { version: '1.21.0', date: '12.10.2026', items: [
     '🎉 Effekte in Shorts: Claude ist jetzt Effekt-Regisseur – animierte Emojis 😱😂🔥, Soundeffekte, Blitz, Wackeln, Zoom-Punch, Freeze mit Text („WARTE …“), Zeitlupen-Wiederholung und KI-Comic-Sticker aus deinen Fotos. Jeder Effekt sitzt auf einem echten Moment, nicht überladen.',
     '⏪ Zurückspulen im VHS-Look mit Band-Sound, Hook-Vorschau startet mit Bass-Boom.',

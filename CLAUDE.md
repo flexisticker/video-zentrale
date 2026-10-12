@@ -207,6 +207,12 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   UI: Kanal-Felder, Kasten „🔊 Soundeffekte“ (Vorhören, Baukasten erzeugen), Chips Mehr/Weniger/Ohne Effekte, **v2-Abzeichen** in der Liste (`hasNewer`).
   Getestet (Mock): Short mit Emoji, Freeze, Zeitlupe, Wackeln, Blitz, Sticker, 7 Sounds (inkl. Sonder-Sound). **Nicht getestet:** echte Sonilo-Sounds/
   Lautstärke-Balance mit echter Stimme, echte Sticker aus Kundenfotos, NVENC mit vielen Eingaben.
+- 1.22.0: **Guthaben-Warnung** (`server/credits.js`, `db().credits {fal, claude: {topup, at, spentAt, warnBelow}, alerts, live, falReadKey}`).
+  fal: `GET https://api.fal.ai/v1/account/billing?expand=credits` (Recht billing:usage:read → eigener Nur-Lese-Schlüssel `falReadKey`, normaler Schlüssel
+  darf meist nicht; Feld defensiv `credits.current_balance|balance|…`, nur gegen Mock getestet), alle 6 h + Knopf. Claude: keine Abfrage möglich → Schätzung
+  `topup − (ai.spent − spentAt)`. Fehler: `credits.falError(status, body)` in allen fal-Aufrufen (402/403 „Exhausted balance/locked“ → Warnung statt
+  „Schlüssel ungültig“), `ai.friendly` flaggt Anthropic „credit balance“. Warnungen über `/api/activity` (`credits`) → `.act-warn` in der Leiste oben.
+  Routen `/api/credits` GET/POST, `/check`, `/dismiss`. Einstellungen → „💳 Guthaben“.
 - Beim Kunden (11.10.2026): Rechenhelfer auf dem PC (RTX 3070) eingerichtet und **online**. Echte CUDA-Spracherkennung noch nicht bestätigt.
 - Achtung `.dockerignore`: `tools` ist ausgeschlossen, nur `!tools/rechenhelfer` erlaubt (1.14.0/1.15.0-Bau schlug deshalb fehl). Neue Ordner,
   die ins Image sollen, dort freigeben.
@@ -219,6 +225,7 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   „Add products“ (Login Kit mit Redirect URI unter Web, Content Posting API), Target Users michamodus + 3dbymicha.
   **Beide Plattformen verbunden.** App-Icon `docs/app-icon-1024.png`. Demo-Video aus der Sandbox am 11.10.2026 vom Kunden aufgenommen, Einreichung der Prüfung läuft.
   Nach Freigabe: Production-Client-Key/Secret (anders als Sandbox!) in der Zentrale eintragen, Kanäle neu verbinden.
+- **Offen – Organisation (Kunde 12.10.: „fertige Videos organisieren, Rohvideos sauber ablegen, am besten durch KI“):** Plan erklärt, wartet auf „leg los“.
 - **Offen – Paket 4 Zusammenstellung (angeboten, Kunde will es):** „Best of“ aus mehreren Videos (Zeitraum/Auswahl, 16:9 oder 9:16, Claude
   ordnet Highlights, Platz-Einblendungen), später automatisch wöchentlich. Nach 1.18.0 als eigenes Paket bauen.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,

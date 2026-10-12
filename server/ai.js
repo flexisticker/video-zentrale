@@ -11,6 +11,7 @@ import * as whisper from './whisper.js';
 import * as thumbs from './thumbs.js';
 import * as fx from './cutfx.js';
 import * as sfx from './sfx.js';
+import * as credits from './credits.js';
 
 const MODEL = 'claude-opus-5-5';
 const FRAMES = [0.08, 0.25, 0.42, 0.58, 0.75, 0.92];
@@ -202,7 +203,8 @@ function friendly(e) {
   if (e instanceof Anthropic.AuthenticationError) return 'Claude-API-Schlüssel ungültig – unter Einstellungen → Claude prüfen.';
   if (e instanceof Anthropic.PermissionDeniedError) return 'Der API-Schlüssel darf dieses Modell nicht nutzen.';
   if (e instanceof Anthropic.RateLimitError) return 'Claude ist gerade ausgelastet bzw. Limit erreicht – später erneut versuchen.';
-  if (e instanceof Anthropic.BadRequestError) return /credit|balance/i.test(e.message) ? 'Kein Guthaben mehr im Anthropic-Konto (console.anthropic.com → Billing).' : 'Claude lehnt die Anfrage ab: ' + e.message;
+  if (e instanceof Anthropic.BadRequestError && /credit|balance/i.test(e.message)) { credits.flag('claude', 'Claude: Guthaben im Anthropic-Konto aufgebraucht.'); return 'Kein Guthaben mehr im Anthropic-Konto (console.anthropic.com → Billing).'; }
+  if (e instanceof Anthropic.BadRequestError) return 'Claude lehnt die Anfrage ab: ' + e.message;
   if (e instanceof Anthropic.APIConnectionError) return 'Keine Verbindung zu Claude (Internet/Firewall des Servers?).';
   if (e instanceof Anthropic.APIError) return `Claude-Fehler ${e.status}: ${e.message}`;
   return e.message;

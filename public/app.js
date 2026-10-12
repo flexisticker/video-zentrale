@@ -1251,7 +1251,12 @@ function drawActivity() {
       jobs.length ? jobs.map((j) => h('span', open(j.id), `🎙 ${j.step} · „${j.name || 'Video'}“ · seit ${mmss(a.now - j.since)}`))
         : h('span', { class: 'act-item muted' }, state));
   }
-  actEl.replaceChildren(srv, hpBox || '');
+  // Guthaben-Warnungen (fal.ai / Claude)
+  const warns = (a.credits || []).map((w) => h('div', { class: 'act-warn ' + w.level }, '💳 ' + w.text + ' ',
+    h('a', { href: w.url, target: '_blank', rel: 'noopener' }, 'aufladen'), ' · ',
+    h('a', { href: '#einstellungen', onclick: () => setTimeout(() => document.getElementById('s-guthaben')?.scrollIntoView({ block: 'start' }), 600) }, 'Einstellungen'),
+    w.level === 'bad' ? h('button', { class: 'chip-btn', onclick: async () => { await api('POST', '/api/credits/dismiss', { provider: w.provider }).catch(() => {}); pollActivity(); } }, 'erledigt') : null));
+  actEl.replaceChildren(...warns, srv, hpBox || '');
   actEl.hidden = false;
 }
 
@@ -1714,6 +1719,37 @@ async function renderSettings() {
       ' · ', h('a', { href: '#', onclick: (e) => { e.preventDefault(); showChangelog(); } }, 'Was ist neu'),
       ' · ', h('a', { href: '#', onclick: async (e) => { e.preventDefault(); S.version = await api('POST', '/api/version/check'); toast(S.version.updateAvailable ? `Update ${S.version.latest.version} verfügbar – in Unraid „Check for Updates“ → „apply update“.` : S.version.latest.error ? 'Prüfung ging nicht: ' + S.version.latest.error : 'Du hast die neueste Version.', !!S.version.latest.error); render(); } }, 'Nach Updates suchen')));
 
+  const cr = await api('GET', '/api/credits').catch(() => null);
+  const crRow = (p) => {
+    const x = cr[p];
+    const top = h('input', { type: 'number', min: 0, step: '0.01', placeholder: 'z. B. 25', style: { width: '110px' } });
+    const warn = h('input', { type: 'number', min: 0, step: '0.5', value: x.warnBelow, style: { width: '90px' } });
+    const money = (n) => n == null ? '–' : n.toFixed(2).replace('.', ',') + ' $';
+    return h('div', { class: 'cr-row' + (x.low || x.alert ? ' low' : '') },
+      h('b', {}, x.name),
+      x.alert ? h('p', { class: 'err' }, '⚠ ' + x.alert.msg + ' (' + fmtDate(x.alert.at) + ')') : null,
+      h('p', {}, x.live?.balance != null ? `Guthaben laut ${p === 'fal' ? 'fal.ai' : 'Anbieter'}: ${money(x.live.balance)} (abgefragt ${fmtDate(x.live.at)})`
+        : x.estimate != null ? `Geschätzt noch ${money(x.estimate)} (aufgeladen ${money(x.topup)} am ${fmtDate(x.at)}, seitdem verbraucht ${money(x.topup - x.estimate)})`
+        : 'Noch keine Aufladung eingetragen – trag ein, wie viel Guthaben gerade drauf ist, dann rechnet die Zentrale mit.',
+        h('span', { class: 'hint' }, ` · insgesamt von der Zentrale verbraucht: ${money(x.used)}`)),
+      x.live?.error ? h('p', { class: 'hint' }, 'Abfrage: ' + x.live.error) : null,
+      h('div', { class: 'row', style: { alignItems: 'center', flexWrap: 'wrap' } },
+        h('span', { class: 'hint' }, 'Aktuelles Guthaben ($):'), top,
+        h('span', { class: 'hint' }, 'warnen unter ($):'), warn,
+        h('button', { class: 'btn small', onclick: run(() => api('POST', '/api/credits', { [p]: { topup: top.value === '' ? undefined : Number(top.value), warnBelow: Number(warn.value) } }), 'Gespeichert.') }, 'Speichern'),
+        p === 'fal' ? h('button', { class: 'btn small ghost', onclick: run(() => api('POST', '/api/credits/check'), 'Abgefragt.') }, 'Jetzt abfragen') : null,
+        h('a', { class: 'btn small ghost', href: x.url, target: '_blank', rel: 'noopener' }, 'Zum Aufladen ↗')));
+  };
+  const creditBox = h('div', { class: 'box' }, h('h3', {}, '💳 Guthaben der KI-Dienste'),
+    h('p', { class: 'hint' }, 'Oben erscheint eine Warnung, sobald ein Guthaben unter die Schwelle fällt oder ein Dienst „kein Guthaben“ meldet. '
+      + 'fal.ai kann das echte Guthaben liefern: dafür bei fal.ai unter API-Keys einen zusätzlichen Schlüssel mit „Read only“ anlegen und unten eintragen (er darf nur lesen, nichts erzeugen). '
+      + 'Bei Claude gibt es keine Abfrage – trag nach dem Aufladen den Stand ein, dann zieht die Zentrale ihren Verbrauch ab (Schätzung, andere Nutzung desselben Kontos zählt nicht mit).'),
+    cr ? crRow('fal') : null,
+    cr ? (() => { const k = h('input', { type: 'password', autocomplete: 'off', placeholder: cr.falReadKey ? '•••••• gespeichert' : 'optional: fal.ai-Schlüssel mit „Read only“' });
+      return h('div', { class: 'row', style: { alignItems: 'center', flexWrap: 'wrap', marginBottom: '6px' } }, h('span', { class: 'hint' }, 'Nur-Lese-Schlüssel fürs Guthaben:'), k,
+        h('button', { class: 'btn small', onclick: run(async () => { await api('POST', '/api/credits', { falReadKey: k.value }); await api('POST', '/api/credits/check'); }, 'Gespeichert und abgefragt.') }, 'Speichern'),
+        cr.falReadKey ? h('button', { class: 'btn small ghost', onclick: run(() => api('POST', '/api/credits', { removeFalReadKey: true }), 'Entfernt.') }, 'Entfernen') : null); })() : null,
+    cr ? crRow('claude') : null);
   const sx = await api('GET', '/api/sfx').catch(() => null);
   const sfxBox = h('div', { class: 'box' }, h('h3', {}, '🔊 Soundeffekte'),
     h('p', { class: 'hint' }, 'Claude setzt in Shorts passende Sounds (Whoosh, Bass-Boom, Zurückspulen, Pop …). Der Grundbaukasten wird einmal per KI erzeugt (fal.ai, laut Anbieter kommerziell nutzbar) und dann immer wieder verwendet. '
@@ -1725,9 +1761,9 @@ async function renderSettings() {
     sx ? h('div', { class: 'sfx-list' }, sx.sounds.map((x) => h('button', { class: 'chip-btn' + (x.ready ? '' : ' off'), disabled: !x.ready, title: x.own ? 'eigener Sound' : x.id,
       onclick: () => { const a = new Audio('/api/sfx/file/' + x.id); a.play().catch(() => {}); } }, (x.ready ? '▶ ' : '') + x.name + (x.own ? ' ★' : '')))) : null,
     h('p', { class: 'hint' }, 'Fehlt ein Sound beim Schnitt, wird er automatisch erzeugt (sofern der fal.ai-Schlüssel eingetragen ist).'));
-  const jumps = [['s-kanaele', 'Kanäle'], ['s-claude', 'Claude'], ['s-schnitt', 'Schnitt'], ['s-musik', 'Musik'], ['s-sfx', 'Sounds'], ['s-bilder', 'Titelbilder'],
+  const jumps = [['s-kanaele', 'Kanäle'], ['s-claude', 'Claude'], ['s-schnitt', 'Schnitt'], ['s-musik', 'Musik'], ['s-sfx', 'Sounds'], ['s-guthaben', 'Guthaben'], ['s-bilder', 'Titelbilder'],
     ['s-helfer', 'Rechenhelfer'], ['s-google', 'YouTube-App'], ['s-tiktok', 'TikTok-App'], ['s-sicherung', 'Sicherung'], ['s-allgemein', 'Allgemein']];
-  [[claudeBox, 's-claude'], [cutBox, 's-schnitt'], [musicBox, 's-musik'], [sfxBox, 's-sfx'], [thumbBox, 's-bilder'], [helperBox, 's-helfer'], [googleBox, 's-google'],
+  [[claudeBox, 's-claude'], [cutBox, 's-schnitt'], [musicBox, 's-musik'], [sfxBox, 's-sfx'], [creditBox, 's-guthaben'], [thumbBox, 's-bilder'], [helperBox, 's-helfer'], [googleBox, 's-google'],
     [tiktokBox, 's-tiktok'], [backupBox, 's-sicherung'], [account, 's-allgemein']].forEach(([el, id]) => { el.id = id; el.style.scrollMarginTop = '110px'; });
   const jumpBar = h('div', { class: 'setjump' }, jumps.map(([id, label]) => h('button', { class: 'btn small', onclick: () => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, label)));
   mainEl.replaceChildren(jumpBar,
@@ -1736,7 +1772,7 @@ async function renderSettings() {
       h('button', { class: 'btn small', onclick: () => { const n = prompt('Name des neuen Kanals:'); if (n) run(() => api('POST', '/api/profiles', { name: n }), 'Kanal angelegt.')(); } }, '+ Kanal')),
     h('div', { class: 'settings' }, st.profiles.map(channelBox)),
     h('h2', { class: 'h2', style: { marginTop: '24px' } }, 'Apps & Zugang'),
-    h('div', { class: 'settings' }, claudeBox, cutBox, musicBox, sfxBox, thumbBox, helperBox, googleBox, tiktokBox, backupBox, account));
+    h('div', { class: 'settings' }, claudeBox, cutBox, musicBox, sfxBox, creditBox, thumbBox, helperBox, googleBox, tiktokBox, backupBox, account));
 }
 
 start();

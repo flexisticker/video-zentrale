@@ -5,6 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import * as credits from './credits.js';
 import { db, save, saveNow, DATA_DIR } from './store.js';
 import * as profiles from './profiles.js';
 
@@ -48,7 +49,7 @@ async function removeBackground(buf, mime) {
     body: JSON.stringify({ image_url: `data:${mime};base64,${buf.toString('base64')}`, model: 'Portrait', operating_resolution: '2048x2048', output_format: 'png' }),
   });
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401 || r.status === 403) throw new Error('fal.ai-Schlüssel ungültig.');
+  { const fe = credits.falError(r.status, j); if (fe) throw new Error(fe); }
   if (!r.ok || !j.image?.url) throw new Error('fal.ai: ' + (j.detail?.[0]?.msg || j.detail || j.error || r.status));
   const img = await fetch(j.image.url);
   if (!img.ok) throw new Error('fal.ai: Ergebnis nicht abrufbar.');
@@ -216,8 +217,7 @@ export async function boost(v, k) {
       num_images: 1, output_format: 'jpeg', aspect_ratio: '16:9' }),
   });
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401 || r.status === 403) throw new Error('fal.ai-Schlüssel ungültig.');
-  if (r.status === 402 || /balance|credit/i.test(JSON.stringify(j))) throw new Error('fal.ai: kein Guthaben mehr.');
+  { const fe = credits.falError(r.status, j); if (fe) throw new Error(fe); }
   const url = j.images?.[0]?.url || j.image?.url;
   if (!r.ok || !url) throw new Error('fal.ai: ' + (j.detail?.[0]?.msg || j.detail || j.error || r.status));
   const img = await fetch(url);
@@ -283,8 +283,7 @@ async function genOne(v, { k, frame, photo, text, scene, vertical }) {
     body: JSON.stringify({ prompt, image_urls: images, aspect_ratio: vertical ? '9:16' : '16:9', output_format: 'jpeg', num_images: 1 }),
   });
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401 || r.status === 403) throw new Error('fal.ai-Schlüssel ungültig.');
-  if (r.status === 402 || /balance|credit|insufficient/i.test(JSON.stringify(j))) throw new Error('fal.ai: kein Guthaben mehr.');
+  { const fe = credits.falError(r.status, j); if (fe) throw new Error(fe); }
   const url = j.images?.[0]?.url;
   if (!r.ok || !url) throw new Error('fal.ai: ' + (j.detail?.[0]?.msg || j.detail || j.error || r.status));
   const img = await fetch(url);
@@ -367,8 +366,7 @@ export async function makeSticker(idea, channelId) {
     body: JSON.stringify({ prompt, ...(photo ? { image_urls: [toDataUri(photoPath(photo))] } : {}), aspect_ratio: '1:1', output_format: 'png', num_images: 1 }),
   });
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401 || r.status === 403) throw new Error('fal.ai-Schlüssel ungültig.');
-  if (r.status === 402 || /balance|credit|insufficient/i.test(JSON.stringify(j))) throw new Error('fal.ai: kein Guthaben mehr.');
+  { const fe = credits.falError(r.status, j); if (fe) throw new Error(fe); }
   const url = j.images?.[0]?.url;
   if (!r.ok || !url) throw new Error('fal.ai-Sticker: ' + (j.detail?.[0]?.msg || j.detail || j.error || r.status));
   const img = await fetch(url);

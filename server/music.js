@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
+import * as credits from './credits.js';
 import { db, save, saveNow } from './store.js';
 import * as lib from './library.js';
 
@@ -110,8 +111,7 @@ export async function generate({ prompt, seconds, profileId, label }) {
     body: JSON.stringify({ prompt, duration, num_samples: 1 }),
   });
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401 || r.status === 403) throw new Error('fal.ai-Schlüssel ungültig.');
-  if (r.status === 402 || /balance|credit|insufficient/i.test(JSON.stringify(j))) throw new Error('fal.ai: kein Guthaben mehr.');
+  { const fe = credits.falError(r.status, j); if (fe) throw new Error(fe); }
   const url = j.audio?.url || j.audios?.[0]?.url;
   if (!r.ok || !url) throw new Error('fal.ai-Musik: ' + (j.detail?.[0]?.msg || j.detail || j.error || r.status));
   const a = await fetch(url);

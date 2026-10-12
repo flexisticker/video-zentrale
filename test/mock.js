@@ -83,6 +83,10 @@ http.createServer(async (req, res) => {
   }
   if (p === '/v2/post/publish/status/fetch/') return json(res, 200, { data: { status: tt.got >= tt.size ? 'SEND_TO_USER_INBOX' : 'PROCESSING_UPLOAD' }, error: { code: 'ok' } });
   // fal.ai: Freistellen (liefert Test-Person mit Transparenz) und KI-Aufwertung (liefert das Eingangsbild zurück)
+  if (p === '/v1/account/billing') {
+    if (req.headers.authorization !== 'Key fal-test') return json(res, 403, { error: { type: 'authorization_error', message: 'no billing permission' } });
+    return json(res, 200, { username: 'test', credits: { current_balance: Number(process.env.MOCK_FAL_BALANCE || 1.5), currency: 'USD' } });
+  }
   if (p === '/sonilo/v1.1/text-to-sound-effects') {
     if (req.headers.authorization !== 'Key fal-test') return json(res, 401, { detail: 'Unauthorized' });
     const j = JSON.parse(b.toString());
