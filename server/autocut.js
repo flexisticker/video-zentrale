@@ -13,6 +13,7 @@ import * as music from './music.js';
 import * as profiles from './profiles.js';
 import { buildAss, buildCalmAss, buildHookAss, buildFxAss } from './captions.js';
 import * as fx from './cutfx.js';
+import * as bounds from './bounds.js';
 import * as sfx from './sfx.js';
 import * as thumbs from './thumbs.js';
 import { fileURLToPath } from 'node:url';
@@ -476,7 +477,7 @@ async function runCut(v) {
     } catch (e) { v.cut.warning = e.message; segs = null; words = null; }
   }
 
-  let cut = c.cutPauses && hasAudio ? pauses(loud, c) : [];
+  let cut = c.cutPauses && hasAudio ? bounds.protectWords(pauses(loud, c), words) : [];
   const removedAll = cut.reduce((s, [a, b]) => s + b - a, 0);
   if (c.cutPauses && !hasAudio) v.cut.warning = 'Keine Tonspur erkannt – nichts gekürzt.';
   if (removedAll > duration * 0.5) {
@@ -491,6 +492,7 @@ async function runCut(v) {
 
   const profile = profiles.effective(v);
   const pro = profiles.isPro(profile);
+  const sents = bounds.numbered(segs);
   let shorts = [];
   if (cands.length) {
     step('Highlights auswählen');
@@ -499,13 +501,25 @@ async function runCut(v) {
       catch (e) { v.cut.warning = 'Claude-Auswahl: ' + e.message + ' – lauteste Stellen genommen.'; }
     }
     if (!shorts.length) shorts = cands.slice(0, plan.shorts).map((x) => ({ ...x, title: '', reason: 'laute/bewegte Stelle' }));
+    // Schnittgrenzen einrasten: ganze Sätze, Sprechpausen, Bildwechsel – nie mitten im Satz/Wort
+    const snapped = [];
+    for (const x of shorts) {
+      const r = bounds.snapRange(x.start, x.end, { sents, words, fine: hasAudio ? fine : null, scenes, dur: duration, minLen: c.shortMin, maxLen: c.shortMax });
+      if (snapped.some((p) => r.start < p.end - 0.5 && r.end > p.start + 0.5)) continue;
+      snapped.push({ ...x, start: r.start, end: r.end, snapNotes: r.notes });
+    }
+    shorts = snapped;
   }
 
   // Kurzfassung: die besten Stellen hintereinander (Ziellänge in Sekunden)
   let reel = [];
   if (plan.summary > 0 && duration > plan.summary + 20) {
     step('Kurzfassung planen');
-    const parts = candidates(loud, scenes, duration, cut, SEG, Math.min(40, Math.ceil(plan.summary / SEG) * 3));
+    const want = Math.min(40, Math.ceil(plan.summary / SEG) * 3);
+    // Bausteine aus ganzen Sätzen (wie Opus Clip & Co.); ohne Sprache wie bisher nach Lautstärke/Bildwechseln
+    const sb = sents.length ? bounds.sentenceBlocks(sents, { loud, scenes, cut, target: SEG }) : [];
+    const parts = sb.length >= 4 ? [...sb].sort((a, b) => b.score - a.score).slice(0, want).sort((a, b) => a.start - b.start)
+      : candidates(loud, scenes, duration, cut, SEG, want);
     if (db().ai.apiKey) {
       try { reel = await ai.chooseSummary(v, parts, segs, plan.summary, profile, plan.wish); }
       catch (e) { v.cut.warning = 'Claude-Kurzfassung: ' + e.message + ' – beste Stellen nach Lautstärke genommen.'; }
@@ -514,7 +528,9 @@ async function runCut(v) {
       let total = 0;
       for (const x of parts) { if (total >= plan.summary) break; reel.push({ start: x.start, end: x.end }); total += x.end - x.start; }
     }
-    reel.sort((a, b) => a.start - b.start);
+    reel = reel.map((x) => bounds.snapRange(x.start, x.end, { sents, words, fine: hasAudio ? fine : null, scenes, dur: duration, minLen: 2 }))
+      .sort((a, b) => a.start - b.start)
+      .reduce((acc, x) => { const l = acc[acc.length - 1]; if (l && x.start <= l.end + 0.3) l.end = Math.max(l.end, x.end); else acc.push({ start: x.start, end: x.end }); return acc; }, []);
   } else if (plan.summary > 0) v.cut.warning = 'Video ist kürzer als die gewünschte Kurzfassung – keine Kurzfassung erstellt.';
 
   const base = path.basename(v.file, path.extname(v.file));
@@ -573,7 +589,7 @@ async function runCut(v) {
   const tempo = profile?.tempo || (pro ? 'ruhig' : 'normal');
   for (let i = 0; i < shorts.length; i++) {
     const s = shorts[i];
-    s.hook = fx.cleanHook(s.hook, s.start, s.end, hookStyle, pro);
+    s.hook = bounds.snapHook(fx.cleanHook(s.hook, s.start, s.end, hookStyle, pro), { words, fine: hasAudio ? fine : null });
     s.parts = fx.buildParts({ start: s.start, end: s.end, hook: s.hook, words, fine: hasAudio ? fine : null, tempo });
     const fxHow = await prepareFx(s, profile, (m) => { v.cut.warning = m; });
     step(`Short ${i + 1} von ${shorts.length} schneiden`);
@@ -592,7 +608,8 @@ async function runCut(v) {
       edit: { hook: s.hook || null, tempo, parts: s.parts.length, how, fxHow, fxLevel: s.fxLevel },
       title: s.title ? s.title.slice(0, 100) : `${base} – Short ${i + 1}`,
       viral: Number.isFinite(s.viral) ? { score: s.viral, why: s.viralWhy || '', tip: s.viralTip || '', by: 'Schnitt' } : undefined,
-      note: sourceNote(s.start, s.end) + (s.reason ? ' Warum: ' + s.reason : '') + (how ? ' ' + how + '.' : '') + music.noteOf(track),
+      note: sourceNote(s.start, s.end) + (s.reason ? ' Warum: ' + s.reason : '') + (how ? ' ' + how + '.' : '')
+        + (s.bySentence ? ' Grenzen: ganze Sätze.' : '') + (s.snapNotes?.length ? ' Eingerastet: ' + s.snapNotes.join(', ') + '.' : '') + music.noteOf(track),
       music: track ? { kind: track.kind, name: track.name, mood: track.mood || '' } : null,
       transcriptText: segs ? whisper.textOf(segs, s.start, s.end) : '',
     }, v);
@@ -689,6 +706,11 @@ async function reviseLongVersion(out, raw, wish, words, segs, profile, step) {
   const { values: loud, fine, hasAudio } = await loudness(file, raw.duration);
   step('Claude plant die neue Fassung');
   const r = await ai.reviseLong(raw, out, wish, segs, hasAudio ? loud : null, profile);
+  // Abschnitte einrasten (ganze Sätze, Sprechpausen), danach überlappende zusammenführen
+  const sents = bounds.numbered(segs);
+  r.segments = r.segments.map(([a, b]) => { const x = bounds.snapRange(a, b, { sents, words, fine: hasAudio ? fine : null, dur: raw.duration, minLen: 2 }); return [x.start, x.end]; })
+    .sort((p, q) => p[0] - q[0]).reduce((acc, x) => { const l = acc[acc.length - 1]; if (l && x[0] <= l[1] + 0.3) l[1] = Math.max(l[1], x[1]); else acc.push(x); return acc; }, []);
+  if (r.teaser) { const t = bounds.snapHook({ mode: 'preview', at: r.teaser.at, len: r.teaser.len }, { words, fine: hasAudio ? fine : null }); r.teaser = { ...r.teaser, at: t.at, len: Math.min(9, t.len) }; }
   // Tempo innerhalb der Abschnitte
   let keep = [];
   for (const [a, b] of r.segments) keep.push(...(r.tempo !== 'aus' && hasAudio ? fx.tempoKeep(words, fine, a, b, r.tempo) : [[a, b]]));
@@ -782,12 +804,16 @@ async function runRevision({ revise: outId, wish }) {
     const pro = profiles.isPro(profile);
     if (out.source.kind !== 'short') return await reviseLongVersion(out, raw, wish, words, segs, profile, step);
     step('Claude plant die neue Fassung');
-    const r = await ai.reviseShort(raw, out, wish, segs, profile, { minLen: Math.min(c.shortMin || 30, 15), maxLen: Math.max(c.shortMax || 45, 60) });
+    const lim = { minLen: Math.min(c.shortMin || 30, 15), maxLen: Math.max(c.shortMax || 45, 60) };
+    const r = await ai.reviseShort(raw, out, wish, segs, profile, lim);
     step('Lautstärke messen');
-    const { fine, hasAudio } = await loudness(file, raw.duration, { from: Math.max(0, r.start - 1), span: r.end - r.start + 2 });
+    const { fine, hasAudio } = await loudness(file, raw.duration, { from: Math.max(0, r.start - 10), span: r.end - r.start + 30 });
+    // Grenzen einrasten (ganze Sätze, Sprechpausen)
+    const snap = bounds.snapRange(r.start, r.end, { sents: bounds.numbered(segs), words, fine: hasAudio ? fine : null, dur: raw.duration, ...lim });
+    r.start = snap.start; r.end = snap.end;
     let style = profile?.hookStyle || (pro ? 'cold' : 'auto');
     if (style === 'off' && /hook|anfang|einstieg/i.test(wish)) style = 'auto';
-    const s = { start: r.start, end: r.end, hook: fx.cleanHook(r.hook, r.start, r.end, style, pro) };
+    const s = { start: r.start, end: r.end, hook: bounds.snapHook(fx.cleanHook(r.hook, r.start, r.end, style, pro), { words, fine: hasAudio ? fine : null }) };
     s.parts = fx.buildParts({ start: s.start, end: s.end, hook: s.hook, words, fine: hasAudio ? fine : null, tempo: r.tempo });
     s.fx = r.fx; s.fxLevel = r.fxLevel;
     step('Effekte vorbereiten');

@@ -122,15 +122,28 @@ const toWords = (j) => (j.transcription || []).map((x) => ({ s: (x.offsets?.from
   .filter((x) => x.t && !/^\[.*\]$|^\(.*\)$/.test(x.t)); // [Musik], (Lachen) o. Ä. weglassen
 
 // Wörter zu Sätzen/Zeilen gruppieren (Anzeige, Text für Claude)
+// Satzgrenzen: Satzzeichen von Whisper oder deutliche Sprechpause. Lange Monologe ohne Punkt (beim Zocken häufig)
+// werden an der größten Pause geteilt – nicht stur nach n Wörtern, sonst landet ein Schnitt mitten im Satz.
 export function sentences(words) {
   const out = []; let cur = null;
-  for (const w of words) {
-    if (cur && (w.s - cur.e > 1.0 || cur.n >= 20 || /[.!?]$/.test(cur.t))) { out.push(cur); cur = null; }
-    if (!cur) cur = { s: w.s, e: w.e, t: w.t, n: 1 };
-    else { cur.e = w.e; cur.t += ' ' + w.t; cur.n++; }
+  for (const w of words || []) {
+    if (cur && (w.s - cur.e >= 0.7 || /[.!?…]["“”»]?$/.test(cur.ws[cur.ws.length - 1].t))) { out.push(cur); cur = null; }
+    if (!cur) cur = { ws: [] };
+    cur.ws.push(w); cur.e = w.e;
   }
   if (cur) out.push(cur);
-  return out.map(({ s, e, t }) => ({ s, e, t }));
+  const split = (ws) => {
+    const len = ws[ws.length - 1].e - ws[0].s;
+    if (ws.length <= 30 && len <= 15) return [ws];
+    let best = -1, gap = -1;
+    for (let i = 3; i < ws.length - 3; i++) {
+      const g = ws[i].s - ws[i - 1].e + (/[,;:]$/.test(ws[i - 1].t) ? 0.25 : 0);   // Komma = guter Trennpunkt
+      if (g > gap) { gap = g; best = i; }
+    }
+    if (best < 0) return [ws];
+    return [...split(ws.slice(0, best)), ...split(ws.slice(best))];
+  };
+  return out.flatMap((x) => split(x.ws)).map((ws) => ({ s: ws[0].s, e: ws[ws.length - 1].e, t: ws.map((w) => w.t).join(' ').replace(/\s+([.,!?;:…])/g, '$1') }));
 }
 
 // Text eines Zeitraums (für Shorts) bzw. alles.

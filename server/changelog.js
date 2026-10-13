@@ -1,5 +1,12 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.25.0', date: '13.10.2026', items: [
+    '✂ Saubere Schnitte wie bei Opus Clip: Claude wählt Anfang und Ende jetzt als ganze Sätze (nummerierte Sätze mit Zeitstempel statt geschätzter Sekunden) – kein Abschneiden mitten im Satz mehr.',
+    'Sicherheitsnetz beim Schneiden: Start/Ende rasten auf Satzanfang bzw. Satzende ein, mit etwas Luft und in der leisesten Stelle der Sprechpause; ohne Sprache auf einen Bildwechsel. Zu lange Clips enden am letzten Satzende statt hart bei der Maximallänge.',
+    'Kurzfassung aus zusammenhängenden Sätzen statt starrer 15-Sekunden-Stücke; Langfassung entfernt Pausen nie mehr mitten in einem Satz; Hook-Vorschau und Teaser auf ganzen Wörtern.',
+    'Bessere Satzerkennung: lange Monologe ohne Punkt werden an der größten Sprechpause geteilt, nicht stur nach 20 Wörtern.',
+    '🧠 Maximale Denkstufe für alle Schnitt-Entscheidungen (Highlights, Kurzfassung, Überarbeiten) – einstellbar unter Einstellungen → Claude. Rechenhelfer nutzt jetzt das beste Spracherkennungs-Modell large-v3 (genauere Wort-Zeiten und Satzzeichen).',
+  ] },
   { version: '1.24.1', date: '12.10.2026', items: [
     'Fehler behoben: Kurzfassung brach mit „Error while processing the decoded data … Conversion failed“ ab. Lagen die Bausteine nicht in zeitlicher Reihenfolge (z. B. Höhepunkt vorne), musste ffmpeg minutenlang Bilder zwischenspeichern und lief voll. Jetzt wird jeder Baustein direkt angesprungen – schneller und ohne Speicherhunger.',
     'Fehlermeldungen von ffmpeg zeigen jetzt die eigentliche Ursache statt nur „Conversion failed“.',

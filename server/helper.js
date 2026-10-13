@@ -58,7 +58,7 @@ export function hello(b = {}) {
 export function transcribe(wav, { timeoutMs, label = '' }) {
   const id = crypto.randomBytes(8).toString('hex');
   return new Promise((resolve, reject) => {
-    const job = { id, kind: 'whisper', wav, label, createdAt: Date.now(), model: cfg().model || 'large-v3-turbo', state: 'open', resolve, reject };
+    const job = { id, kind: 'whisper', wav, label, createdAt: Date.now(), model: cfg().model || 'large-v3', state: 'open', resolve, reject };
     job.timer = setTimeout(() => finish(job, new Error('Rechenhelfer hat nicht rechtzeitig geantwortet.')), timeoutMs);
     // Nicht abgeholt innerhalb von 2 Minuten → Server rechnet selbst
     job.pickup = setTimeout(() => { if (job.state === 'open') finish(job, new Error('Rechenhelfer hat den Auftrag nicht abgeholt.')); }, 120_000);

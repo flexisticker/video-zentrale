@@ -246,6 +246,19 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   Bausteine nicht chronologisch → ffmpeg puffert Rohbilder (nachgestellt mit `ulimit -v`: „Cannot allocate memory“). `renderSummary` jetzt mit eigener Eingabe je
   Baustein (`-ss/-t -i`, Graph per `-filter_complex_script`, Musik `idx = reel.length`). `lastError()` zeigt die Ursache vor „Conversion failed“.
   **Gleiches Muster** steckt in `concatGraph` (Shorts, Hook-Vorschau vorne → Puffer bis zur Hook-Stelle, max. Clip-Spanne) – bisher ohne Fehler beim Kunden.
+- 1.25.0 (13.10.2026): **Saubere Schnittgrenzen** (Kunde: „oft mitten im Satz abgeschnitten“; Recherche Opus Clip/ClipsAI/StreamLadder: Wort-Zeitmarken +
+  Satz-/Themengrenzen, Sprechpausen, Bildwechsel). `server/bounds.js`: `numbered(segs)` (S1 …), `sentenceLines()` („S12 [312.4–315.8] Text“ für Claude),
+  `fromSentences()`, `snapRange(start, end, {sents, words, fine, scenes, dur, minLen, maxLen})` (Start auf Satzanfang −0,25 s nach vorigem Wort, Ende auf
+  Satzende + leiseste Stelle bis 0,9 s vor dem nächsten Wort, Satz zu Ende bis +6 s, Maximallänge darf +5 s überziehen, sonst letztes Satzende; ohne Sprache
+  Bildwechsel ±1,5 s bzw. leiseste Stelle; nie im Wort), `snapHook()`, `protectWords()` (Langfassung: Pausen nicht in Sätze), `sentenceBlocks()` (Kurzfassung).
+  `whisper.sentences()`: Grenze bei Satzzeichen oder Pause ≥ 0,7 s, > 30 Wörter/15 s an größter Pause (Komma bevorzugt) geteilt.
+  ai.js: `SENTENCE_RULES`, Schemas mit `fromSentence/toSentence` (0 = ohne Sprache → Sekunden) in chooseHighlights/chooseSummary/reviseShort/reviseLong
+  (reviseLong mit Satzliste bis 150k Zeichen, sonst 20-s-Blöcke). **`cutCall()`**: gestreamt (`beta.messages.stream().finalMessage()`), `max_tokens` 64000,
+  Effort `ai.cutEffort` (medium|high|xhigh|max, Standard **max**, Einstellungen → Claude), Abbruch bei `max_tokens` mit Hinweis. autocut: Einrasten nach
+  Auswahl (Shorts, Kurzfassung, Überarbeitungen, Teaser), Hinweis „Grenzen: ganze Sätze / Eingerastet: …“ in der Notiz. Rechenhelfer Standard **large-v3**
+  (Migration `migMaxCut` von large-v3-turbo). Mock: SSE-Antworten bei `stream: true`, Satzwahl. Getestet (Mock + fake-whisper, 180-s-Aufnahme): Shorts/
+  Kurzfassung/Langfassung/Überarbeitungen auf Satzgrenzen, effort max gestreamt, Einstellung speichern. **Nicht getestet:** echte Claude-Antworten mit Satznummern,
+  Kosten bei effort max (geschätzt 0,20–1 $ je Aufnahme), large-v3 auf dem Kunden-PC.
 - **Offen – Paket 4 Zusammenstellung (angeboten, Kunde will es):** „Best of“ aus mehreren Videos (Zeitraum/Auswahl, 16:9 oder 9:16, Claude
   ordnet Highlights, Platz-Einblendungen), später automatisch wöchentlich. Nach 1.18.0 als eigenes Paket bauen.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,

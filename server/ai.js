@@ -12,6 +12,7 @@ import * as thumbs from './thumbs.js';
 import * as fx from './cutfx.js';
 import * as sfx from './sfx.js';
 import * as credits from './credits.js';
+import * as bounds from './bounds.js';
 
 const MODEL = 'claude-opus-5-5';
 const FRAMES = [0.08, 0.25, 0.42, 0.58, 0.75, 0.92];
@@ -22,7 +23,7 @@ const cfg = () => db().ai;
 
 export function status() {
   const c = cfg();
-  return { configured: !!c.apiKey, auto: c.auto, autoTips: c.autoTips !== false, hints: c.hints, keyHint: c.apiKey ? '…' + c.apiKey.slice(-4) : '',
+  return { configured: !!c.apiKey, auto: c.auto, autoTips: c.autoTips !== false, cutEffort: cutEffort(), hints: c.hints, keyHint: c.apiKey ? '…' + c.apiKey.slice(-4) : '',
     spent: c.spent || 0, count: c.count || 0 };
 }
 
@@ -36,6 +37,7 @@ export function configure(b) {
   if (b.removeKey === true) c.apiKey = '';
   if (typeof b.auto === 'boolean') c.auto = b.auto;
   if (typeof b.autoTips === 'boolean') c.autoTips = b.autoTips;
+  if (CUT_EFFORTS.includes(b.cutEffort)) c.cutEffort = b.cutEffort;
   if (typeof b.hints === 'string') c.hints = b.hints.slice(0, 3000);
   saveNow();
   autoQueue();
@@ -44,6 +46,28 @@ export function configure(b) {
 // Wird nach jedem fertigen Vorschlag aufgerufen (z. B. Viral-Tipps automatisch umsetzen – siehe autocut.autoApplyTips)
 let suggested = null;
 export function afterSuggest(fn) { suggested = fn; }
+
+// Schnitt-Entscheidungen (Highlights, Kurzfassung, Überarbeiten): höchste Denkstufe, gestreamt (lange Denkzeit → kein HTTP-Timeout)
+export const CUT_EFFORTS = ['medium', 'high', 'xhigh', 'max'];
+export const cutEffort = () => (CUT_EFFORTS.includes(cfg().cutEffort) ? cfg().cutEffort : 'max');
+async function cutCall(content, schema) {
+  let r;
+  try {
+    r = await api().beta.messages.stream({ model: MODEL, max_tokens: 64000, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
+      output_config: { effort: cutEffort(), format: { type: 'json_schema', schema } }, messages: [{ role: 'user', content }] }).finalMessage();
+  } catch (e) { throw new Error(friendly(e)); }
+  const cost = (r.usage?.input_tokens || 0) * PRICE.input + (r.usage?.output_tokens || 0) * PRICE.output;
+  const a = cfg(); a.spent = Math.round(((a.spent || 0) + cost) * 10000) / 10000; a.count = (a.count || 0) + 1; save();
+  if (r.stop_reason === 'refusal') throw new Error('abgelehnt');
+  if (r.stop_reason === 'max_tokens') throw new Error('Claude hat zu lange nachgedacht (Antwort abgeschnitten) – bitte noch einmal starten.');
+  return JSON.parse(r.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
+}
+const SENTENCE_RULES = 'SAUBERE SCHNITTE (sehr wichtig): Schneide nie mitten im Satz. Das Gesprochene ist in nummerierte Sätze zerlegt (S12 [Start–Ende] Text). '
+  + 'Gib Anfang und Ende als Satznummern an (fromSentence = erster Satz, toSentence = letzter Satz des Clips); geschnitten wird kurz vor dem ersten und '
+  + 'kurz nach dem letzten Satz. Der Clip beginnt mit einem Satz, der ohne Vorwissen verständlich ist (nicht mit „und dann …“ als Antwort auf etwas Fehlendes), '
+  + 'und endet nach der Pointe bzw. Reaktion – nicht nach einer halben Aussage. Folgt direkt auf die Pointe eine kurze Reaktion (Lachen, „Alter!“), nimm sie mit. '
+  + 'Ohne Sprache an der Stelle: fromSentence/toSentence = 0, dann zählen start/end (Sekunden) – lege sie in einen ruhigen Moment oder auf einen Bildwechsel, nicht mitten in die Action.';
+
 
 export const framePath = (v, n) => path.join(FRAME_DIR, `${v.id}-${n}.jpg`);
 
@@ -351,6 +375,7 @@ const HOOK_RULES = (pro, profile) => {
 
 export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
   fs.mkdirSync(FRAME_DIR, { recursive: true });
+  const sents = bounds.numbered(segs);
   const pro = profiles.isPro(profile);
   const content = [{ type: 'text', text: [
     ...(pro ? [
@@ -373,7 +398,8 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
     HOOK_RULES(pro, profile),
     FX_RULES(fxLevelOf(profile), fxStickers(profile)),
     `Video: „${v.file}“, Länge ${whisper.fmtTime(v.duration)}. ${v.note ? 'Notiz: ' + v.note : ''}`,
-    segs?.length ? 'Gesprochenes ist je Kandidat angegeben (automatisch erkannt, kann Fehler enthalten).' : 'Kein gesprochener Text verfügbar.',
+    segs?.length ? 'Gesprochenes ist je Kandidat als nummerierte Sätze angegeben (automatisch erkannt, kann Fehler enthalten).' : 'Kein gesprochener Text verfügbar.',
+    segs?.length ? SENTENCE_RULES : '',
     '',
     'Kandidaten (aus Lautstärke und Bildwechseln vorsortiert); zu jedem folgt ein Standbild aus der Mitte:',
   ].join('\n') }];
@@ -383,9 +409,9 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
     const file = path.join(FRAME_DIR, `${v.id}-k${i + 1}.jpg`);
     const ok = await ffmpeg(['-hide_banner', '-loglevel', 'error', '-y', '-ss', mid.toFixed(2), '-i', fileOf(v),
       '-vf', "scale='if(gt(iw,ih),min(640,iw),-2)':'if(gt(iw,ih),-2,min(640,ih))'", '-frames:v', '1', '-q:v', '5', file]);
-    const said = segs ? whisper.textOf(segs, k.start - 5, k.end + 5).slice(0, 600) : '';
+    const said = sents.length ? bounds.sentenceLines(sents, k.start - 15, k.end + 15, 3000) : '';
     content.push({ type: 'text', text: `Kandidat ${i + 1}: ${whisper.fmtTime(k.start)}–${whisper.fmtTime(k.end)} (Sekunde ${k.start}–${k.end}), `
-      + `lauteste Stelle ${k.peak} LUFS, ${k.scenes} Bildwechsel${said ? `, gesagt: „${said}“` : ''}` });
+      + `lauteste Stelle ${k.peak} LUFS, ${k.scenes} Bildwechsel${said ? `\nGesprochen:\n${said}` : ''}` });
     if (ok && fs.existsSync(file)) {
       content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: fs.readFileSync(file).toString('base64') } });
       fs.rmSync(file, { force: true });
@@ -393,9 +419,11 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
   }
   const schemaH = {
     type: 'object', additionalProperties: false, required: ['shorts'],
-    properties: { shorts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['candidate', 'start', 'end', 'title', 'reason', 'mood', 'music', 'viral', 'viralWhy', 'viralTip', 'hook', 'fx'],
+    properties: { shorts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['candidate', 'fromSentence', 'toSentence', 'start', 'end', 'title', 'reason', 'mood', 'music', 'viral', 'viralWhy', 'viralTip', 'hook', 'fx'],
       properties: {
         candidate: { type: 'integer', description: 'Nummer des Kandidaten' },
+        fromSentence: { type: 'integer', description: 'Nummer des ersten Satzes (S…), 0 wenn an der Stelle nicht gesprochen wird' },
+        toSentence: { type: 'integer', description: 'Nummer des letzten Satzes (S…), 0 wenn an der Stelle nicht gesprochen wird' },
         start: { type: 'number', description: 'Start in Sekunden ab Videoanfang' },
         end: { type: 'number', description: 'Ende in Sekunden ab Videoanfang' },
         title: { type: 'string', description: 'Kurzer, packender Titel für den Short (höchstens 70 Zeichen)' },
@@ -409,30 +437,21 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
         fx: FX_SCHEMA,
       } } } },
   };
-  let r;
-  try {
-    r = await api().beta.messages.create({
-      model: MODEL, max_tokens: 16000,
-      betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: schemaH } },
-      messages: [{ role: 'user', content }],
-    });
-  } catch (e) { throw new Error(friendly(e)); }
-  if (r.stop_reason === 'refusal') throw new Error('abgelehnt');
-  const out = JSON.parse(r.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
-  const cost = (r.usage?.input_tokens || 0) * PRICE.input + (r.usage?.output_tokens || 0) * PRICE.output;
-  const a = cfg(); a.spent = Math.round(((a.spent || 0) + cost) * 10000) / 10000; a.count = (a.count || 0) + 1; save();
+  const out = await cutCall(content, schemaH);
   const dur = v.duration;
   const picked = [];
   for (const s of (out.shorts || []).slice(0, c.shorts)) {
     const k = cands[s.candidate - 1];
     if (!k) continue;
-    let start = Math.max(0, Math.max(k.start - 15, Math.min(Number(s.start), k.end)));
-    let end = Math.min(dur, Math.min(k.end + 15, Math.max(Number(s.end), start + c.shortMin)));
-    if (end - start > c.shortMax) end = start + c.shortMax;
-    if (end - start < Math.min(c.shortMin, 10)) continue;
+    // Satznummern haben Vorrang (exakte Grenzen); sonst Sekunden. Feinschliff (Einrasten, Maximallänge) macht bounds.snapRange beim Schnitt.
+    const bySent = bounds.fromSentences(sents, s.fromSentence, s.toSentence);
+    const okSent = bySent && bySent.start >= k.start - 25 && bySent.end <= k.end + 25 && bySent.end - bySent.start <= c.shortMax + 20;
+    let start = okSent ? bySent.start : Math.max(0, Math.max(k.start - 15, Math.min(Number(s.start), k.end)));
+    let end = okSent ? bySent.end : Math.min(dur, Math.min(k.end + 15, Math.max(Number(s.end), start + c.shortMin)));
+    if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+    if (end - start < Math.min(c.shortMin, 10)) end = Math.min(dur, start + c.shortMin);
     if (picked.some((p) => start < p.end && end > p.start)) continue;
-    picked.push({ start: Math.round(start * 10) / 10, end: Math.round(end * 10) / 10, title: String(s.title || '').slice(0, 100), reason: String(s.reason || '').slice(0, 300),
+    picked.push({ bySentence: !!okSent, start: Math.round(start * 100) / 100, end: Math.round(end * 100) / 100, title: String(s.title || '').slice(0, 100), reason: String(s.reason || '').slice(0, 300),
       mood: String(s.mood || ''), music: String(s.music || '').slice(0, 200),
       viral: Math.max(1, Math.min(10, Math.round(Number(s.viral) || 0))) || undefined, viralWhy: String(s.viralWhy || '').slice(0, 300), viralTip: String(s.viralTip || '').slice(0, 300),
       hook: s.hook && typeof s.hook === 'object' ? { mode: s.hook.mode, at: Number(s.hook.at), len: Number(s.hook.len), text: String(s.hook.text || '').slice(0, 60) } : null,
@@ -444,13 +463,16 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
 // Kurzfassung: aus Bausteinen (je ~15 s) die besten in Summe ca. `target` Sekunden wählen – zeitliche Reihenfolge bleibt.
 export async function chooseSummary(v, parts, segs, target, profile, wish = '') {
   fs.mkdirSync(FRAME_DIR, { recursive: true });
+  const sents = bounds.numbered(segs);
   const pro = profiles.isPro(profile);
   const content = [{ type: 'text', text: [
     pro ? 'Du stellst aus einer Rohaufnahme eine professionelle Kurzfassung für LinkedIn zusammen (Inhaber eines Druck- und 3D-Druck-Betriebs, als Person).'
       : 'Du stellst aus einer Rohaufnahme eine Kurzfassung (Best-of / Zusammenfassung) für YouTube zusammen.',
     `Ziellänge insgesamt ca. ${Math.round(target)} Sekunden (±15 %). Wähle passende Stellen aus den Bausteinen; sie werden in zeitlicher Reihenfolge`,
     'hintereinander geschnitten. Die Kurzfassung soll für sich verständlich sein: klarer Einstieg, die wichtigsten Momente bzw. Aussagen, ein Abschluss.',
-    'Start/Ende eines Bausteins darfst du um bis zu 8 Sekunden verschieben (z. B. damit ein Satz vollständig ist).',
+    'Bausteine bestehen aus ganzen Sätzen. Du darfst einen Baustein über die Satznummern enger fassen oder bis zu 2 Sätze davor/danach mitnehmen,'
+      + ' damit ein Gedanke vollständig ist (fromSentence/toSentence). Schneide nie mitten im Satz; ohne Sprache (0/0) gelten start/end.',
+    'Achte auf den Übergang: Der nächste Baustein soll nicht mit einem Bezug auf Weggeschnittenes beginnen („wie gesagt“, „und deswegen“).',
     wish ? `WICHTIG – Wunsch des Creators: „${wish}“. Richte die Auswahl danach aus.` : '',
     `Video: „${v.file}“, Länge ${whisper.fmtTime(v.duration)}. ${v.note ? 'Notiz: ' + v.note : ''}`,
     segs?.length ? 'Gesprochenes steht je Baustein dabei (automatisch erkannt).' : 'Kein gesprochener Text verfügbar.',
@@ -461,35 +483,32 @@ export async function chooseSummary(v, parts, segs, target, profile, wish = '') 
     const file = path.join(FRAME_DIR, `${v.id}-z${i + 1}.jpg`);
     const ok = await ffmpeg(['-hide_banner', '-loglevel', 'error', '-y', '-ss', ((k.start + k.end) / 2).toFixed(2), '-i', fileOf(v),
       '-vf', "scale='if(gt(iw,ih),min(480,iw),-2)':'if(gt(iw,ih),-2,min(480,ih))'", '-frames:v', '1', '-q:v', '6', file]);
-    const said = segs ? whisper.textOf(segs, k.start, k.end).slice(0, 400) : '';
-    content.push({ type: 'text', text: `Baustein ${i + 1}: Sekunde ${k.start}–${k.end}, lauteste Stelle ${k.peak} LUFS, ${k.scenes} Bildwechsel${said ? `, gesagt: „${said}“` : ''}` });
+    const said = sents.length ? bounds.sentenceLines(sents, k.start - 0.05, k.end + 0.05, 1500) : '';
+    content.push({ type: 'text', text: `Baustein ${i + 1}: Sekunde ${k.start}–${k.end}${k.from ? ` (Sätze S${k.from}–S${k.to})` : ''}, lauteste Stelle ${k.peak} LUFS, ${k.scenes} Bildwechsel${said ? `\n${said}` : ''}` });
     if (ok && fs.existsSync(file)) {
       content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: fs.readFileSync(file).toString('base64') } });
       fs.rmSync(file, { force: true });
     }
   }
   const schemaS = { type: 'object', additionalProperties: false, required: ['parts'],
-    properties: { parts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['part', 'start', 'end'], properties: {
+    properties: { parts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['part', 'fromSentence', 'toSentence', 'start', 'end'], properties: {
       part: { type: 'integer', description: 'Nummer des Bausteins' },
+      fromSentence: { type: 'integer', description: 'erster Satz (S…), 0 ohne Sprache' },
+      toSentence: { type: 'integer', description: 'letzter Satz (S…), 0 ohne Sprache' },
       start: { type: 'number', description: 'Start in Sekunden ab Videoanfang' },
       end: { type: 'number', description: 'Ende in Sekunden ab Videoanfang' } } } } } };
-  let r;
-  try {
-    r = await api().beta.messages.create({ model: MODEL, max_tokens: 16000, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: schemaS } }, messages: [{ role: 'user', content }] });
-  } catch (e) { throw new Error(friendly(e)); }
-  if (r.stop_reason === 'refusal') throw new Error('abgelehnt');
-  const out = JSON.parse(r.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
-  const cost = (r.usage?.input_tokens || 0) * PRICE.input + (r.usage?.output_tokens || 0) * PRICE.output;
-  const a = cfg(); a.spent = Math.round(((a.spent || 0) + cost) * 10000) / 10000; a.count = (a.count || 0) + 1; save();
+  const out = await cutCall(content, schemaS);
   const picked = [];
   for (const x of out.parts || []) {
     const k = parts[x.part - 1];
     if (!k) continue;
-    const start = Math.max(0, k.start - 8, Math.min(Number(x.start), k.end - 3));
-    const end = Math.min(v.duration, k.end + 8, Math.max(Number(x.end), start + 3));
+    const bySent = bounds.fromSentences(sents, x.fromSentence, x.toSentence);
+    const okSent = bySent && bySent.start >= k.start - 30 && bySent.end <= k.end + 30;
+    const start = okSent ? bySent.start : Math.max(0, k.start - 8, Math.min(Number(x.start), k.end - 3));
+    const end = okSent ? bySent.end : Math.min(v.duration, k.end + 8, Math.max(Number(x.end), start + 3));
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end - start < 2) continue;
     if (picked.some((p) => start < p.end && end > p.start)) continue;
-    picked.push({ start: Math.round(start * 10) / 10, end: Math.round(end * 10) / 10 });
+    picked.push({ start: Math.round(start * 100) / 100, end: Math.round(end * 100) / 100 });
   }
   // nicht über 130 % der Ziellänge
   picked.sort((p, q) => p.start - q.start);
@@ -636,7 +655,8 @@ export async function reviseShort(raw, out, wish, segs, profile, { minLen = 15, 
   const pro = profiles.isPro(profile);
   const src = out.source;
   const from = Math.max(0, src.start - 120), to = Math.min(raw.duration || src.end + 120, src.end + 120);
-  const said = (segs || []).filter((x) => x.e > from && x.s < to).map((x) => `[${x.s.toFixed(1)}–${x.e.toFixed(1)}] ${x.t}`).join('\n').slice(0, 9000);
+  const sents = bounds.numbered(segs);
+  const said = bounds.sentenceLines(sents, from, to, 12000);
   const hook = out.edit?.hook || src.hook;
   const content = [{ type: 'text', text: [
     pro ? 'Du überarbeitest einen LinkedIn-Clip (Inhaber eines Druck- und 3D-Druck-Betriebs, als Person, professionell).'
@@ -652,7 +672,8 @@ export async function reviseShort(raw, out, wish, segs, profile, { minLen = 15, 
     FX_RULES(fxLevelOf(profile, wish), fxStickers(profile)),
     out.edit?.fxHow ? `Bisherige Effekte: ${out.edit.fxHow}.` : '',
     profile?.clipHints ? `Worauf der Creator bei diesem Kanal Wert legt: ${profile.clipHints}` : '',
-    said ? 'Gesprochenes in diesem Bereich (Sekunden ab Videoanfang, automatisch erkannt):\n' + said : 'Kein gesprochener Text verfügbar.',
+    said ? SENTENCE_RULES : '',
+    said ? 'Gesprochenes in diesem Bereich als nummerierte Sätze (Sekunden ab Videoanfang, automatisch erkannt):\n' + said : 'Kein gesprochener Text verfügbar.',
     '', 'Standbilder (Sekunde steht jeweils davor):',
   ].filter(Boolean).join('\n') }];
   const times = [...new Set([src.start + 1, hook?.at, (src.start + src.end) / 2, src.end - 1, from + 5, to - 5]
@@ -668,8 +689,10 @@ export async function reviseShort(raw, out, wish, segs, profile, { minLen = 15, 
     }
   }
   const schema = { type: 'object', additionalProperties: false,
-    required: ['start', 'end', 'title', 'hook', 'tempo', 'music', 'changes', 'viral', 'viralWhy', 'viralTip', 'fx'], properties: {
+    required: ['fromSentence', 'toSentence', 'start', 'end', 'title', 'hook', 'tempo', 'music', 'changes', 'viral', 'viralWhy', 'viralTip', 'fx'], properties: {
       fx: FX_SCHEMA,
+      fromSentence: { type: 'integer', description: 'erster Satz (S…) des neuen Clips, 0 ohne Sprache' },
+      toSentence: { type: 'integer', description: 'letzter Satz (S…) des neuen Clips, 0 ohne Sprache' },
       start: { type: 'number', description: 'neuer Start (Sekunde ab Videoanfang)' },
       end: { type: 'number', description: 'neues Ende (Sekunde ab Videoanfang)' },
       title: { type: 'string', description: 'Titel (höchstens 70 Zeichen)' },
@@ -681,25 +704,15 @@ export async function reviseShort(raw, out, wish, segs, profile, { minLen = 15, 
       viralWhy: { type: 'string' },
       viralTip: { type: 'string' },
     } };
-  let r;
-  try {
-    r = await api().beta.messages.create({
-      model: MODEL, max_tokens: 8000,
-      betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema } },
-      messages: [{ role: 'user', content }],
-    });
-  } catch (e) { throw new Error(friendly(e)); }
-  if (r.stop_reason === 'refusal') throw new Error('abgelehnt');
-  const o = JSON.parse(r.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
-  const cost = (r.usage?.input_tokens || 0) * PRICE.input + (r.usage?.output_tokens || 0) * PRICE.output;
-  const a = cfg(); a.spent = Math.round(((a.spent || 0) + cost) * 10000) / 10000; a.count = (a.count || 0) + 1; save();
-  let start = Math.max(from, Math.min(to - minLen, Number(o.start)));
+  const o = await cutCall(content, schema);
+  const bySent = bounds.fromSentences(sents, o.fromSentence, o.toSentence);
+  const okSent = bySent && bySent.start >= from - 5 && bySent.end <= to + 5 && bySent.end - bySent.start <= maxLen + 20;
+  let start = okSent ? bySent.start : Math.max(from, Math.min(to - minLen, Number(o.start)));
   if (!Number.isFinite(start)) start = src.start;
-  let end = Math.min(to, Math.max(start + minLen, Number(o.end)));
+  let end = okSent ? bySent.end : Math.min(to, Math.max(start + minLen, Number(o.end)));
   if (!Number.isFinite(end)) end = src.end;
-  if (end - start > maxLen) end = start + maxLen;
-  return { start: Math.round(start * 10) / 10, end: Math.round(end * 10) / 10, title: String(o.title || out.title || '').slice(0, 100),
+  // Maximallänge regelt bounds.snapRange (an Satzende statt hart abschneiden)
+  return { bySentence: !!okSent, start: Math.round(start * 100) / 100, end: Math.round(end * 100) / 100, title: String(o.title || out.title || '').slice(0, 100),
     hook: o.hook ? { mode: o.hook.mode, at: Number(o.hook.at), len: Number(o.hook.len), text: String(o.hook.text || '').slice(0, 60) } : null,
     tempo: fx.TEMPO[o.tempo] !== undefined ? o.tempo : 'normal', music: !!o.music, changes: String(o.changes || '').slice(0, 500),
     viral: Math.max(1, Math.min(10, Math.round(Number(o.viral) || 0))) || undefined, viralWhy: String(o.viralWhy || '').slice(0, 300), viralTip: String(o.viralTip || '').slice(0, 300),
@@ -732,8 +745,14 @@ export async function reviseLong(raw, out, wish, segs, loud, profile) {
     const last = blocks[blocks.length - 1];
     if (last && x.s - last.s < 20) { last.e = x.e; last.t += ' ' + x.t; } else blocks.push({ s: x.s, e: x.e, t: x.t });
   }
-  let said = blocks.map((b) => `[${Math.floor(b.s)}–${Math.ceil(b.e)}] ${b.t}`).join('\n');
-  if (said.length > 120000) said = said.slice(0, 120000) + '\n[… gekürzt]';
+  // möglichst ganze Sätze mit Nummer (exakte Grenzen); nur bei sehr langen Aufnahmen 20-s-Blöcke
+  const sents = bounds.numbered(segs);
+  let said = bounds.sentenceLines(sents, 0, Infinity, 150000);
+  const bySentences = !said.endsWith('[… gekürzt]');
+  if (!bySentences) {
+    said = blocks.map((b) => `[${Math.floor(b.s)}–${Math.ceil(b.e)}] ${b.t}`).join('\n');
+    if (said.length > 120000) said = said.slice(0, 120000) + '\n[… gekürzt]';
+  }
   // lauteste 5-s-Fenster als Hinweise auf Action
   const peaks = [];
   if (loud?.length) {
@@ -756,7 +775,9 @@ export async function reviseLong(raw, out, wish, segs, loud, profile) {
     'Tempo innerhalb der Abschnitte: aus = nichts, ruhig = nur lange Pausen, normal = Pausen + „ähm“, schnell = auch kurze Pausen.',
     profile?.clipHints ? `Worauf der Creator bei diesem Kanal Wert legt: ${profile.clipHints}` : '',
     peaks.length ? 'Lauteste Stellen (oft Action/Reaktion): ' + peaks.join(', ') : '',
-    said ? 'Gesprochenes (Sekunden ab Anfang, automatisch erkannt):\n' + said : 'Kein gesprochener Text verfügbar – orientiere dich an Lautstärke und Standbildern.',
+    said && bySentences ? 'Abschnitte bitte über Satznummern angeben (fromSentence/toSentence; Abschnitt ohne Sprache: 0/0 und start/end). Nie mitten im Satz schneiden;'
+      + ' ein Abschnitt endet nach einem abgeschlossenen Gedanken, der nächste beginnt nicht mit einem Bezug auf Weggeschnittenes.' : '',
+    said ? `Gesprochenes (Sekunden ab Anfang, automatisch erkannt${bySentences ? ', nummerierte Sätze' : ''}):\n` + said : 'Kein gesprochener Text verfügbar – orientiere dich an Lautstärke und Standbildern.',
     '', 'Standbilder (Sekunde steht davor):',
   ].filter(Boolean).join('\n') }];
   const n = Math.min(10, Math.max(4, Math.round(dur / 120)));
@@ -773,8 +794,9 @@ export async function reviseLong(raw, out, wish, segs, loud, profile) {
   }
   const schema = { type: 'object', additionalProperties: false,
     required: ['segments', 'teaser', 'tempo', 'music', 'title', 'changes'], properties: {
-      segments: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['start', 'end'],
-        properties: { start: { type: 'number' }, end: { type: 'number' } } } },
+      segments: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['fromSentence', 'toSentence', 'start', 'end'],
+        properties: { fromSentence: { type: 'integer', description: 'erster Satz (S…), 0 ohne Sprache' }, toSentence: { type: 'integer', description: 'letzter Satz (S…), 0 ohne Sprache' },
+          start: { type: 'number' }, end: { type: 'number' } } } },
       teaser: { type: 'object', additionalProperties: false, required: ['use', 'at', 'len', 'text'], properties: {
         use: { type: 'boolean' }, at: { type: 'number', description: 'Start des Höhepunkts (Sekunde)' },
         len: { type: 'number', description: '3–8 Sekunden' }, text: { type: 'string', description: 'höchstens 5 Wörter, leer wenn unpassend' } } },
@@ -783,22 +805,10 @@ export async function reviseLong(raw, out, wish, segs, loud, profile) {
       title: { type: 'string', description: 'Titel (höchstens 100 Zeichen)' },
       changes: { type: 'string', description: 'Ein bis zwei Sätze auf Deutsch (Du-Form an den Creator): was du geändert hast und warum, mit neuer Länge' },
     } };
-  let r;
-  try {
-    r = await api().beta.messages.create({
-      model: MODEL, max_tokens: 16000,
-      betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema } },
-      messages: [{ role: 'user', content }],
-    });
-  } catch (e) { throw new Error(friendly(e)); }
-  if (r.stop_reason === 'refusal') throw new Error('abgelehnt');
-  const o = JSON.parse(r.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
-  const cost = (r.usage?.input_tokens || 0) * PRICE.input + (r.usage?.output_tokens || 0) * PRICE.output;
-  const a = cfg(); a.spent = Math.round(((a.spent || 0) + cost) * 10000) / 10000; a.count = (a.count || 0) + 1; save();
+  const o = await cutCall(content, schema);
   // Abschnitte prüfen: in der Aufnahme, sortiert, zusammengeführt, mind. 3 s
   const segsOut = [];
-  for (const x of (o.segments || []).map((x) => [Math.max(0, Number(x.start)), Math.min(dur, Number(x.end))])
+  for (const x of (o.segments || []).map((x) => { const b = bySentences && bounds.fromSentences(sents, x.fromSentence, x.toSentence); return b ? [b.start, b.end] : [Math.max(0, Number(x.start)), Math.min(dur, Number(x.end))]; })
     .filter(([s, e]) => Number.isFinite(s) && Number.isFinite(e) && e - s >= 3).sort((p, q) => p[0] - q[0])) {
     const last = segsOut[segsOut.length - 1];
     if (last && x[0] <= last[1] + 0.5) last[1] = Math.max(last[1], x[1]); else segsOut.push(x);

@@ -10,7 +10,8 @@ const yt = { size: 0, got: 0 }, tt = { size: 0, got: 0, chunks: 0 };
 let stallAt = process.env.MOCK_STALL_AT ? Number(process.env.MOCK_STALL_AT) : -1;
 const stallOnce = (s, e) => { if (stallAt >= s && stallAt <= e) { stallAt = -1; return true; } return false; };
 const body = (req) => new Promise((r) => { const c = []; req.on('data', (d) => c.push(d)); req.on('end', () => r(Buffer.concat(c))); });
-const json = (res, s, j, h = {}) => { res.writeHead(s, { 'Content-Type': 'application/json', ...h }); res.end(JSON.stringify(j)); };
+const jsonOut = (res, s, j, h = {}) => { res.writeHead(s, { 'Content-Type': 'application/json', ...h }); res.end(JSON.stringify(j)); };
+const json = jsonOut;
 http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://x'); const b = await body(req);
   const p = u.pathname;
@@ -124,6 +125,22 @@ http.createServer(async (req, res) => {
   if (p.startsWith('/whisper/')) { res.writeHead(200, { 'Content-Length': 2048 }); return res.end(Buffer.alloc(2048)); }
   if (p === '/v1/messages') {
     const j = JSON.parse(b.toString());
+    // stream: true → dieselbe Antwort als Server-Sent Events (wie die echte API)
+    const json = !j.stream ? jsonOut : (res2, st, m) => {
+      if (st !== 200) return jsonOut(res2, st, m);
+      log.push({ stream: true, effort: j.output_config?.effort, maxTokens: j.max_tokens });
+      res2.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      const ev = (type, data) => res2.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);
+      ev('message_start', { message: { ...m, content: [], stop_reason: null, usage: { input_tokens: m.usage.input_tokens, output_tokens: 1 } } });
+      m.content.forEach((c, i) => {
+        ev('content_block_start', { index: i, content_block: { type: 'text', text: '' } });
+        ev('content_block_delta', { index: i, delta: { type: 'text_delta', text: c.text } });
+        ev('content_block_stop', { index: i });
+      });
+      ev('message_delta', { delta: { stop_reason: m.stop_reason, stop_sequence: null }, usage: { output_tokens: m.usage.output_tokens } });
+      ev('message_stop', {});
+      res2.end();
+    };
     if (j.output_config?.format?.schema?.properties?.items) {
       const ids = j.output_config.format.schema.properties.items.items.properties.id.enum;
       const txt = JSON.stringify(j.messages[0].content);
@@ -144,7 +161,8 @@ http.createServer(async (req, res) => {
     }
     if (j.output_config?.format?.schema?.properties?.parts) {
       const texts = j.messages[0].content.filter((c) => c.type === 'text').map((c) => c.text);
-      const parts = texts.filter((t) => t.startsWith('Baustein')).map((t, i) => { const m = /Sekunde (\d+)–(\d+)/.exec(t); return { part: i + 1, start: +m[1], end: +m[2] }; });
+      const parts = texts.filter((t) => t.startsWith('Baustein')).map((t, i) => { const m = /Sekunde ([\d.]+)–([\d.]+)/.exec(t); const st = /Sätze S(\d+)–S(\d+)/.exec(t);
+        return { part: i + 1, fromSentence: st ? +st[1] : 0, toSentence: st ? +st[2] : 0, start: +m[1], end: +m[2] }; });
       log.push({ summary: { parts: parts.length, wish: /Wunsch des Creators: „([^“]*)“/.exec(texts[0])?.[1] || '' } });
       return json(res, 200, { id: 'msg_s', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn',
         content: [{ type: 'text', text: JSON.stringify({ parts: parts.slice(0, 4) }) }], usage: { input_tokens: 9000, output_tokens: 300 } });
@@ -179,7 +197,11 @@ http.createServer(async (req, res) => {
       const sec = texts.filter((t) => t.startsWith('Kandidat')).map((t) => /Sekunde (\d+)–(\d+)/.exec(t)).map((m) => [Number(m[1]), Number(m[2])]);
       const clipHints = /Worauf der Creator bei diesem Kanal Wert legt: ([^\n]*)/.exec(texts[0])?.[1] || '';
       if (clipHints) log.push({ clipHints: clipHints.slice(0, 60) });
-      const pick = sec.slice(0, 2).map(([a, b2], i) => ({ candidate: i + 1, start: a + 1, end: b2 - 2, title: i ? 'Der Sieg 🏆' : 'Drei auf einmal?!', reason: 'lauter Moment mit Reaktion',
+      const sentOf = (t) => [...t.matchAll(/^S(\d+) \[([\d.]+)–([\d.]+)\]/gm)].map((m) => ({ id: Number(m[1]), s: Number(m[2]), e: Number(m[3]) }));
+      const cs = texts.filter((t) => t.startsWith('Kandidat')).map(sentOf);
+      log.push({ sentenceRules: /SAUBERE SCHNITTE/.test(texts[0]), sentLines: cs.map((x) => x.length) });
+      const pick = sec.slice(0, 2).map(([a, b2], i) => ({ candidate: i + 1, start: a + 1, end: b2 - 2,
+        ...(i === 0 && cs[0]?.length > 2 ? { fromSentence: cs[0].find((x) => x.s >= a)?.id || cs[0][0].id, toSentence: [...cs[0]].reverse().find((x) => x.e <= b2)?.id || cs[0][cs[0].length - 1].id } : { fromSentence: 0, toSentence: 0 }), title: i ? 'Der Sieg 🏆' : 'Drei auf einmal?!', reason: 'lauter Moment mit Reaktion',
         mood: i ? 'episch' : 'lustig', music: i ? 'epic orchestral hybrid with big drums' : 'quirky playful pizzicato',
         viral: i ? 6 : 9, viralWhy: i ? 'Solider Sieg-Moment, aber bekannter Ablauf.' : 'Lauter Ausraster mit Pointe – hoher Teilwert.', viralTip: 'Mit dem Ausruf direkt einsteigen.',
         hook: { mode: i ? 'cold' : 'preview', at: a + 1 + Math.round((b2 - a - 3) * 0.7), len: 2, text: i ? 'Das gibt es nicht!' : 'Wie konnte das passieren?' },

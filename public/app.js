@@ -1647,6 +1647,8 @@ async function renderSettings() {
   const aKey = h('input', { type: 'password', autocomplete: 'off', placeholder: a.configured ? 'gespeichert (' + a.keyHint + ') – zum Ändern neu eintragen' : 'sk-ant-…' });
   const aAuto = h('input', { type: 'checkbox', checked: a.auto });
   const aTips = h('input', { type: 'checkbox', checked: a.autoTips !== false });
+  const aEffort = h('select', {}, [['max', 'Maximum – beste Schnitte (empfohlen, ca. 0,20–1 $ je Aufnahme)'], ['xhigh', 'Sehr hoch'], ['high', 'Hoch'], ['medium', 'Mittel – günstig, schneller']]
+    .map(([k, n]) => h('option', { value: k, selected: (a.cutEffort || 'max') === k }, n)));
   const aHints = h('textarea', { rows: 3, value: a.hints, placeholder: 'z. B. „Ich heiße Micha“, „keine Emojis im Titel“, „immer auf Deutsch“' });
   const claudeBox = h('div', { class: 'box' }, h('h3', {}, '✨ Claude (Vorschläge für Titel & Texte)'),
     a.configured ? h('p', { class: 'ok-text' }, '✓ eingerichtet · bisher ' + a.count + ' Vorschläge, ca. ' + (a.spent || 0).toFixed(2).replace('.', ',') + ' $') : null,
@@ -1657,9 +1659,11 @@ async function renderSettings() {
     h('label', {}, 'API-Schlüssel'), aKey,
     h('label', { class: 'check' }, aAuto, 'Neue Videos unter „Zur Freigabe“ automatisch vorschlagen lassen'),
     h('label', { class: 'check' }, aTips, '⚡ Viral-Tipps zu Einstieg und Schnitt einmal automatisch umsetzen (neue Fassung „v2“ zum Vergleichen, kostet je Video einen weiteren Claude-Aufruf)'),
+    h('label', {}, '✂ Denkstufe beim Schneiden (Highlights, Kurzfassung, Überarbeiten)'), aEffort,
+    h('p', { class: 'hint' }, 'Claude wählt Anfang und Ende als ganze Sätze; je höher die Stufe, desto gründlicher prüft es Pointe, Zusammenhang und saubere Übergänge.'),
     h('label', {}, 'Allgemeine Hinweise an Claude'), aHints,
     h('div', { class: 'row', style: { marginTop: '12px' } },
-      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/ai/config', { apiKey: aKey.value, auto: aAuto.checked, autoTips: aTips.checked, hints: aHints.value }), 'Gespeichert.') }, 'Speichern'),
+      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/ai/config', { apiKey: aKey.value, auto: aAuto.checked, autoTips: aTips.checked, cutEffort: aEffort.value, hints: aHints.value }), 'Gespeichert.') }, 'Speichern'),
       a.configured ? h('button', { class: 'btn ghost danger', onclick: () => confirm('API-Schlüssel entfernen?') && run(() => api('POST', '/api/ai/config', { removeKey: true }), 'Schlüssel entfernt.')() }, 'Schlüssel entfernen') : null));
 
   // ----- Automatischer Schnitt -----
@@ -1807,8 +1811,8 @@ async function renderSettings() {
   const hpGame = cb(hp?.pauseGaming !== false);
   const hpLoad = h('input', { type: 'number', min: 5, max: 95, value: hp?.gpuLoad ?? 25 });
   const hpGames = h('input', { value: hp?.games || '', placeholder: 'z. B. Wow, FortniteClient-Win64-Shipping, cs2 (Prozessname ohne .exe)' });
-  const hpModel = h('select', {}, [['large-v3-turbo', 'large-v3-turbo – sehr gut und schnell (empfohlen)'], ['large-v3', 'large-v3 – beste Qualität, langsamer'], ['medium', 'medium'], ['small', 'small']]
-    .map(([k, n]) => h('option', { value: k, selected: (hp?.model || 'large-v3-turbo') === k }, n)));
+  const hpModel = h('select', {}, [['large-v3', 'large-v3 – beste Qualität, genaueste Satzgrenzen (empfohlen)'], ['large-v3-turbo', 'large-v3-turbo – sehr gut, schneller'], ['medium', 'medium'], ['small', 'small']]
+    .map(([k, n]) => h('option', { value: k, selected: (hp?.model || 'large-v3') === k }, n)));
   const helperBox = h('div', { class: 'box' }, h('h3', {}, '🖥 Rechenhelfer (dein PC)'),
     h('p', { class: 'hint' }, 'Ein PC mit NVIDIA-Grafikkarte (z. B. RTX 3070) übernimmt die Spracherkennung mit dem großen Whisper-Modell – genauer, schneller und der Server wird entlastet. Ist der PC aus, rechnet die Zentrale selbst.'),
     hp?.enabled ? hpStatusEl(hp) : null,
