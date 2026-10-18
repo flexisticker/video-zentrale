@@ -1,5 +1,8 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.25.1', date: '18.10.2026', items: [
+    'Unraid zeigt jetzt ein Icon für den Container (Docker-Label net.unraid.docker.icon). Falls es nicht erscheint: beim Container unter „Icon URL“ die Adresse aus der Anleitung eintragen.',
+  ] },
   { version: '1.25.0', date: '13.10.2026', items: [
     '✂ Saubere Schnitte wie bei Opus Clip: Claude wählt Anfang und Ende jetzt als ganze Sätze (nummerierte Sätze mit Zeitstempel statt geschätzter Sekunden) – kein Abschneiden mitten im Satz mehr.',
     'Sicherheitsnetz beim Schneiden: Start/Ende rasten auf Satzanfang bzw. Satzende ein, mit etwas Luft und in der leisesten Stelle der Sprechpause; ohne Sprache auf einen Bildwechsel. Zu lange Clips enden am letzten Satzende statt hart bei der Maximallänge.',

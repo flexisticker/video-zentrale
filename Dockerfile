@@ -41,6 +41,7 @@ ARG BUILD_DATE=""
 ENV BUILD_NUMBER=$BUILD_NUMBER GIT_COMMIT=$GIT_COMMIT BUILD_DATE=$BUILD_DATE
 # Unraid: Eintrag „WebUI“ im Container-Menü
 LABEL net.unraid.docker.webui="http://[IP]:[PORT:8090]/"
+LABEL net.unraid.docker.icon="https://raw.githubusercontent.com/flexisticker/video-zentrale/main/public/icons/icon-512.png"
 EXPOSE 8090
 VOLUME ["/data", "/videos"]
 HEALTHCHECK --interval=60s --timeout=5s --start-period=20s CMD node -e "fetch('http://127.0.0.1:8090/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
