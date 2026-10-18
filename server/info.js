@@ -48,8 +48,9 @@ ${nav(esc, P)}
 <li>Eigene Aufnahmen schneiden (Highlights, Kurzfassung, Shorts) und mit Untertiteln, Titelbild, Titel und Beschreibung versehen.</li>
 <li>Jedes Video wird vom Inhaber geprüft und ausdrücklich freigegeben – erst dann wird es hochgeladen.</li>
 <li><b>YouTube:</b> Upload als privates Video auf den eigenen Kanal; öffentlich stellt der Inhaber es selbst in YouTube Studio.</li>
-<li><b>TikTok:</b> Upload des fertigen Videos auf das eigene TikTok-Konto – als Entwurf in den TikTok-Posteingang (Bearbeitung und Veröffentlichung in der TikTok-App)
-oder, nach Auswahl der Einstellungen im Veröffentlichungsdialog (Sichtbarkeit, Kommentare, Duett/Stitch, Offenlegung von Werbeinhalten), direkt auf das eigene Profil.</li>
+<li><b>TikTok:</b> Das fertige Video wird <b>direkt aus der App auf dem eigenen TikTok-Profil veröffentlicht</b>. Vorher wählt der Inhaber im
+Veröffentlichungsdialog der App selbst Sichtbarkeit, Kommentare/Duett/Stitch und ggf. die Kennzeichnung von Werbe- bzw. Markeninhalten und bestätigt
+die TikTok-Richtlinien – erst dann wird gepostet. Alternativ kann ein Video als Entwurf in den TikTok-Posteingang geschickt und in der TikTok-App fertiggestellt werden.</li>
 </ul>
 </div>
 <h2>TikTok-Anbindung</h2>
@@ -57,8 +58,9 @@ oder, nach Auswahl der Einstellungen im Veröffentlichungsdialog (Sichtbarkeit, 
 <ul>
 <li><b>Login Kit:</b> Der Inhaber meldet sich einmal mit seinem TikTok-Konto an und stimmt dem Zugriff zu. Die Verbindung kann jederzeit in der App oder in den TikTok-Einstellungen getrennt werden.</li>
 <li><b>user.info.basic:</b> Anzeige von Profilname und Profilbild, damit klar ist, auf welches Konto hochgeladen wird.</li>
-<li><b>video.upload:</b> Hochladen eines vom Inhaber ausgewählten Videos als Entwurf in den TikTok-Posteingang.</li>
-<li><b>video.publish:</b> Veröffentlichen eines vom Inhaber ausgewählten Videos auf dem eigenen Profil – nur nach ausdrücklicher Bestätigung im Veröffentlichungsdialog.</li>
+<li><b>video.publish:</b> Direktes Veröffentlichen eines vom Inhaber ausgewählten Videos auf seinem eigenen Profil (Content Posting API, Direct Post) –
+nur nach ausdrücklicher Bestätigung im Veröffentlichungsdialog. Die Profil-Einstellungen von TikTok (z. B. gesperrte Kommentare, maximale Videolänge) werden vorher abgefragt und beachtet.</li>
+<li><b>video.upload:</b> Optional: ein ausgewähltes Video als Entwurf in den TikTok-Posteingang schicken, um es in der TikTok-App zu bearbeiten.</li>
 <li>Es werden keine Inhalte anderer Nutzer gelesen, keine Daten verkauft oder an Dritte weitergegeben und keine Werbung geschaltet.</li>
 </ul>
 </div>
@@ -67,8 +69,10 @@ oder, nach Auswahl der Einstellungen im Veröffentlichungsdialog (Sichtbarkeit, 
 <p><b>Micha’s Video-Zentrale</b> is the private video tool of ${name}. The owner uses it to edit his <b>own</b> gaming and 3D-printing videos and to publish them
 to his <b>own</b> YouTube and TikTok accounts (MichaModus, 3dbymicha). The application runs on the company’s own server; it is not offered to the public and has no other users.</p>
 <p>TikTok integration: <b>Login Kit</b> (the owner signs in with his TikTok account and grants access; access can be revoked at any time),
-<b>user.info.basic</b> (display name and avatar to show which account is connected), <b>video.upload</b> (send a video the owner selected to his TikTok inbox as a draft)
-and <b>video.publish</b> (post a video the owner selected to his own profile, only after he confirms privacy level, interaction settings and content disclosure in the posting dialog).
+<b>user.info.basic</b> (display name and avatar to show which account is connected), <b>video.publish</b> (Direct Post: the app publishes a video the owner selected
+directly to his own TikTok profile, only after he chooses the privacy level and interaction settings, discloses branded or promotional content where applicable and confirms
+TikTok’s policies in the app’s posting dialog; creator info such as disabled interactions and maximum video length is queried first and respected)
+and <b>video.upload</b> (optional: send a selected video to his TikTok inbox as a draft to finish it in the TikTok app).
 No content of other users is accessed, no data is sold or shared, no ads are shown.</p>
 </div>
 <h2>Kontakt / Contact</h2>

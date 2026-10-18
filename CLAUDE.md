@@ -269,6 +269,8 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   – Access List „Nur Heimnetz“ bleibt für alles andere. TikTok: Website `https://videos.flexisticker.de/info`, Terms `…/info/nutzungsbedingungen`,
   Privacy `…/info/datenschutz`. Kurzzeitig lagen die Seiten im Flex-Studio-Portal (Flex-Studio 2.51.0) – auf Wunsch des Kunden wieder entfernt (2.51.1).
   Texte bei geänderten Scopes/Funktionen mitpflegen. **Nicht getestet:** NPM-Block beim Kunden, Aufruf von außen.
+- 1.26.1: Info-Seite beschreibt **Direct Post als Hauptweg** (Kunde: nach TikTok-Freigabe soll direkt live gepostet werden), Entwurf/Posteingang nur Alternative.
+  Nach der Freigabe: Production-Schlüssel eintragen, „Direkt veröffentlichen“ (`tiktok.directPost`) an, Kanäle neu verbinden (Scope video.publish).
 - **Offen – Paket 4 Zusammenstellung (angeboten, Kunde will es):** „Best of“ aus mehreren Videos (Zeitraum/Auswahl, 16:9 oder 9:16, Claude
   ordnet Highlights, Platz-Einblendungen), später automatisch wöchentlich. Nach 1.18.0 als eigenes Paket bauen.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
