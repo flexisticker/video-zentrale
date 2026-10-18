@@ -1,5 +1,8 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.26.0', date: '18.10.2026', items: [
+    '🌐 Öffentliche Info-Seite unter /info (Beschreibung, Nutzungsbedingungen, Datenschutzhinweise – deutsch + englisch) für die App-Prüfung bei TikTok. Nur dieser Pfad ist ohne Anmeldung erreichbar; Anleitung für die Freigabe in Nginx Proxy Manager unter Einstellungen → Info-Seite.',
+  ] },
   { version: '1.25.1', date: '18.10.2026', items: [
     'Unraid zeigt jetzt ein Icon für den Container (Docker-Label net.unraid.docker.icon). Falls es nicht erscheint: beim Container unter „Icon URL“ die Adresse aus der Anleitung eintragen.',
   ] },

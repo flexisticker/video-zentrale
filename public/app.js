@@ -1845,6 +1845,28 @@ async function renderSettings() {
     if (f) restoreFrom(f.name, () => api('POST', '/api/backup/restore', undefined, f));
   } });
   const bkAuto = cb(bk?.auto), bkTime = h('input', { type: 'time', value: bk?.time || '03:30' }), bkKeep = numIn(bk?.keep ?? 14, { min: 1, max: 90 });
+  // ----- Öffentliche Info-Seite (/info) -----
+  const pi = await api('GET', '/api/public-info').catch(() => null);
+  const infoUrl = location.origin + '/info';
+  const npmSnippet = `location ^~ /info {\n    allow all;\n    proxy_pass http://192.168.1.10:8094;\n    proxy_set_header Host $host;\n}`;
+  const piCompany = h('input', { value: pi?.company || '' }), piContact = h('textarea', { rows: 3, value: pi?.contact || '', placeholder: 'Inhaber, Anschrift, E-Mail' });
+  const piImprint = h('input', { value: pi?.imprintUrl || '', placeholder: 'https://…/impressum' }), piPrivacy = h('input', { value: pi?.privacyUrl || '', placeholder: 'optional: https://…/datenschutz' });
+  const infoBox = h('div', { class: 'box' }, h('h3', {}, '🌐 Öffentliche Info-Seite'),
+    h('p', { class: 'hint' }, 'Für die App-Prüfung bei TikTok (und Google) braucht es eine von außen erreichbare Website. Die Zentrale hat dafür unter /info drei Seiten ohne Anmeldung: '
+      + 'Beschreibung, Nutzungsbedingungen und Datenschutzhinweise (deutsch + englisch). Alles andere bleibt im Heimnetz.'),
+    h('div', { class: 'row', style: { flexWrap: 'wrap' } }, ...[['/info', 'Info-Seite'], ['/info/nutzungsbedingungen', 'Nutzungsbedingungen'], ['/info/datenschutz', 'Datenschutz']]
+      .map(([u, n]) => h('a', { class: 'btn small ghost', href: u, target: '_blank', rel: 'noopener' }, n + ' ↗'))),
+    h('label', {}, 'Firma / Name'), piCompany, h('label', {}, 'Kontakt (erscheint auf den Seiten)'), piContact,
+    h('label', {}, 'Impressum-Adresse'), piImprint, h('label', {}, 'Allgemeine Datenschutzerklärung (optional)'), piPrivacy,
+    h('div', { class: 'row', style: { marginTop: '10px' } }, h('button', { class: 'btn', onclick: run(() => api('POST', '/api/public-info', { company: piCompany.value, contact: piContact.value, imprintUrl: piImprint.value, privacyUrl: piPrivacy.value }), 'Gespeichert.') }, 'Speichern')),
+    h('details', {}, h('summary', {}, 'So gibst du nur /info nach außen frei (Nginx Proxy Manager)'),
+      h('ol', { class: 'steps' },
+        h('li', {}, 'NPM öffnen → Proxy Hosts → videos.flexisticker.de → Bearbeiten (⋮ → Edit).'),
+        h('li', {}, 'Reiter „Advanced“ → in „Custom Nginx Configuration“ diesen Block einfügen (IP/Port wie beim Proxy-Ziel der Zentrale):'),
+        h('li', {}, h('pre', { class: 'snippet' }, npmSnippet), h('button', { class: 'btn small', onclick: () => { navigator.clipboard?.writeText(npmSnippet).then(() => toast('Kopiert.'), () => toast('Bitte von Hand markieren.', true)); } }, 'Kopieren')),
+        h('li', {}, 'Speichern. Die Zugriffsliste „Nur Heimnetz“ bleibt eingeschaltet – sie gilt weiter für alles außer /info.'),
+        h('li', {}, 'Am Handy mit WLAN aus prüfen: ' + infoUrl + ' lädt, ' + location.origin + '/ zeigt weiterhin 403.'),
+        h('li', {}, 'Bei TikTok eintragen: Website ' + infoUrl + ', Terms ' + infoUrl + '/nutzungsbedingungen, Privacy ' + infoUrl + '/datenschutz.'))));
   const backupBox = h('div', { class: 'box' }, h('h3', {}, '💾 Sicherung'),
     h('p', { class: 'hint' }, 'Sichert Kanäle, Verbindungen, Schlüssel, alle Einstellungen, Videodaten (Titel, Texte, Status), deine Fotos und Transkripte. Die Videos selbst und die Musik liegen auf dem Server-Array und sind nicht enthalten.'),
     !bk ? h('p', { class: 'err' }, 'Sicherungen konnten nicht geladen werden.') : null,
@@ -1945,9 +1967,9 @@ async function renderSettings() {
             onclick: run(async () => { await api('POST', '/api/org/undo', { index: i }); await refresh(); }, 'Rückgängig gemacht.') }, '↶ Rückgängig'))))) : null,
     ] : null);
   const jumps = [['s-kanaele', 'Kanäle'], ['s-claude', 'Claude'], ['s-schnitt', 'Schnitt'], ['s-musik', 'Musik'], ['s-sfx', 'Sounds'], ['s-guthaben', 'Guthaben'], ['s-ordnung', 'Ordnung'], ['s-bilder', 'Titelbilder'],
-    ['s-helfer', 'Rechenhelfer'], ['s-google', 'YouTube-App'], ['s-tiktok', 'TikTok-App'], ['s-sicherung', 'Sicherung'], ['s-allgemein', 'Allgemein']];
+    ['s-helfer', 'Rechenhelfer'], ['s-google', 'YouTube-App'], ['s-tiktok', 'TikTok-App'], ['s-info', 'Info-Seite'], ['s-sicherung', 'Sicherung'], ['s-allgemein', 'Allgemein']];
   [[claudeBox, 's-claude'], [cutBox, 's-schnitt'], [musicBox, 's-musik'], [sfxBox, 's-sfx'], [creditBox, 's-guthaben'], [orgBox, 's-ordnung'], [thumbBox, 's-bilder'], [helperBox, 's-helfer'], [googleBox, 's-google'],
-    [tiktokBox, 's-tiktok'], [backupBox, 's-sicherung'], [account, 's-allgemein']].forEach(([el, id]) => { el.id = id; el.style.scrollMarginTop = '110px'; });
+    [tiktokBox, 's-tiktok'], [infoBox, 's-info'], [backupBox, 's-sicherung'], [account, 's-allgemein']].forEach(([el, id]) => { el.id = id; el.style.scrollMarginTop = '110px'; });
   const jumpBar = h('div', { class: 'setjump' }, jumps.map(([id, label]) => h('button', { class: 'btn small', onclick: () => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, label)));
   mainEl.replaceChildren(jumpBar,
     h('div', { class: 'bar', id: 's-kanaele', style: { scrollMarginTop: '110px' } }, h('h2', { class: 'h2' }, 'Kanäle'), h('span', { class: 'hint' }, 'Jeder Kanal hat eigene YouTube-/TikTok-Verbindung und Vorgaben. Die Zentrale schlägt je Video den Kanal vor.'),
@@ -1955,7 +1977,7 @@ async function renderSettings() {
       h('button', { class: 'btn small', onclick: () => { const n = prompt('Name des neuen Kanals:'); if (n) run(() => api('POST', '/api/profiles', { name: n }), 'Kanal angelegt.')(); } }, '+ Kanal')),
     h('div', { class: 'settings' }, st.profiles.map(channelBox)),
     h('h2', { class: 'h2', style: { marginTop: '24px' } }, 'Apps & Zugang'),
-    h('div', { class: 'settings' }, claudeBox, cutBox, musicBox, sfxBox, creditBox, orgBox, thumbBox, helperBox, googleBox, tiktokBox, backupBox, account));
+    h('div', { class: 'settings' }, claudeBox, cutBox, musicBox, sfxBox, creditBox, orgBox, thumbBox, helperBox, googleBox, tiktokBox, infoBox, backupBox, account));
 }
 
 start();

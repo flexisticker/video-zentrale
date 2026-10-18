@@ -261,9 +261,14 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   Kosten bei effort max (geschätzt 0,20–1 $ je Aufnahme), large-v3 auf dem Kunden-PC.
 - 1.25.1 (18.10.2026): Unraid-Icon. Dockerfile-Label `net.unraid.docker.icon` = raw.githubusercontent …/main/public/icons/icon-512.png (Repo öffentlich).
   Unraid nimmt das Label nur, wenn im Container-Template kein Icon steht → sonst „Icon URL“ (erweiterte Ansicht) von Hand setzen.
-- TikTok-Prüfung (18.10.2026): abgelehnt wegen **Website URL** (videos.flexisticker.de ist nur im Heimnetz). Öffentliche Info-Seiten liegen jetzt im
-  Flex-Studio-Kundenportal (Flex-Studio 2.51.0, `server/appinfo.js`): `https://freigabe.flexisticker.de/video-zentrale` (+ `/nutzungsbedingungen`,
-  `/datenschutz`). Kunde trägt sie bei TikTok ein und reicht neu ein. Wenn sich Scopes/Funktionen ändern, die Texte dort mitpflegen.
+- 1.26.0 (18.10.2026): TikTok-Prüfung abgelehnt wegen **Website URL** (videos.flexisticker.de nur im Heimnetz). **Öffentliche Info-Seiten** `server/info.js`
+  unter `/info` (+ `/nutzungsbedingungen`, `/datenschutz`, Kurz `/terms` `/privacy` 301, `/info/style.css`, `/info/icon.png`), vor jeder Anmeldung in
+  `createServer` (`info.handle`), nur GET/HEAD, kein JS. Kontakt/Impressum aus `db().publicInfo {company, contact, imprintUrl (Standard
+  freigabe.flexisticker.de/impressum), privacyUrl}`, Routen `/api/public-info` GET/POST, Kasten „🌐 Öffentliche Info-Seite“ (Einstellungen, `#s-info`).
+  **NPM:** Proxy Host videos.flexisticker.de → Advanced: `location ^~ /info { allow all; proxy_pass http://192.168.1.10:8094; proxy_set_header Host $host; }`
+  – Access List „Nur Heimnetz“ bleibt für alles andere. TikTok: Website `https://videos.flexisticker.de/info`, Terms `…/info/nutzungsbedingungen`,
+  Privacy `…/info/datenschutz`. Kurzzeitig lagen die Seiten im Flex-Studio-Portal (Flex-Studio 2.51.0) – auf Wunsch des Kunden wieder entfernt (2.51.1).
+  Texte bei geänderten Scopes/Funktionen mitpflegen. **Nicht getestet:** NPM-Block beim Kunden, Aufruf von außen.
 - **Offen – Paket 4 Zusammenstellung (angeboten, Kunde will es):** „Best of“ aus mehreren Videos (Zeitraum/Auswahl, 16:9 oder 9:16, Claude
   ordnet Highlights, Platz-Einblendungen), später automatisch wöchentlich. Nach 1.18.0 als eigenes Paket bauen.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,

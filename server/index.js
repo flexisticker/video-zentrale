@@ -23,6 +23,7 @@ import * as helper from './helper.js';
 import * as sfx from './sfx.js';
 import * as credits from './credits.js';
 import * as org from './organize.js';
+import * as info from './info.js';
 import * as ai2 from './ai.js';
 
 const PORT = Number(process.env.PORT || 8090);
@@ -589,6 +590,8 @@ async function api(req, res, url) {
     return send(res, 200, { settings: db().settings, youtube: youtube.status(), tiktok: tiktok.status(), ai: ai.status(), cut: autocut.status(), fal: thumbs.falStatus(), music: music.status(),
       profiles: profiles.list().map(profiles.publicProfile), version: VERSION });
   }
+  if (p === '/api/public-info' && m === 'GET') return send(res, 200, info.cfg());
+  if (p === '/api/public-info' && m === 'POST') return send(res, 200, info.configure(await readJson(req)));
   if (p === '/api/settings' && m === 'PUT') {
     const b = await readJson(req);
     const s = db().settings;
@@ -773,6 +776,8 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
   const url = new URL(req.url, 'http://localhost');
   try {
+    // öffentliche Info-Seiten (/info …) – ohne Anmeldung, in NPM als einziger Pfad nach außen freigegeben
+    if (info.handle(req, res, url)) return;
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/oauth/')) await api(req, res, url);
     else serveStatic(req, res, url);
   } catch (e) {

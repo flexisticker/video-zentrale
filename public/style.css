@@ -353,3 +353,4 @@ select.small { padding: 4px 8px; font-size: 13px; width: auto; }
 .alert-line { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 14px; margin: 0 0 14px; border-radius: 12px;
   border: 1px solid #b8860b; background: rgba(184, 134, 11, .12); }
 .lib-rec .btn.small { margin-left: 8px; padding: 2px 8px; }
+.snippet { font: 13px/1.5 ui-monospace, Consolas, monospace; background: var(--bg); border: 1px solid var(--line); padding: 10px 12px; border-radius: 8px; overflow-x: auto; white-space: pre; margin: 6px 0; }
