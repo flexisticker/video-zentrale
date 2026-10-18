@@ -271,6 +271,9 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   Texte bei geänderten Scopes/Funktionen mitpflegen. **Nicht getestet:** NPM-Block beim Kunden, Aufruf von außen.
 - 1.26.1: Info-Seite beschreibt **Direct Post als Hauptweg** (Kunde: nach TikTok-Freigabe soll direkt live gepostet werden), Entwurf/Posteingang nur Alternative.
   Nach der Freigabe: Production-Schlüssel eintragen, „Direkt veröffentlichen“ (`tiktok.directPost`) an, Kanäle neu verbinden (Scope video.publish).
+  **Beim Kunden eingerichtet (18.10.2026):** NPM-Version mit Access List je Custom Location → Access List „Öffentlich“ (Satisfy Any, allow 0.0.0.0/0 + ::/0),
+  Custom Location `/info` → 192.168.1.10:8094 mit „Öffentlich“; Proxy Host selbst weiter „Nur Heimnetz“. `/info` von außen erreichbar (Kunde bestätigt),
+  TikTok-Prüfung neu eingereicht. Achtung: „Publicly Accessible“ im Reiter Details würde die ganze Zentrale öffnen.
 - **Offen – Paket 4 Zusammenstellung (angeboten, Kunde will es):** „Best of“ aus mehreren Videos (Zeitraum/Auswahl, 16:9 oder 9:16, Claude
   ordnet Highlights, Platz-Einblendungen), später automatisch wöchentlich. Nach 1.18.0 als eigenes Paket bauen.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
