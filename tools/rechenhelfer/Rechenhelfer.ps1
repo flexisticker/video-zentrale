@@ -12,7 +12,7 @@ param([switch]$Install, [switch]$Uninstall, [string]$Release = '')
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # macht Downloads in Windows PowerShell deutlich schneller
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$Version = '1.5'
+$Version = '1.6'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ConfigFile = Join-Path $Here 'rechenhelfer.json'
 $Home2 = if ($env:VZ_HELPER_HOME) { $env:VZ_HELPER_HOME } else { Join-Path $env:LOCALAPPDATA 'VideoZentrale-Rechenhelfer' }
@@ -33,6 +33,8 @@ if ($Uninstall) {
   Log 'Autostart entfernt.'; exit 0
 }
 if ($Install) {
+  # laufende Instanz (auch ältere Version) beenden, sonst rechnen zwei Helfer gleichzeitig
+  Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
   $arg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Minimized -File `"$($MyInvocation.MyCommand.Path)`""
   $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arg -WorkingDirectory $Here
   $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
@@ -178,8 +180,19 @@ $PyMarker = Join-Path $Home2 'py-bereit-1.txt'
 $env:HF_HOME = Join-Path $Home2 'hf'; $env:TORCH_HOME = Join-Path $Home2 'torch'
 $env:UV_CACHE_DIR = Join-Path $Home2 'uv-cache'; $env:UV_PYTHON_INSTALL_DIR = Join-Path $Home2 'python'
 $env:PYTHONIOENCODING = 'utf-8'
+$env:UV_NO_PROGRESS = '1'
+# Programme wie uv/python schreiben Fortschritt auf die Fehlerausgabe. Windows PowerShell 5.1 macht daraus mit
+# ErrorActionPreference 'Stop' sofort einen Abbruch („Downloading cpython …“) → hier nur Zeilen mitschreiben, Ergebnis per Exitcode.
+function Invoke-Native([string]$exe, [string[]]$argv, [string]$label) {
+  $ErrorActionPreference = 'Continue'
+  $lines = @()
+  & $exe @argv 2>&1 | ForEach-Object { $t = "$_"; if ($t.Trim()) { $lines += $t; Log "${label}: $t" } }
+  return @{ code = $LASTEXITCODE; text = ($lines | Select-Object -Last 3) -join ' ' }
+}
+$LastPyTry = [DateTime]::MinValue
 function Ensure-Python {
   if ($env:VZ_PYTHON -or (Test-Path $PyMarker)) { return $true }
+  $script:LastPyTry = Get-Date
   try {
     $uvDir = Join-Path $Home2 'uv'
     $uv = Get-ChildItem -Path $uvDir -Recurse -Filter 'uv.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -193,21 +206,24 @@ function Ensure-Python {
     $uv = $uv.FullName
     Log 'Richte Python für die PC-Analyse ein (einmalig, ca. 5 GB, 15–60 Min.) …'
     Say-Hello 'lädt Python (einmalig)'
-    & $uv venv --python 3.11 $PyDir 2>&1 | ForEach-Object { Log "uv: $_" }
-    if ($LASTEXITCODE -ne 0) { throw 'Python-Umgebung konnte nicht angelegt werden.' }
+    if (-not (Test-Path $PyExe)) {
+      $r = Invoke-Native $uv @('venv', '--python', '3.11', '--clear', $PyDir) 'uv'
+      if ($r.code -ne 0) { throw "Python-Umgebung konnte nicht angelegt werden ($($r.text))" }
+    }
     Say-Hello 'lädt PyTorch mit CUDA (einmalig, ca. 2,5 GB)'
-    & $uv pip install --python $PyExe torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124 2>&1 | ForEach-Object { Log "uv: $_" }
-    if ($LASTEXITCODE -ne 0) { throw 'PyTorch konnte nicht installiert werden.' }
+    $r = Invoke-Native $uv @('pip', 'install', '--python', $PyExe, 'torch==2.5.1', 'torchaudio==2.5.1', '--index-url', 'https://download.pytorch.org/whl/cu124') 'uv'
+    if ($r.code -ne 0) { throw "PyTorch konnte nicht installiert werden ($($r.text))" }
     Say-Hello 'lädt Demucs, Geräusch- und Texterkennung (einmalig)'
-    & $uv pip install --python $PyExe demucs==4.0.1 transformers easyocr soundfile 2>&1 | ForEach-Object { Log "uv: $_" }
-    if ($LASTEXITCODE -ne 0) { throw 'Analyse-Pakete konnten nicht installiert werden.' }
-    $test = & $PyExe -c "import torch, demucs, transformers, easyocr, soundfile; print('CUDA' if torch.cuda.is_available() else 'CPU')" 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "Selbsttest fehlgeschlagen: $test" }
+    $r = Invoke-Native $uv @('pip', 'install', '--python', $PyExe, 'demucs==4.0.1', 'transformers', 'easyocr', 'soundfile') 'uv'
+    if ($r.code -ne 0) { throw "Analyse-Pakete konnten nicht installiert werden ($($r.text))" }
+    $r = Invoke-Native $PyExe @('-c', "import torch, demucs, transformers, easyocr, soundfile; print('CUDA' if torch.cuda.is_available() else 'CPU')") 'Python'
+    if ($r.code -ne 0) { throw "Selbsttest fehlgeschlagen: $($r.text)" }
+    $test = $r.text
     Set-Content -Path $PyMarker -Value "eingerichtet $(Get-Date) – $test" -Encoding UTF8
     Log "Python für die PC-Analyse bereit ($test). Modelle (Demucs, AST, EasyOCR, zusammen ca. 600 MB) lädt der erste Auftrag."
     return $true
   } catch {
-    Log "PC-Analyse nicht eingerichtet: $($_.Exception.Message) – Spracherkennung läuft weiter, neuer Versuch beim nächsten Start."
+    Log "PC-Analyse nicht eingerichtet: $($_.Exception.Message) – Spracherkennung läuft weiter, neuer Versuch in 30 Minuten."
     return $false
   }
 }
@@ -236,6 +252,10 @@ function Get-GamingReason {
   if ($load -ge [int]$Gaming.gpuLoad) { return "Grafikkarte zu $load % ausgelastet" }
   return $null
 }
+
+# Nur ein Rechenhelfer gleichzeitig (sonst laden/rechnen zwei Fenster dasselbe)
+$Single = New-Object Threading.Mutex($false, 'Global\VideoZentraleRechenhelfer')
+if (-not $Single.WaitOne(0)) { Log 'Läuft schon in einem anderen Fenster – dieses beendet sich.'; Start-Sleep 3; exit 0 }
 
 $gpu = try { (Get-CimInstance Win32_VideoController | Where-Object { $_.Name -match 'NVIDIA' } | Select-Object -First 1).Name } catch { $null }
 if (-not $gpu) { $gpu = 'keine NVIDIA-Grafikkarte gefunden (rechnet auf dem Prozessor)' }
@@ -325,6 +345,9 @@ while ($true) {
       continue
     }
     if ($Status -like 'pausiert*') { Log 'Weiter – Grafikkarte wieder frei.' }
+    if ($WantAnalyse -and $Caps -notcontains 'analyse' -and ((Get-Date) - $LastPyTry).TotalMinutes -ge 30) {
+      if (Ensure-Python) { $Caps = @('whisper', 'analyse') }
+    }
     Say-Hello 'bereit'
     $job = Invoke-RestMethod -Uri "$Base/api/helper/next?caps=$($Caps -join ',')" -Headers $Headers -TimeoutSec 40
     if (-not $job -or -not $job.id) { continue }

@@ -347,6 +347,10 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   Getestet (Server + pwsh-Helfer 1.5 + fake-python + Mock): Warten ohne Freigabe, Freigabe per `-Release stop` → Analyse → Schnitt mit Stimme vom PC, Lachen/Knall/„VICTORY ROYALE“
   bei Claude. **Nicht getestet:** echtes Python/PyTorch/Demucs/AST/EasyOCR (nur Syntax geprüft; Modelle aus der Sandbox nicht ladbar), Laufzeit/VRAM auf der RTX 3070,
   uv/PowerShell 5.1 auf echtem Windows, Größe/Upload von voice.wav bei mehrstündigen VODs.
+- 1.29.1: Beim Kunden brach `Ensure-Python` sofort ab: Windows PowerShell 5.1 macht aus stderr-Zeilen nativer Programme (uv „Downloading cpython …“)
+  bei `$ErrorActionPreference='Stop'` einen Abbruch. Jetzt `Invoke-Native` (lokal Continue, Zeilen ins Log, nur `$LASTEXITCODE` zählt), `UV_NO_PROGRESS`.
+  **Regel: native Programme im Rechenhelfer immer über `Invoke-Native`.** Rechenhelfer 1.6: Mutex `Global\VideoZentraleRechenhelfer` (zweite Instanz beendet sich,
+  Log zeigte zwei gleichzeitige Starts), `-Install` stoppt erst die laufende Aufgabe, Python-Einrichtung erneut alle 30 Min. Getestet mit pwsh (Fake-uv mit stderr, Mutex).
 - Ideen danach: „Best of der Woche“ automatisch (Zeitplan), Platz-Einblendungen „Platz 3/2/1“.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
   Sendeplätze je Kanal **stellt der Kunde selbst ein** (keine festen Startzeiten), „Einplanen“ auf nächsten freien Platz, Shorts

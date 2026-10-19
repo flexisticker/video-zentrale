@@ -1,5 +1,9 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.29.1', date: '19.10.2026', items: [
+    'Rechenhelfer 1.6: Die Einrichtung der PC-Analyse brach unter Windows sofort bei „Downloading cpython …“ ab (Windows PowerShell hielt die Fortschrittsmeldungen für Fehler). Behoben – bitte den Rechenhelfer neu herunterladen und „Einrichten.bat“ starten.',
+    'Es läuft jetzt immer nur ein Rechenhelfer gleichzeitig (vorher konnten zwei Fenster parallel starten). Scheitert die Einrichtung, versucht er es alle 30 Minuten erneut, ohne Neustart.',
+  ] },
   { version: '1.29.0', date: '19.10.2026', items: [
     '🧠 PC-Analyse auf deiner Grafikkarte (Rechenhelfer 1.5): trennt deine Stimme vom Spielton (Demucs – wichtig für Twitch-VODs mit nur einer Tonspur), erkennt Lachen, Schreie, Jubel, Explosionen und Schüsse per KI und liest Spieltexte wie „VICTORY“, „ELIMINATED“ oder „#1“.',
     'Alles fließt in die Momentfindung: genauere Spracherkennung auf der sauberen Stimme, echter Tonfall, Geräusche und Spieltexte als Highlight-Signale für Claude.',
