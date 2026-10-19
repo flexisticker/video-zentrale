@@ -274,6 +274,12 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   **Beim Kunden eingerichtet (18.10.2026):** NPM-Version mit Access List je Custom Location → Access List „Öffentlich“ (Satisfy Any, allow 0.0.0.0/0 + ::/0),
   Custom Location `/info` → 192.168.1.10:8094 mit „Öffentlich“; Proxy Host selbst weiter „Nur Heimnetz“. `/info` von außen erreichbar (Kunde bestätigt),
   TikTok-Prüfung neu eingereicht. Achtung: „Publicly Accessible“ im Reiter Details würde die ganze Zentrale öffnen.
+- **Ideen-Plan „Virale Clips“ (19.10.2026, nicht gebaut):** `docs/ideen-plan-virale-clips.md` (Recherche mit 5 Agenten: Profi-Tools,
+  Erkennungssignale, Viral-Handwerk, RTX 3070, Code-Analyse). Kunde: streamt live auf **Twitch + TikTok**, Aufnahme Full HD **30 fps**,
+  Facecam-Position wechselt, OBS-Mehrspur unklar. Wunsch: Zahlen von YouTube/TikTok/Twitch holen und auswerten. Vorschlag: Paket A
+  (Sofort-Fixes inkl. Speicher-Falle `concatGraph`, Hook-Text über Facecam, Mehrspur/Tonfall, 9er-Bildraster, Facecam-Erkennung) +
+  Paket B (Twitch-Chat live per EventSub als Highlight-Signal, Zuschauer-Clips, Statistik-Zentrale, Top/Flop-Beispiele an Claude).
+  Wartet auf „leg los“ und Antwort: Aufnahme parallel zum Stream? TikTok-Live über OBS?
 - **Offen – Paket 4 Zusammenstellung (angeboten, Kunde will es):** „Best of“ aus mehreren Videos (Zeitraum/Auswahl, 16:9 oder 9:16, Claude
   ordnet Highlights, Platz-Einblendungen), später automatisch wöchentlich. Nach 1.18.0 als eigenes Paket bauen.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
