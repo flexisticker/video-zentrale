@@ -1,5 +1,11 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.28.0', date: '19.10.2026', items: [
+    '🎬 Highlight-Video / Kanal-Trailer (Freigabe → „🎬 Trailer“): die besten Momente quer über alle Shorts eines Kanals, 30 Sekunden bis 5 Minuten, quer (YouTube-Kanaltrailer) oder hoch (Short/TikTok). Claude baut den Spannungsbogen: stärkster Einstieg, Abwechslung, bestes Highlight zum Schluss.',
+    'Mit Logo-Intro, „Jetzt abonnieren“-Outro, Logo als Wasserzeichen, kurzen Einblendungen, Spiel/Thema, Blitz + Whoosh an jedem Schnitt und Musik. Zeitraum wählbar (z. B. „Best of der Woche“).',
+    'Logo je Kanal: hochladen oder das Profilbild vom YouTube-Kanal bzw. von Twitch holen (rund ausgeschnitten).',
+    '🔓 Rechenhelfer rechnet jetzt nur, wenn du die Grafikkarte freigibst: Knöpfe unter Einstellungen → Rechenhelfer (2 Std., bis morgen früh, bis ich sperre) oder die neuen Desktop-Verknüpfungen „Grafikkarte freigeben/sperren“ auf dem PC. Startest du ein Spiel oder OBS, endet die Freigabe sofort. Alternativ: nachts automatisch oder immer.',
+  ] },
   { version: '1.27.0', date: '19.10.2026', items: [
     '🎯 Momente finden wie die Profis: Statt nur „wo ist es laut“ zählen jetzt deine Stimme (bei OBS-Mehrspur getrennt vom Spiel), dein Tonfall je Satz (lauter als sonst, schneller, Ausrufe, „Alter!“, Wiederholungen), erkannte Lacher/Schreie, Bildwechsel und Twitch-Signale.',
     '👀 Claude liest vor dem Schnitt die ganze Aufnahme und meldet starke Momente – auch leise, witzige Stellen, die keine Lautstärke-Spitze haben. Je Kandidat sieht Claude jetzt einen Bildraster aus 9 Bildern statt eines einzelnen Standbilds.',

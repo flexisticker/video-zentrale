@@ -21,6 +21,7 @@ import * as signals from './signals.js';
 import * as vision from './vision.js';
 import * as qc from './qc.js';
 import * as twitch from './twitch.js';
+import * as trailer from './trailer.js';
 import { fileURLToPath } from 'node:url';
 
 const FONTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fonts');
@@ -733,7 +734,7 @@ async function next() {
   if (i < 0) i = 0;
   const [item] = queue.splice(i, 1);
   if (!item) return;
-  if (typeof item === 'object') return runRevision(item);
+  if (typeof item === 'object') return item.trailer ? runTrailer(item.trailer) : runRevision(item);
   const id = item;
   priority.delete(id);
   running = id;
@@ -753,6 +754,14 @@ async function next() {
     afterRun?.();
     next();
   }
+}
+
+// Kanal-Trailer laufen in derselben Warteschlange (nie zwei große ffmpeg-Aufträge gleichzeitig)
+export function enqueueTrailer(id) { queue.push({ trailer: id }); next(); }
+async function runTrailer(id) {
+  running = 'trailer-' + id;
+  try { await trailer.runJob(id); }
+  finally { running = null; afterRun?.(); next(); }
 }
 
 let afterRun = null;

@@ -134,7 +134,7 @@ export async function generate({ prompt, seconds, profileId, label }) {
 // → { file, kind: 'library'|'ai', name, mood, prompt? } oder null (aus / nichts gefunden / Fehler → warning)
 export async function trackFor({ profile, kind, seconds, idea = {} }) {
   const c = cfg();
-  if (!c.enabled || profile?.music === false || (kind === 'short' && !c.shorts) || (kind === 'long' && !c.long)) return null;
+  if (!c.enabled || profile?.music === false || (kind === 'short' && !c.shorts) || (kind === 'long' && !c.long)) return null;   // 'trailer' = immer, wenn Musik an
   const mood = MOODS.includes(idea.mood) ? idea.mood : (profile?.musicMood || '');
   if (c.source !== 'ai') {
     const t = pickTrack(profile?.id, mood);
@@ -145,7 +145,7 @@ export async function trackFor({ profile, kind, seconds, idea = {} }) {
   const style = (profile?.musicStyle || 'modern instrumental background music').trim();
   const prompt = [style, idea.music, mood ? `mood: ${moodEnglish[mood]}` : '',
     'instrumental only, no vocals, no singing, clean mix that sits under spoken voice, consistent energy, loopable ending'].filter(Boolean).join('. ');
-  const len = kind === 'long' ? Math.min(seconds, c.longMax || 180) : seconds + 1;
+  const len = kind === 'long' ? Math.min(seconds, c.longMax || 180) : kind === 'trailer' ? Math.min(seconds + 1, 300) : seconds + 1;
   const file = await generate({ prompt, seconds: len, profileId: profile?.id, label: mood || kind });
   return { file, kind: 'ai', name: path.basename(file), mood, prompt, lufs: await measure(file) };
 }

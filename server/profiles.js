@@ -57,6 +57,7 @@ export function publicProfile(p) {
     clipHints: p.clipHints || '', shorts: Number.isFinite(p.shorts) ? p.shorts : null,
     hookStyle: p.hookStyle || 'auto', tempo: p.tempo || 'normal', hookHint: p.hookHint || '',
     fxLevel: p.fxLevel || 'normal', fxImages: !!p.fxImages,
+    logo: p.logo || null,
     category: p.category || '20', tags: p.tags || '', footer: p.footer || '',
     youtube: { connected: !!p.youtube?.refreshToken, channel: p.youtube?.channel || null },
     tiktok: { connected: !!p.tiktok?.refreshToken && (!p.tiktok.refreshExpires || Date.now() < p.tiktok.refreshExpires),

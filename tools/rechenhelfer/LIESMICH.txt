@@ -13,6 +13,14 @@ Einrichten (einmalig)
      -> richtet den Autostart bei der Anmeldung ein
   3. In der Zentrale unter Einstellungen -> Rechenhelfer steht dann "online".
 
+Grafikkarte freigeben/sperren (ab Version 1.4):
+  Der PC rechnet nur, wenn du die Grafikkarte freigibst. Dafür liegen nach "Einrichten.bat" zwei
+  Verknüpfungen auf dem Desktop: "Grafikkarte freigeben (Video-Zentrale)" und "... sperren ...".
+  Im Ordner gehen auch "Grafikkarte freigeben.bat" / "Grafikkarte sperren.bat".
+  Startest du ein Spiel oder OBS, endet die Freigabe sofort. Freigeben geht auch in der Zentrale
+  (Einstellungen -> Rechenhelfer), dort lässt sich auch "nachts automatisch" einstellen.
+  Wer schon eingerichtet hatte: "Einrichten.bat" einmal neu ausführen, dann erscheinen die Verknüpfungen.
+
 Starten von Hand:   "Starten.bat"
 Autostart entfernen: "Autostart entfernen.bat"
 

@@ -71,6 +71,8 @@ const SENTENCE_RULES = 'SAUBERE SCHNITTE (sehr wichtig): Schneide nie mitten im 
   + 'und endet nach der Pointe bzw. Reaktion – nicht nach einer halben Aussage. Folgt direkt auf die Pointe eine kurze Reaktion (Lachen, „Alter!“), nimm sie mit. '
   + 'Ohne Sprache an der Stelle: fromSentence/toSentence = 0, dann zählen start/end (Sekunden) – lege sie in einen ruhigen Moment oder auf einen Bildwechsel, nicht mitten in die Action.';
 
+// für trailer.js
+export { cutCall, SENTENCE_RULES };
 
 export const framePath = (v, n) => path.join(FRAME_DIR, `${v.id}-${n}.jpg`);
 

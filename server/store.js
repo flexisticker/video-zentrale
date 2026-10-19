@@ -61,7 +61,7 @@ const empty = () => ({
     genModel: 'fal-ai/nano-banana/edit', autoThumb: true, generated: 0 },     //   + KI-Titelbild aus Foto & Standbild
   music: { enabled: true, shorts: true, long: false, source: 'mixed', level: 'mittel', lufs: -30, duck: true, duckLevel: 'leicht', longMax: 180,  // Hintergrundmusik
     model: 'sonilo/v1.1/text-to-music', generated: 0, spent: 0, recent: [] },
-  helper: { enabled: false, token: '', model: 'large-v3', lastSeen: '', name: '', gpu: '', done: 0, failed: 0 },   // Rechenhelfer-PC
+  helper: { enabled: false, token: '', model: 'large-v3', mode: 'manual', releaseUntil: '', nightFrom: '02:00', nightTo: '07:00', lastSeen: '', name: '', gpu: '', done: 0, failed: 0 },   // Rechenhelfer-PC
   backup: { auto: true, time: '03:30', keep: 14, lastAt: '', lastFile: '', lastError: '' },        // Sicherung
   photos: [],                                                      // Fotos des Creators für Titelbilder
   cut: { auto: true, hookText: true, longVersion: true, longCopy: false, summary: 0, cutPauses: true, silenceDb: -45, minPause: 20, shorts: 3, shortMin: 15, shortMax: 60,
@@ -128,6 +128,9 @@ function normalize(raw) {
   // 1.27: Länge folgt dem Moment (vorher feste 30–45 s) – nur wenn der Kunde die alten Startwerte nie geändert hat
   if (!raw.migVarLen && state.cut.shortMin === 30 && state.cut.shortMax === 45) { state.cut.shortMin = 15; state.cut.shortMax = 60; }
   state.migVarLen = true;
+  // 1.28: Rechenhelfer rechnet nur nach Freigabe (Wunsch Kunde) – vorher automatisch, sobald frei
+  if (!raw.migRelease && raw.helper && !raw.helper.mode) state.helper.mode = 'manual';
+  state.migRelease = true;
   const defaults = Object.fromEntries(defaultProfiles().map((p) => [p.id, p]));
   for (const p of state.profiles) {
     const c = emptyConnections();

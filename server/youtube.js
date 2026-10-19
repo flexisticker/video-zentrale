@@ -238,6 +238,15 @@ export async function setThumbnail(videoId, p, imagePath) {
   } catch (e) { return 'Titelbild nicht gesetzt: ' + e.message; }
 }
 
+// Profilbild des verbundenen Kanals (für Trailer-Logo)
+export async function channelImage(p) {
+  if (!p?.youtube?.refreshToken) return '';
+  const r = await fetch(API + '/youtube/v3/channels?part=snippet&mine=true', { headers: { Authorization: 'Bearer ' + await token(p) } });
+  const j = await r.json().catch(() => ({}));
+  const t = j.items?.[0]?.snippet?.thumbnails || {};
+  return (t.high || t.medium || t.default || {}).url || '';
+}
+
 // Statistik (stats.js): Aufrufe/Likes/Kommentare – geht mit dem normalen YouTube-Recht
 export async function videoStats(p, ids) {
   const out = {};

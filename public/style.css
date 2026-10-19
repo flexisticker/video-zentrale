@@ -361,3 +361,8 @@ select.small { padding: 4px 8px; font-size: 13px; width: auto; }
 a.statrow:hover { outline: 1px solid var(--line, rgba(255,255,255,.15)); }
 .statrow .rank { width: 22px; text-align: right; opacity: .6; font-variant-numeric: tabular-nums; }
 .statrow .st-title { flex: 1 1 200px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 🎬 Trailer */
+.logo-row { align-items: flex-start; gap: 14px; margin: 10px 0; }
+.logo-prev { width: 84px; height: 84px; object-fit: contain; border-radius: 12px; background: repeating-conic-gradient(#2a2a33 0% 25%, #1c1c24 0% 50%) 50% / 16px 16px; flex: none; }
+.logo-prev.empty { display: grid; place-items: center; font-size: 12px; opacity: .6; }

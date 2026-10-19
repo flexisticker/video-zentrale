@@ -277,8 +277,8 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
 - **Ideen-Plan „Virale Clips“ (19.10.2026):** `docs/ideen-plan-virale-clips.md` (Recherche mit 5 Agenten). Kunde: streamt live auf **Twitch + TikTok**
   (OBS → Twitch, OBS-Virtual-Cam → TikTok Live Studio), lädt bisher das **Twitch-VOD** herunter (keine OBS-Aufnahme, eine Tonspur), Full HD **30 fps**,
   Facecam-Position wechselt. Empfehlung an ihn: OBS automatisch mitaufnehmen (Stream-Encoder, Spuren 1 alles / 2 Mikro / 3 Spiel).
-  Paket A + B + Freigabe-Wünsche = **1.27.0 gebaut**. **Paket C offen:** Rechenhelfer als Auftragsliste, Grafikkarte **von Hand freigeben**
-  (Modus „nur nach Freigabe“, Knopf + Desktop-Verknüpfung, Abbruch bei OBS/Spiel bleibt), dort Demucs (Stimme aus VOD), Audio-Ereignisse, OCR, WhisperX.
+  Paket A + B + Freigabe-Wünsche = **1.27.0 gebaut**. Paket C Teil 1 (Grafikkarte von Hand freigeben) = 1.28.0. **Offen aus Paket C:** weitere
+  Auftragsarten für den PC (Demucs = Stimme aus dem VOD, Audio-Ereignisse, OCR Spieltexte, WhisperX) – braucht Python/Modelle auf Windows, nicht gebaut.
 - 1.27.0 (19.10.2026): **Momentfindung/Bildaufbau/Prüfung/Twitch/Zahlen.**
   - `server/signals.js`: Tonspuren (`audioTracks`, `voiceIndex` aus `cut.voiceTrack` auto = Spur 2 bei Mehrspur, `voiceUsable`), `prosody()` je Satz (laut +dB
     ggü. Sprech-Median, Tempo, Ausruf, `HYPE`-Wörter, Wiederholung, Whisper-Ereignisse) → `annotate()` (bounds.sentenceLines zeigt `(tag)`), `timeline()` je Sekunde,
@@ -313,10 +313,23 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
     EventSub-Chat, VOD-Import (fake yt-dlp), 390 px ohne Überlauf. **Nicht getestet:** echtes Twitch (EventSub, Clips/vod_offset, Marker-Recht), echtes yt-dlp mit Twitch,
     echte Claude-Antworten (Facecam-Genauigkeit in %!), YouTube Analytics mit echtem Konto (Device-Flow erlaubt evtl. kein yt-analytics-Scope → Web-Anmeldung nutzen),
     TikTok video.list (Prüfung nötig), NVENC-Qualitätsparameter auf der 1050 Ti (Pascal: spatial-aq/lookahead sollten gehen).
-- **Offen – Paket 4 Zusammenstellung (angeboten, Kunde will es):** „Best of“ aus mehreren Videos (Zeitraum/Auswahl, 16:9 oder 9:16, Claude
-  ordnet Highlights, Platz-Einblendungen), später automatisch wöchentlich. Nach 1.18.0 als eigenes Paket bauen.
-  19.10.2026 erneut gewünscht als **Kanal-Trailer/Highlight-Video**: max. ~5 Min., nur „geiles Zeug“ quer über ALLE Videos eines Kanals,
-  mit Kanal-Logo (hochladen oder vom Kanal holen – YouTube channels.snippet.thumbnails / Twitch profile_image_url). Plan geschickt, wartet auf „leg los“.
+- 1.28.0 (19.10.2026): **Kanal-Trailer / Highlight-Video** (`server/trailer.js`, war „Paket 4 Zusammenstellung“): Kandidaten = Shorts des Kanals
+  (geschnitten/hochgeladen, Zeitraum `days`), Punkte aus Viral + Aufrufe ÷ Median + Zuschauer-Clip − QC; Quelle = Rohvideo-Bereich (sonst der fertige Short),
+  je Rohstelle eine Fassung, max. 60. `plan()` → `ai.cutCall` (jetzt exportiert, + `SENTENCE_RULES`) mit Satzlisten je Moment → moments[{moment, from/toSentence, start, end, text}],
+  title/tagline/outro; Einrasten `snapRange` (2–22 s, max. 25 s), Ziel-Länge +10 %. Ohne Claude `planSimple`. `render()`: je Moment eigene Eingabe, Bild
+  `frameFilter` (9:16: `layout.graph` mit dem Layout des Shorts, interne Labels mit Präfix `t<i>`; 16:9: Hochformat-Quellen auf Blur), weißer Einblend-Blitz,
+  Intro/Outro-Karten (color + Logo per zoompan-Pop + drawtext Anton), ASS-Texte (Einblendung + Spiel), Wort-Untertitel (nur 9:16, aus Rohvideo-Wörtern),
+  Logo-Wasserzeichen, Whoosh je Schnitt (`sfx.get('whoosh')`), Musik `music.trackFor({kind:'trailer'})` (neu: immer wenn Musik an, max. 300 s) + `mixGraph`.
+  Ausgabe `geschnitten/<Datum> <Kanal> – Kanal-Trailer|Highlight-Short.mp4`, `source.kind 'trailer'` (nicht überarbeitbar). `db().trailers[]` (Status, max. 50),
+  Warteschlange über autocut (`enqueueTrailer`, `{trailer:id}`), Aktivitätsleiste. Logo: `/data/logos/<kanal>.png`, `saveLogo` (rund bei Profilbildern), `fetchLogo`
+  (`youtube.channelImage`, `twitch.profileImage`), Routen `/api/trailer` GET (jobs + preview) / POST, `/api/profiles/:id/logo` POST (roh)/GET/DELETE, `/logo/fetch {from}`.
+  UI `trailerDialog()` (Knopf „🎬 Trailer“ in Freigabe/Hochgeladen). **Grafikkarte freigeben** (`helper.mode` manual|night|auto, Migration `migRelease` → manual,
+  `releaseUntil`, `release(hours|'morning'|'stop'|0)`, `online()` nur wenn `released()`, hello mit paused → Freigabe endet), Routen `/api/helper-release` (UI),
+  `/api/helper/release` (Token, vom PC); Rechenhelfer 1.4: `-Release`, Desktop-Verknüpfungen bei `-Install`, `Grafikkarte freigeben.bat`/`sperren.bat`.
+  Getestet (Mock + Playwright + pwsh): Logo vom YouTube-Profil, Trailer 16:9 (Intro/Outro/Wasserzeichen, −14 LUFS) und 9:16 (Facecam-Layout aus dem Short,
+  Untertitel), Dialog 1400/390 px, Freigabe per pwsh/Knopf, Ende bei OBS. **Nicht getestet:** echte Claude-Dramaturgie, Trailer mit vielen Videos (Laufzeit/Speicher bei
+  ~40 Eingaben), echtes Windows (Desktop-Verknüpfungen, PowerShell 5.1), Twitch-Profilbild echt.
+- Ideen danach: „Best of der Woche“ automatisch (Zeitplan), Platz-Einblendungen „Platz 3/2/1“.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
   Sendeplätze je Kanal **stellt der Kunde selbst ein** (keine festen Startzeiten), „Einplanen“ auf nächsten freien Platz, Shorts
   eines Langvideos über Tage verteilen, Übersicht Heute/Woche, Lückenwarnung. YouTube `publishAt` erst nach YouTube-Audit

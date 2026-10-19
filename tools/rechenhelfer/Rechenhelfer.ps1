@@ -5,12 +5,13 @@
 #   Rechenhelfer.ps1             -> läuft im Fenster (Strg+C beendet)
 #   Rechenhelfer.ps1 -Install    -> startet künftig automatisch bei der Anmeldung (Aufgabenplanung)
 #   Rechenhelfer.ps1 -Uninstall  -> Autostart entfernen
-param([switch]$Install, [switch]$Uninstall)
+#   Rechenhelfer.ps1 -Release stop|4|morning|0 -> Grafikkarte freigeben (bis gestoppt / 4 Std. / bis morgen 8 Uhr) bzw. sperren (0)
+param([switch]$Install, [switch]$Uninstall, [string]$Release = '')
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # macht Downloads in Windows PowerShell deutlich schneller
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$Version = '1.3'
+$Version = '1.4'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ConfigFile = Join-Path $Here 'rechenhelfer.json'
 $Home2 = if ($env:VZ_HELPER_HOME) { $env:VZ_HELPER_HOME } else { Join-Path $env:LOCALAPPDATA 'VideoZentrale-Rechenhelfer' }
@@ -38,6 +39,20 @@ if ($Install) {
   Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Description 'Spracherkennung für die Video-Zentrale' -Force | Out-Null
   Start-ScheduledTask -TaskName $TaskName
   Log 'Autostart eingerichtet und gestartet. Der Rechenhelfer läuft jetzt (minimiert) und startet bei jeder Anmeldung.'
+  # Verknüpfungen auf dem Desktop: Grafikkarte freigeben / sperren
+  try {
+    $desk = [Environment]::GetFolderPath('Desktop')
+    $sh = New-Object -ComObject WScript.Shell
+    foreach ($x in @(@('Grafikkarte freigeben (Video-Zentrale)', 'stop'), @('Grafikkarte sperren (Video-Zentrale)', '0'))) {
+      $lnk = $sh.CreateShortcut((Join-Path $desk ($x[0] + '.lnk')))
+      $lnk.TargetPath = 'powershell.exe'
+      $lnk.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`" -Release $($x[1])"
+      $lnk.WorkingDirectory = $Here
+      $lnk.IconLocation = if ($x[1] -eq '0') { 'imageres.dll,100' } else { 'imageres.dll,101' }
+      $lnk.Save()
+    }
+    Log 'Desktop-Verknüpfungen „Grafikkarte freigeben/sperren“ angelegt.'
+  } catch { Log ('Desktop-Verknüpfungen nicht angelegt: ' + $_.Exception.Message) }
   exit 0
 }
 
@@ -47,6 +62,20 @@ $cfg = Get-Content $ConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
 $Base = $cfg.url.TrimEnd('/')
 $Headers = @{ 'X-Helper-Token' = $cfg.token }
 $Pc = if ($env:COMPUTERNAME) { $env:COMPUTERNAME } else { [Environment]::MachineName }
+
+# ---------- Grafikkarte freigeben / sperren (Desktop-Verknüpfung) ----------
+if ($Release -ne '') {
+  try {
+    $h = if ($Release -match '^\d+$') { [int]$Release } else { $Release }
+    $r = Invoke-RestMethod -Method Post -Uri "$Base/api/helper/release" -Headers $Headers -ContentType 'application/json' -Body (@{ hours = $h } | ConvertTo-Json)
+    if ($r.released) {
+      $bis = if ($r.until) { ([DateTime]::Parse($r.until)).ToLocalTime().ToString('dd.MM. HH:mm') } else { '' }
+      Write-Host "Grafikkarte FREIGEGEBEN – die Zentrale darf jetzt rechnen$(if ($Release -eq 'stop') { ' (bis du sperrst oder ein Spiel/OBS startest)' } elseif ($bis) { " (bis $bis)" })." -ForegroundColor Green
+    } else { Write-Host 'Grafikkarte GESPERRT – die Zentrale rechnet selbst.' -ForegroundColor Yellow }
+  } catch { Write-Host ('Zentrale nicht erreichbar: ' + $_.Exception.Message) -ForegroundColor Red }
+  Start-Sleep -Seconds 3
+  exit 0
+}
 
 # ---------- Download mit Fortschritt (Log + Anzeige in der Zentrale), setzt abgebrochene Downloads fort ----------
 function Get-Download($url, $file, $label) {

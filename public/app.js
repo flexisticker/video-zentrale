@@ -372,6 +372,7 @@ function renderMain() {
   const dupes = S.tab === 'geschnitten' ? shown.filter((v) => S.videos.some((x) => x.folder === 'geschnitten' && !x.missing && x.id !== v.id
     && (x.revisionRoot || x.id) === (v.revisionRoot || v.id) && String(x.createdAt || '') > String(v.createdAt || ''))
     && !['done', 'uploading', 'queued', 'processing'].includes(v.yt?.state) && !['done', 'uploading', 'queued', 'processing'].includes(v.tt?.state) && v.li?.state !== 'done').length : 0;
+  const trailerBtn = ['geschnitten', 'hochgeladen'].includes(S.tab) ? h('button', { class: 'btn small', title: 'Highlight-Video / Kanal-Trailer aus den besten Momenten aller Videos', onclick: trailerDialog }, '🎬 Trailer') : null;
   const dupeBtn = dupes ? h('button', { class: 'btn small', title: 'Ältere Fassungen, zu denen es schon eine überarbeitete gibt, in den Papierkorb', onclick: dedupe }, `🧹 Doppelte aufräumen (${dupes})`) : null;
   let grid;
   if (S.group) {
@@ -400,7 +401,7 @@ function renderMain() {
         onclick: () => bulk('revise') }, '🔁 Mit neuen Erkenntnissen überarbeiten') : null,
       h('button', { class: 'btn small danger', disabled: !S.sel.size, onclick: () => bulk('trash') }, '🗑 In den Papierkorb')]) : null;
   mainEl.replaceChildren(...[
-    h('div', { class: 'bar' }, search, filter, topicSel, monthSel, sortSel, groupBtn, selBtn, dupeBtn, h('span', { class: 'hint' }, hints[S.tab]),
+    h('div', { class: 'bar' }, search, filter, topicSel, monthSel, sortSel, groupBtn, selBtn, dupeBtn, trailerBtn, h('span', { class: 'hint' }, hints[S.tab]),
       h('div', { style: { flex: '1' } }), emptyTrash,
       h('button', { class: 'btn small ghost', onclick: async () => { await api('POST', '/api/scan'); await refresh(); renderMain(); updateCounts(); toast('Ordner neu eingelesen.'); } }, '↻ Ordner prüfen')),
     selBar,
@@ -1382,6 +1383,73 @@ function renderRevise(box, v) {
 }
 
 // ---------- Bestand in die neue Ordnung umstellen (Vorschau → Themen erkennen → umstellen) ----------
+// 🎬 Kanal-Trailer / Highlight-Video quer über alle Videos eines Kanals
+async function trailerDialog() {
+  const close = () => { clearTimeout(timer); modal.remove(); };
+  let timer = null;
+  const chans = profilesList().filter((p) => !isPro(p));
+  const st = { profileId: S.channel && chans.some((p) => p.id === S.channel) ? S.channel : (chans.find((p) => p.isDefault) || chans[0])?.id, seconds: 180, format: '16:9', days: 0 };
+  const body = h('div', {});
+  const modal = h('div', { class: 'modal sheetmodal', onclick: (e) => { if (e.target === modal) close(); } },
+    h('div', { class: 'sheet' }, h('button', { class: 'close', onclick: close, title: 'Schließen' }, '×'), h('h2', {}, '🎬 Highlight-Video / Kanal-Trailer'), body));
+  document.body.append(modal);
+  const sel = (key, opts, onch) => h('select', { onchange: (e) => { st[key] = isNaN(e.target.value) ? e.target.value : Number(e.target.value); onch?.(); } },
+    opts.map(([k, n]) => h('option', { value: k, selected: String(st[key]) === String(k) }, n)));
+  const wish = h('input', { placeholder: 'Wunsch an Claude (optional), z. B. „nur Rage-Momente“, „viel Fortnite“' });
+  const cIntro = h('input', { type: 'checkbox', checked: true }), cWm = h('input', { type: 'checkbox', checked: true }), cLab = h('input', { type: 'checkbox', checked: true });
+  const draw = async () => {
+    clearTimeout(timer);
+    let d;
+    try { d = await api('GET', `/api/trailer?profile=${encodeURIComponent(st.profileId || '')}&days=${st.days}`); } catch (x) { body.replaceChildren(h('p', { class: 'bad' }, x.message)); return; }
+    const pv = d.preview || { count: 0 };
+    const logoImg = pv.logo ? h('img', { class: 'logo-prev', src: `/api/profiles/${st.profileId}/logo?v=${encodeURIComponent(pv.logo.at || '')}`, alt: 'Logo' }) : h('div', { class: 'logo-prev empty' }, 'kein Logo');
+    const file = h('input', { type: 'file', accept: 'image/*', class: 'hidden', onchange: async (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      try { await api('POST', `/api/profiles/${st.profileId}/logo`, undefined, f); toast('Logo gespeichert.'); draw(); } catch (x) { toast(x.message, true); }
+    } });
+    const fetchLogo = (from) => async () => { try { await api('POST', `/api/profiles/${st.profileId}/logo/fetch`, { from }); toast('Profilbild übernommen.'); draw(); } catch (x) { toast(x.message, true); } };
+    const jobs = (d.jobs || []).slice(0, 5);
+    const busy = jobs.some((j) => ['queued', 'running'].includes(j.state));
+    body.replaceChildren(...[
+      h('p', { class: 'hint' }, 'Die Zentrale nimmt die besten Momente aus allen Shorts des Kanals (Viral-Punkte, echte Aufrufe, Twitch-Clips). Claude baut daraus einen Spannungsbogen: stärkster Einstieg, Abwechslung, bestes Highlight zum Schluss – mit Logo-Intro, „Jetzt abonnieren“ am Ende und Musik.'),
+      h('div', { class: 'two' },
+        h('div', {}, h('label', {}, 'Kanal'), sel('profileId', chans.map((p) => [p.id, p.name]), draw)),
+        h('div', {}, h('label', {}, 'Zeitraum'), sel('days', [[0, 'alle Videos'], [7, 'letzte 7 Tage (Best of der Woche)'], [30, 'letzte 30 Tage'], [90, 'letzte 3 Monate'], [365, 'letztes Jahr']], draw))),
+      h('div', { class: 'two' },
+        h('div', {}, h('label', {}, 'Länge'), sel('seconds', [[30, '30 Sekunden'], [60, '1 Minute'], [90, '1:30'], [120, '2 Minuten'], [180, '3 Minuten'], [240, '4 Minuten'], [300, '5 Minuten']])),
+        h('div', {}, h('label', {}, 'Format'), sel('format', [['16:9', 'Quer 16:9 – YouTube-Kanaltrailer'], ['9:16', 'Hoch 9:16 – Short/TikTok/Reel']]))),
+      h('p', { class: pv.count ? 'ok-text' : 'bad' }, pv.count ? `${pv.count} Momente aus ${pv.videos} Aufnahme(n) stehen zur Wahl.` : 'In diesem Zeitraum gibt es noch keine Shorts dieses Kanals.'),
+      pv.top?.length ? h('div', { class: 'hint' }, 'Stärkste: ' + pv.top.map((x) => `„${x.title}“${x.viral ? ' 🔥' + x.viral : ''}${x.views != null ? ' 👁 ' + fmtNum(x.views) : ''}`).join(' · ')) : null,
+      h('div', { class: 'row logo-row' }, logoImg, h('div', {},
+        h('b', {}, 'Logo'), h('p', { class: 'hint' }, 'Für Intro, Outro und Wasserzeichen. Am besten PNG mit transparentem Hintergrund.'),
+        h('div', { class: 'row' }, h('button', { class: 'btn small', onclick: () => file.click() }, '⤒ Hochladen'), file,
+          h('button', { class: 'btn small', onclick: fetchLogo('youtube') }, 'Vom YouTube-Kanal holen'),
+          S.settings?.twitch?.connected ? h('button', { class: 'btn small', onclick: fetchLogo('twitch') }, 'Von Twitch holen') : null,
+          pv.logo ? h('button', { class: 'btn small ghost', onclick: async () => { await api('DELETE', `/api/profiles/${st.profileId}/logo`); draw(); } }, 'Entfernen') : null))),
+      h('label', {}, 'Wunsch'), wish,
+      h('label', { class: 'check' }, cIntro, 'Intro mit Logo + Outro „Jetzt abonnieren“'),
+      h('label', { class: 'check' }, cWm, 'Logo klein als Wasserzeichen'),
+      h('label', { class: 'check' }, cLab, 'Spiel/Thema kurz einblenden'),
+      h('div', { class: 'row', style: { marginTop: '12px' } },
+        h('button', { class: 'btn primary', disabled: !pv.count, onclick: async () => {
+          try {
+            await api('POST', '/api/trailer', { profileId: st.profileId, seconds: st.seconds, format: st.format, days: st.days, wish: wish.value, intro: cIntro.checked, watermark: cWm.checked, labels: cLab.checked });
+            toast('Trailer wird erstellt – er erscheint danach unter „Zur Freigabe“.'); pollActivity(); startPolling(); draw();
+          } catch (x) { toast(x.message, true); }
+        } }, '🎬 Trailer erstellen'),
+        h('span', { class: 'hint' }, 'Kostet ca. 0,30–1,50 $ Claude (+ KI-Musik, falls keine eigene im Ordner).')),
+      jobs.length ? h('div', { class: 'section' }, h('b', {}, 'Zuletzt'), jobs.map((j) => h('div', { class: 'row' },
+        h('span', {}, `${fmtDate(j.at)} · ${j.profileName} · ${j.opts.format} · ${String(Math.round(j.opts.seconds / 60 * 10) / 10).replace('.', ',')} Min.`),
+        j.state === 'done' ? h('a', { class: 'btn small', href: '#video/' + j.outId, onclick: close }, '▶ öffnen') : null,
+        ['queued', 'running'].includes(j.state) ? h('span', { class: 'chip run' }, (j.step || 'wartet') + (j.progress ? ` ${j.progress} %` : '')) : null,
+        j.state === 'error' ? h('span', { class: 'chip bad', title: j.error }, '⚠ ' + (j.error || 'Fehler').slice(0, 60)) : null,
+        j.warning ? h('span', { class: 'hint' }, j.warning) : null))) : null,
+    ].filter(Boolean));
+    if (busy) timer = setTimeout(draw, 4000);
+  };
+  draw();
+}
+
 async function convertDialog(after = () => {}) {
   const close = () => { clearTimeout(timer); modal.remove(); after(); };
   let timer = null;
@@ -1581,6 +1649,8 @@ const connSig = (st) => JSON.stringify([st.profiles.map((p) => [p.youtube, p.tik
 let settingsTimer = null;
 // Statuszeile des Rechenhelfers (wird während der Einstellungen alle 3 s aufgefrischt, z. B. Download-Fortschritt)
 function hpStatusText(hp) {
+  if (hp.enabled && hp.seen && !hp.released && !hp.paused) return `🔒 ${hp.name || 'PC'} wartet auf Freigabe der Grafikkarte – die Zentrale rechnet solange selbst.`
+    + (hp.ended ? ` (Freigabe beendet: ${hp.ended.replace(/^\S+ – /, '')})` : '');
   return hp.online ? `🟢 online: ${hp.name || 'PC'} · ${hp.gpu || ''}` + (hp.status && hp.status !== 'bereit' ? ` · ${hp.status}` : ' · bereit')
     : hp.seen && hp.paused ? `🎮 ${hp.name || 'PC'} ${hp.status || 'pausiert'} – die Zentrale rechnet solange selbst.`
     : hp.seen && hp.status ? `🟡 ${hp.name || 'PC'}: ${hp.status} – die Zentrale rechnet solange selbst.`
@@ -1991,16 +2061,29 @@ async function renderSettings() {
   const hpGames = h('input', { value: hp?.games || '', placeholder: 'z. B. Wow, FortniteClient-Win64-Shipping, cs2 (Prozessname ohne .exe)' });
   const hpModel = h('select', {}, [['large-v3', 'large-v3 – beste Qualität, genaueste Satzgrenzen (empfohlen)'], ['large-v3-turbo', 'large-v3-turbo – sehr gut, schneller'], ['medium', 'medium'], ['small', 'small']]
     .map(([k, n]) => h('option', { value: k, selected: (hp?.model || 'large-v3') === k }, n)));
+  const hpMode = h('select', {}, [['manual', 'Nur nach Freigabe (Knopf hier oder Desktop-Verknüpfung)'], ['night', 'Nachts automatisch + nach Freigabe'], ['auto', 'Immer, wenn nicht gezockt wird']]
+    .map(([k, n]) => h('option', { value: k, selected: (hp?.mode || 'manual') === k }, n)));
+  const hpNf = h('input', { type: 'time', value: hp?.nightFrom || '02:00' }), hpNt = h('input', { type: 'time', value: hp?.nightTo || '07:00' });
   const helperBox = h('div', { class: 'box' }, h('h3', {}, '🖥 Rechenhelfer (dein PC)'),
     h('p', { class: 'hint' }, 'Ein PC mit NVIDIA-Grafikkarte (z. B. RTX 3070) übernimmt die Spracherkennung mit dem großen Whisper-Modell – genauer, schneller und der Server wird entlastet. Ist der PC aus, rechnet die Zentrale selbst.'),
     hp?.enabled ? hpStatusEl(hp) : null,
+    hp?.enabled ? h('div', { class: 'section' },
+      h('b', {}, '🔓 Grafikkarte freigeben'),
+      h('p', { class: hp.released ? 'ok-text' : 'hint' }, hp.released ? (hp.until ? `Freigegeben bis ${fmtDate(hp.until)}` + (hp.by ? ` (von ${hp.by})` : '') : hp.mode === 'auto' ? 'Immer freigegeben (Modus automatisch).' : 'Freigegeben (Nachtfenster).')
+        : 'Gesperrt – der PC rechnet erst, wenn du freigibst.'),
+      h('div', { class: 'row' },
+        [['2 Std.', 2], ['bis morgen früh', 'morning'], ['bis ich sperre', 'stop']].map(([n, v]) => h('button', { class: 'btn small' + (hp.released ? '' : ' primary'), onclick: run(() => api('POST', '/api/helper-release', { hours: v }), 'Grafikkarte freigegeben.') }, '🔓 ' + n)),
+        hp.until ? h('button', { class: 'btn small', onclick: run(() => api('POST', '/api/helper-release', { hours: 0 }), 'Gesperrt.') }, '🔒 Sperren') : null),
+      h('p', { class: 'hint' }, 'Auf dem PC gibt es dafür auch die Verknüpfungen „Grafikkarte freigeben/sperren (Video-Zentrale)“ auf dem Desktop (werden bei „Einrichten.bat“ angelegt). Startest du ein Spiel oder OBS, endet die Freigabe sofort.')) : null,
     hp?.enabled && (hp.done || hp.failed) ? h('p', { class: 'hint' }, `${hp.done} Aufträge erledigt` + (hp.failed ? `, ${hp.failed} fehlgeschlagen` : '') + (hp.lastError ? ` · letzter Fehler: ${hp.lastError}` : '')) : null,
     h('label', { class: 'check' }, hpOn, 'Rechenhelfer verwenden'),
+    h('label', {}, 'Wann darf der PC rechnen?'), hpMode,
+    h('div', { class: 'row' }, h('span', { class: 'hint' }, 'Nachtfenster von'), hpNf, h('span', { class: 'hint' }, 'bis'), hpNt),
     h('label', {}, 'Whisper-Modell auf dem PC'), hpModel,
     h('label', { class: 'check', style: { marginTop: '8px' } }, hpGame, '🎮 Pausieren, wenn ich zocke (OBS läuft, Spiel aus der Liste läuft oder Grafikkarte ausgelastet)'),
     h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Grafikkarte gilt als belegt ab (%)'), hpLoad), h('div', {}, h('label', {}, 'Spiele (Prozessnamen, mit Komma)'), hpGames)),
     h('div', { class: 'row', style: { marginTop: '10px' } },
-      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/helper-config', { enabled: hpOn.checked, model: hpModel.value,
+      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/helper-config', { enabled: hpOn.checked, model: hpModel.value, mode: hpMode.value, nightFrom: hpNf.value, nightTo: hpNt.value,
         pauseGaming: hpGame.checked, gpuLoad: Number(hpLoad.value), games: hpGames.value }), 'Gespeichert.') }, 'Speichern'),
       hp?.enabled ? h('a', { class: 'btn primary', href: '/api/helper-download?origin=' + encodeURIComponent(location.origin), download: '' }, '⤓ Rechenhelfer für Windows (ZIP)') : null,
       hp?.enabled ? h('button', { class: 'btn small ghost', onclick: () => confirm('Neuen Schlüssel erzeugen? Der PC muss danach das neue ZIP bekommen.') && run(() => api('POST', '/api/helper-config', { newToken: true }), 'Neuer Schlüssel – ZIP neu herunterladen.')() }, 'Neuen Schlüssel erzeugen') : null),

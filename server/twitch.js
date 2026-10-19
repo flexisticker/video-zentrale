@@ -135,6 +135,13 @@ async function whoAmI() {
   return cfg().user;
 }
 
+// Profilbild (für Trailer-Logo)
+export async function profileImage() {
+  if (!cfg().refreshToken) return '';
+  const j = await helix('/users');
+  return j.data?.[0]?.profile_image_url || '';
+}
+
 // ---------- Streams & Chat-Mitschnitt ----------
 const streamById = (id) => cfg().streams.find((s) => s.id === id);
 function upsertStream(x) {

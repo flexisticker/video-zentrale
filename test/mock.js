@@ -17,6 +17,7 @@ const server = http.createServer(async (req, res) => {
   const p = u.pathname;
   log.push({ m: req.method, p, range: req.headers['content-range'], len: b.length });
   if (p === '/_log') return json(res, 200, { log, yt, tt });
+  if (p === '/logo.png') { res.writeHead(200, { 'Content-Type': 'image/png' }); return res.end(require('fs').readFileSync(process.env.TEST_LOGO)); }
   // Anmeldefenster: sofort „erlaubt“ und zurück zur Zentrale
   if (p === '/o/oauth2/v2/auth' || p === '/v2/auth/authorize/') {
     const who = u.searchParams.get('client_id') ? 'web' + (++devN) : 'TT' + (++devN);
@@ -59,7 +60,7 @@ const server = http.createServer(async (req, res) => {
   if (p === '/v2/video/list/') return json(res, 200, { data: { videos: [{ id: 'tt1', title: '', video_description: process.env.MOCK_TT_DESC || 'Clutch', create_time: Math.floor(Date.now() / 1000), duration: 25, view_count: 5000, like_count: 300, comment_count: 12, share_count: 40 }], has_more: false }, error: { code: 'ok' } });
   if (p === '/youtube/v3/channels') {
     const d = String(req.headers.authorization).replace('Bearer at-', '');
-    return json(res, 200, { items: [{ id: 'UC-' + d, snippet: { title: YT_NAMES[d] || d } }] });
+    return json(res, 200, { items: [{ id: 'UC-' + d, snippet: { title: YT_NAMES[d] || d, thumbnails: { high: { url: 'http://127.0.0.1:9300/logo.png' } } } }] });
   }
   if (p === '/upload/youtube/v3/videos') {
     yt.meta = JSON.parse(b.toString()); yt.auth = req.headers.authorization; yt.size = Number(req.headers['x-upload-content-length']); yt.got = 0;
@@ -173,6 +174,14 @@ const server = http.createServer(async (req, res) => {
         return { id, game: /minecraft/i.test(m) ? 'Minecraft' : /fortnite/i.test(m) ? 'Fortnite' : /druck/i.test(m) ? '3D-Druck' : '' }; }) };
       return json(res, 200, { id: 'msg_t', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn',
         content: [{ type: 'text', text: JSON.stringify(out) }], usage: { input_tokens: 2000, output_tokens: 200 } });
+    }
+    if (j.output_config?.format?.schema?.properties?.tagline) {
+      const t = j.messages[0].content[0].text;
+      const ms = [...t.matchAll(/^Moment (\d+): .*Sekunde ([\d.]+)–([\d.]+)/gm)].map((m) => ({ n: +m[1], a: +m[2], b: +m[3] }));
+      log.push({ trailer: { moments: ms.length, target: /Ziel-Länge: (\d+)/.exec(t)?.[1], wish: /WUNSCH DES CREATORS: „([^“]*)“/.exec(t)?.[1] || '' } });
+      const out = { title: 'MichaModus – Best of', tagline: 'Rage, Lacher und Clutches', outro: 'Jetzt abonnieren!',
+        moments: ms.map((m, i) => ({ moment: m.n, fromSentence: 0, toSentence: 0, start: m.a + 1, end: Math.min(m.b, m.a + 7), text: i === 0 ? 'Was war DAS?!' : '' })) };
+      return json(res, 200, { id: 'msg_tr', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(out) }], usage: { input_tokens: 8000, output_tokens: 400 } });
     }
     if (j.output_config?.format?.schema?.properties?.moments) {
       const t = j.messages[0].content[0].text;

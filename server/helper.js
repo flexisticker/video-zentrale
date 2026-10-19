@@ -15,7 +15,7 @@ export function status() {
   const c = cfg();
   return { enabled: !!c.enabled, token: c.token || '', model: c.model, online: online(), lastSeen: c.lastSeen || '', name: c.name || '',
     gpu: c.gpu || '', version: c.version || '', status: c.status || '', paused: !!c.paused, pauseGaming: c.pauseGaming !== false,
-    gpuLoad: c.gpuLoad || 25, games: (c.games || []).join(', '), seen: !!(c.lastSeen && Date.now() - new Date(c.lastSeen).getTime() < ONLINE_MS), done: c.done || 0, failed: c.failed || 0, lastError: c.lastError || '',
+    ...releaseStatus(), gpuLoad: c.gpuLoad || 25, games: (c.games || []).join(', '), seen: !!(c.lastSeen && Date.now() - new Date(c.lastSeen).getTime() < ONLINE_MS), done: c.done || 0, failed: c.failed || 0, lastError: c.lastError || '',
     open: [...jobs.values()].map((j) => ({ id: j.id, state: j.state, kind: j.kind, label: j.label, createdAt: j.createdAt, takenAt: j.takenAt || 0 })) };
 }
 
@@ -24,6 +24,10 @@ export function configure(b) {
   if (typeof b.enabled === 'boolean') c.enabled = b.enabled;
   if (['large-v3-turbo', 'large-v3', 'medium', 'small'].includes(b.model)) c.model = b.model;
   if (typeof b.pauseGaming === 'boolean') c.pauseGaming = b.pauseGaming;
+  if (['manual', 'auto', 'night'].includes(b.mode)) c.mode = b.mode;
+  const t = (x) => /^([01]\d|2[0-3]):[0-5]\d$/.test(x || '');
+  if (t(b.nightFrom)) c.nightFrom = b.nightFrom;
+  if (t(b.nightTo)) c.nightTo = b.nightTo;
   if (b.gpuLoad != null && !isNaN(b.gpuLoad)) c.gpuLoad = Math.max(5, Math.min(95, Math.round(Number(b.gpuLoad))));
   if (typeof b.games === 'string') c.games = b.games.split(/[,\n]/).map((x) => x.trim().replace(/\.exe$/i, '')).filter(Boolean).slice(0, 50);
   if (b.newToken || (c.enabled && !c.token)) c.token = crypto.randomBytes(24).toString('base64url');
@@ -33,7 +37,40 @@ export function configure(b) {
 // Helfer lädt gerade whisper.cpp/Modell oder hat einen Startfehler → noch nicht bereit für Aufträge
 const preparing = (st) => /^(lädt|startet|Fehler|Modell |whisper\.cpp )/.test(String(st || ''));
 // online = Lebenszeichen, nicht pausiert (z. B. weil gerade gezockt wird) und nicht mehr beim Vorbereiten
-export const online = () => { const c = cfg(); return !!(c.enabled && !c.paused && !preparing(c.status) && c.lastSeen && Date.now() - new Date(c.lastSeen).getTime() < ONLINE_MS); };
+export const online = () => { const c = cfg(); return !!(c.enabled && released() && !c.paused && !preparing(c.status) && c.lastSeen && Date.now() - new Date(c.lastSeen).getTime() < ONLINE_MS); };
+
+// ---------- Grafikkarte freigeben ----------
+// mode: 'manual' = nur nach Freigabe (Knopf in der Zentrale oder Verknüpfung auf dem PC-Desktop), 'auto' = immer wenn frei (wie bis 1.27),
+// 'night' = im Nachtfenster automatisch + nach Freigabe. Startest du trotz Freigabe OBS/ein Spiel, endet die Freigabe.
+const mins = (t) => { const [h, m] = String(t || '0:0').split(':').map(Number); return (h || 0) * 60 + (m || 0); };
+function inNight(c, d = new Date()) {
+  const now = d.getHours() * 60 + d.getMinutes(), a = mins(c.nightFrom || '02:00'), b = mins(c.nightTo || '07:00');
+  return a <= b ? now >= a && now < b : now >= a || now < b;
+}
+export function released() {
+  const c = cfg();
+  const mode = c.mode || 'manual';
+  if (mode === 'auto') return true;
+  if (c.releaseUntil && Date.parse(c.releaseUntil) > Date.now()) return true;
+  return mode === 'night' && inNight(c);
+}
+// hours: Zahl (Stunden), 'morning' (bis 8 Uhr), 'stop' (bis gestoppt = 7 Tage), 0 = sperren
+export function release(hours, by = 'Zentrale') {
+  const c = cfg();
+  let until = 0;
+  if (hours === 'morning') { const d = new Date(); d.setHours(8, 0, 0, 0); if (d <= new Date()) d.setDate(d.getDate() + 1); until = d.getTime(); }
+  else if (hours === 'stop') until = Date.now() + 7 * 86400_000;
+  else if (Number(hours) > 0) until = Date.now() + Math.min(72, Number(hours)) * 3600_000;
+  c.releaseUntil = until ? new Date(until).toISOString() : '';
+  c.releaseBy = by; c.releaseAt = new Date().toISOString(); c.releaseEnded = '';
+  saveNow();
+  return releaseStatus();
+}
+export function releaseStatus() {
+  const c = cfg();
+  return { mode: c.mode || 'manual', released: released(), until: c.releaseUntil && Date.parse(c.releaseUntil) > Date.now() ? c.releaseUntil : '',
+    by: c.releaseBy || '', ended: c.releaseEnded || '', nightFrom: c.nightFrom || '02:00', nightTo: c.nightTo || '07:00' };
+}
 
 export function checkToken(req) {
   const t = String(req.headers['x-helper-token'] || '');
@@ -49,9 +86,13 @@ export function hello(b = {}) {
   if (b.gpu != null) c.gpu = String(b.gpu).slice(0, 120);
   if (b.version) c.version = String(b.version).slice(0, 20);
   if (b.status) c.status = String(b.status).slice(0, 200);
-  if (typeof b.paused === 'boolean') c.paused = b.paused;
+  if (typeof b.paused === 'boolean') {
+    // Zocken/OBS trotz Freigabe → Freigabe endet (sonst rechnet der PC nach dem Spiel ungefragt weiter)
+    if (b.paused && !c.paused && c.releaseUntil && Date.parse(c.releaseUntil) > Date.now()) { c.releaseUntil = ''; c.releaseEnded = new Date().toISOString() + ' – ' + (b.status || 'Spiel/OBS erkannt'); }
+    c.paused = b.paused;
+  }
   save();
-  return { model: c.model, gaming: { enabled: c.pauseGaming !== false, gpuLoad: c.gpuLoad || 25, games: c.games || [] } };
+  return { model: c.model, ...releaseStatus(), gaming: { enabled: c.pauseGaming !== false, gpuLoad: c.gpuLoad || 25, games: c.games || [] } };
 }
 
 // Auftrag an den Helfer geben → Promise mit dem Whisper-JSON. Bricht ab (reject), wenn der Helfer verschwindet.

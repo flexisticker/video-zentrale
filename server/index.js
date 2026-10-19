@@ -27,6 +27,7 @@ import * as info from './info.js';
 import * as ai2 from './ai.js';
 import * as twitch from './twitch.js';
 import * as stats from './stats.js';
+import * as trailer from './trailer.js';
 
 const PORT = Number(process.env.PORT || 8090);
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -46,6 +47,7 @@ ver.init();
 backup.init();
 twitch.init();
 stats.init();
+trailer.init();
 const scanAll = () => lib.scan().then(() => { ai.autoQueue(); autocut.autoQueue(); });
 autocut.onDone(() => scanAll().catch(() => {}));
 
@@ -205,6 +207,8 @@ async function api(req, res, url) {
     if (!helper.checkToken(req)) throw new HttpError(401, 'Schlüssel des Rechenhelfers ungültig oder Rechenhelfer ausgeschaltet.');
     let hm;
     if (p === '/api/helper/hello' && m === 'POST') return send(res, 200, { ok: true, ...helper.hello(await readJson(req)) });
+    // Desktop-Verknüpfungen auf dem PC: „Grafikkarte freigeben/sperren“
+    if (p === '/api/helper/release' && m === 'POST') { const b = await readJson(req); return send(res, 200, helper.release(b.hours ?? 4, 'PC')); }
     if (p === '/api/helper/next' && m === 'GET') { const j = await helper.next(); return j ? send(res, 200, j) : send(res, 204, ''); }
     if ((hm = /^\/api\/helper\/job\/([0-9a-f]{16})\/(audio|result|error)$/.exec(p))) {
       const [, id, what] = hm;
@@ -287,6 +291,10 @@ async function api(req, res, url) {
     const vids = Object.values(db().videos).filter((v) => !v.missing);
     const server = [], queue = { cut: 0, ai: 0, upload: 0 };
     const hp = helper.status();
+    for (const t of trailer.list()) {
+      if (t.state === 'running') server.push({ id: t.id, kind: 'cut', name: '🎬 Trailer ' + (t.profileName || ''), step: t.step || 'läuft', progress: t.progress || 0 });
+      else if (t.state === 'queued') queue.cut++;
+    }
     for (const v of vids) {
       if (v.cut?.state === 'running') {
         const viaHelper = /Rechenhelfer/.test(v.cut.step || '');
@@ -674,6 +682,7 @@ async function api(req, res, url) {
     return send(res, 200, backup.zip(entries), { 'Content-Type': 'application/zip', 'Content-Disposition': 'attachment; filename="Rechenhelfer.zip"' });
   }
   if (p === '/api/helper-config' && m === 'POST') { helper.configure(await readJson(req)); return send(res, 200, helper.status()); }
+  if (p === '/api/helper-release' && m === 'POST') { const b = await readJson(req); helper.release(b.hours, 'Zentrale'); return send(res, 200, helper.status()); }
   if (p === '/api/coach' && m === 'GET') return send(res, 200, db().coach || {});
   if (p === '/api/coach' && m === 'POST') {
     const b = await readJson(req);
@@ -745,6 +754,17 @@ async function api(req, res, url) {
     twitch.importVod(r[1]).then(() => scanAll()).catch((e) => console.error('VOD-Import:', e.message));
     return send(res, 200, twitch.status());
   }
+  // Kanal-Trailer / Highlight-Video
+  if (p === '/api/trailer' && m === 'GET') {
+    const pid = url.searchParams.get('profile');
+    return send(res, 200, { jobs: trailer.list(), preview: pid ? trailer.preview(pid, Number(url.searchParams.get('days')) || 0) : null });
+  }
+  if (p === '/api/trailer' && m === 'POST') {
+    let t;
+    try { t = trailer.create(await readJson(req)); } catch (e) { throw new HttpError(409, e.message); }
+    autocut.enqueueTrailer(t.id);
+    return send(res, 200, t);
+  }
   // Zahlen: YouTube/TikTok/Twitch-Statistiken je Video
   if (p === '/api/stats' && m === 'GET') return send(res, 200, stats.overview());
   if (p === '/api/stats/refresh' && m === 'POST') { stats.refreshAll(true).catch((e) => console.error('Statistik:', e.message)); return send(res, 200, stats.overview()); }
@@ -796,6 +816,20 @@ async function api(req, res, url) {
       return send(res, 200, { url: youtube.webAuthUrl(prof, origin) });
     }
     if (sub === '/youtube/disconnect' && m === 'POST') { youtube.disconnect(prof); return send(res, 200, { ok: true }); }
+    // Logo für Trailer: hochladen, vom YouTube-/Twitch-Profil holen, anzeigen, entfernen
+    if (sub === '/logo' && m === 'POST') {
+      try { return send(res, 200, await trailer.saveLogo(prof.id, await readRaw(req, 15 * 1024 * 1024))); } catch (e) { throw new HttpError(400, e.message); }
+    }
+    if (sub === '/logo/fetch' && m === 'POST') {
+      const b = await readJson(req);
+      try { return send(res, 200, await trailer.fetchLogo(prof.id, b.from === 'twitch' ? 'twitch' : 'youtube', { youtube, twitch })); } catch (e) { throw new HttpError(409, e.message); }
+    }
+    if (sub === '/logo' && (m === 'GET' || m === 'HEAD')) {
+      const f = trailer.logoPath(prof.id);
+      if (!fs.existsSync(f)) throw new HttpError(404, 'Kein Logo.');
+      return sendFile(req, res, f, 'image/png', '');
+    }
+    if (sub === '/logo' && m === 'DELETE') { fs.rmSync(trailer.logoPath(prof.id), { force: true }); prof.logo = null; saveNow(); return send(res, 200, { ok: true }); }
     if (sub === '/tiktok/auth-url' && m === 'GET') return send(res, 200, { url: tiktok.authUrl(prof) });
     if (sub === '/tiktok/disconnect' && m === 'POST') { tiktok.disconnect(prof); return send(res, 200, { ok: true }); }
   }
