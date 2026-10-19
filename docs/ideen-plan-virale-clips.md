@@ -245,3 +245,11 @@ Daraus baut die Zentrale: Reiter „📈 Zahlen“ mit Top/Flop je Kanal und Pla
 Reihenfolge-Vorschlag: **A und B zusammen**, weil B ab dem ersten Stream Daten sammeln muss – je früher, desto besser.
 
 **Noch zwei kurze Fragen:** Läuft die OBS-Aufnahme **gleichzeitig mit dem Stream** (also ein Rechner, Aufnahme + Stream parallel)? Und streamst du auf TikTok mit **demselben OBS** oder über die TikTok-App / TikTok Live Studio?
+
+### Nachtrag: Grafikkarte von Hand freigeben (Wunsch Michael, 19.10.2026)
+Der PC rechnet nur, wenn du ihn freigibst:
+- **Freigeben:** Knopf in der Zentrale („PC freigeben – 2 Std. / bis morgen früh / bis ich stoppe“) und zusätzlich eine Verknüpfung auf dem PC-Desktop („Grafikkarte freigeben“ / „Grafikkarte sperren“), damit du nicht erst die Zentrale öffnen musst.
+- **Warteschlange:** Schwere Aufträge (Lachen/Schreien erkennen, Texte im Spiel lesen, genaue Wortzeiten, Zeitlupe, Rendern) sammeln sich, bis du freigibst; die Zentrale zeigt „3 Aufträge warten auf den PC (ca. 25 Min.)“. Eilige Sachen (Spracherkennung für einen Schnitt) macht notfalls weiter der Server – wie heute.
+- **Sicherheitsnetz bleibt:** Startest du trotz Freigabe OBS oder ein Spiel, bricht der PC sofort ab (innerhalb von 3 s, gibt es heute schon) und die Freigabe endet.
+- **Einstellung „Modus“:** *Nur nach Freigabe* (dein Wunsch, Standard) · *Automatisch wenn frei* (wie heute) · *Nachts automatisch* (z. B. 2–7 Uhr).
+- Aufwand: S–M, gehört zu Paket C (Power-PC als Rechenzentrum).
