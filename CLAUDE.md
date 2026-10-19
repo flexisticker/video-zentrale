@@ -351,6 +351,10 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   bei `$ErrorActionPreference='Stop'` einen Abbruch. Jetzt `Invoke-Native` (lokal Continue, Zeilen ins Log, nur `$LASTEXITCODE` zählt), `UV_NO_PROGRESS`.
   **Regel: native Programme im Rechenhelfer immer über `Invoke-Native`.** Rechenhelfer 1.6: Mutex `Global\VideoZentraleRechenhelfer` (zweite Instanz beendet sich,
   Log zeigte zwei gleichzeitige Starts), `-Install` stoppt erst die laufende Aufgabe, Python-Einrichtung erneut alle 30 Min. Getestet mit pwsh (Fake-uv mit stderr, Mutex).
+- 1.29.2: Einrichtung beim Kunden lief durch (torch 2.5.1+cu124, CUDA), aber `transformers` 5.x schaltet PyTorch < 2.6 still ab → AST wäre tot gewesen.
+  Rechenhelfer 1.7: `transformers==4.46.3` fest (uv-Auflösung für Windows geprüft: huggingface-hub 0.36, tokenizers 0.20), Marker `py-bereit-2.txt` (neue Einrichtung
+  läuft automatisch, venv/torch bleiben), Selbsttest `is_torch_available()` + Import ASTForAudioClassification, Ergebnis aus Zeile `SELBSTTEST-OK …`.
+  **Nicht auf torch 2.6 gehen:** dort `torch.load(weights_only=True)` als Standard → Demucs-Modelle laden evtl. nicht.
 - Ideen danach: „Best of der Woche“ automatisch (Zeitplan), Platz-Einblendungen „Platz 3/2/1“.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
   Sendeplätze je Kanal **stellt der Kunde selbst ein** (keine festen Startzeiten), „Einplanen“ auf nächsten freien Platz, Shorts

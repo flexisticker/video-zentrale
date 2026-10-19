@@ -1,5 +1,8 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.29.2', date: '19.10.2026', items: [
+    'Rechenhelfer 1.7: Die Geräusch-Erkennung (Lachen, Jubel, Explosionen) hätte nicht funktioniert – die neueste „transformers“-Version verlangt ein neueres PyTorch und hat sich still abgeschaltet. Jetzt fest auf eine passende Version gesetzt; der Selbsttest prüft das ausdrücklich. Die Nachinstallation passiert beim nächsten Start von selbst (nur wenige MB).',
+  ] },
   { version: '1.29.1', date: '19.10.2026', items: [
     'Rechenhelfer 1.6: Die Einrichtung der PC-Analyse brach unter Windows sofort bei „Downloading cpython …“ ab (Windows PowerShell hielt die Fortschrittsmeldungen für Fehler). Behoben – bitte den Rechenhelfer neu herunterladen und „Einrichten.bat“ starten.',
     'Es läuft jetzt immer nur ein Rechenhelfer gleichzeitig (vorher konnten zwei Fenster parallel starten). Scheitert die Einrichtung, versucht er es alle 30 Minuten erneut, ohne Neustart.',

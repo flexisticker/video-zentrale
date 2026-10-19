@@ -12,7 +12,7 @@ param([switch]$Install, [switch]$Uninstall, [string]$Release = '')
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # macht Downloads in Windows PowerShell deutlich schneller
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$Version = '1.6'
+$Version = '1.7'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ConfigFile = Join-Path $Here 'rechenhelfer.json'
 $Home2 = if ($env:VZ_HELPER_HOME) { $env:VZ_HELPER_HOME } else { Join-Path $env:LOCALAPPDATA 'VideoZentrale-Rechenhelfer' }
@@ -176,7 +176,7 @@ $WantAnalyse = $true
 # uv (Astral) lädt eine eigene Python-Version und die Pakete in den Ordner des Rechenhelfers – nichts wird systemweit installiert.
 $PyDir = Join-Path $Home2 'py'
 $PyExe = if ($env:VZ_PYTHON) { $env:VZ_PYTHON } else { Join-Path $PyDir 'Scripts\python.exe' }
-$PyMarker = Join-Path $Home2 'py-bereit-1.txt'
+$PyMarker = Join-Path $Home2 'py-bereit-2.txt'   # 2: transformers 4.x (5.x braucht PyTorch ≥ 2.6)
 $env:HF_HOME = Join-Path $Home2 'hf'; $env:TORCH_HOME = Join-Path $Home2 'torch'
 $env:UV_CACHE_DIR = Join-Path $Home2 'uv-cache'; $env:UV_PYTHON_INSTALL_DIR = Join-Path $Home2 'python'
 $env:PYTHONIOENCODING = 'utf-8'
@@ -214,11 +214,12 @@ function Ensure-Python {
     $r = Invoke-Native $uv @('pip', 'install', '--python', $PyExe, 'torch==2.5.1', 'torchaudio==2.5.1', '--index-url', 'https://download.pytorch.org/whl/cu124') 'uv'
     if ($r.code -ne 0) { throw "PyTorch konnte nicht installiert werden ($($r.text))" }
     Say-Hello 'lädt Demucs, Geräusch- und Texterkennung (einmalig)'
-    $r = Invoke-Native $uv @('pip', 'install', '--python', $PyExe, 'demucs==4.0.1', 'transformers', 'easyocr', 'soundfile') 'uv'
+    $r = Invoke-Native $uv @('pip', 'install', '--python', $PyExe, 'demucs==4.0.1', 'transformers==4.46.3', 'easyocr', 'soundfile') 'uv'
     if ($r.code -ne 0) { throw "Analyse-Pakete konnten nicht installiert werden ($($r.text))" }
-    $r = Invoke-Native $PyExe @('-c', "import torch, demucs, transformers, easyocr, soundfile; print('CUDA' if torch.cuda.is_available() else 'CPU')") 'Python'
-    if ($r.code -ne 0) { throw "Selbsttest fehlgeschlagen: $($r.text)" }
-    $test = $r.text
+    # Selbsttest: transformers muss PyTorch nutzen können (sonst läuft die Geräusch-Erkennung nicht)
+    $r = Invoke-Native $PyExe @('-c', "import torch, demucs, easyocr, soundfile, transformers; from transformers.utils import is_torch_available; assert is_torch_available(), 'transformers ohne PyTorch'; from transformers import ASTForAudioClassification; print('SELBSTTEST-OK ' + ('CUDA ' + torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'Prozessor') + ' · torch ' + torch.__version__ + ' · transformers ' + transformers.__version__)") 'Python'
+    if ($r.code -ne 0 -or $r.text -notmatch 'SELBSTTEST-OK (.+)$') { throw "Selbsttest fehlgeschlagen: $($r.text)" }
+    $test = $Matches[1]
     Set-Content -Path $PyMarker -Value "eingerichtet $(Get-Date) – $test" -Encoding UTF8
     Log "Python für die PC-Analyse bereit ($test). Modelle (Demucs, AST, EasyOCR, zusammen ca. 600 MB) lädt der erste Auftrag."
     return $true
