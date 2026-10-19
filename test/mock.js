@@ -12,7 +12,7 @@ const stallOnce = (s, e) => { if (stallAt >= s && stallAt <= e) { stallAt = -1; 
 const body = (req) => new Promise((r) => { const c = []; req.on('data', (d) => c.push(d)); req.on('end', () => r(Buffer.concat(c))); });
 const jsonOut = (res, s, j, h = {}) => { res.writeHead(s, { 'Content-Type': 'application/json', ...h }); res.end(JSON.stringify(j)); };
 const json = jsonOut;
-http.createServer(async (req, res) => {
+const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://x'); const b = await body(req);
   const p = u.pathname;
   log.push({ m: req.method, p, range: req.headers['content-range'], len: b.length });
@@ -33,6 +33,30 @@ http.createServer(async (req, res) => {
     if (f.get('grant_type') === 'authorization_code') return json(res, 200, { access_token: 'at-' + f.get('code'), refresh_token: 'rt-' + f.get('code'), expires_in: 3600 });
     return json(res, 200, { access_token: 'at-' + f.get('refresh_token').slice(3), expires_in: 3600 });
   }
+  // Twitch (Device Code Flow, Helix)
+  if (p === '/oauth2/device') return json(res, 200, { device_code: 'twdev', user_code: 'TWCODE', verification_uri: 'https://www.twitch.tv/activate?device-code=TWCODE', interval: 1, expires_in: 600 });
+  if (p === '/oauth2/token') {
+    const f = new URLSearchParams(b.toString());
+    if (f.get('grant_type').includes('device_code')) { if (++tokenCalls % 2) return json(res, 400, { status: 400, message: 'authorization_pending' }); return json(res, 200, { access_token: 'tw-at', refresh_token: 'tw-rt', expires_in: 14000 }); }
+    return json(res, 200, { access_token: 'tw-at', refresh_token: 'tw-rt', expires_in: 14000 });
+  }
+  if (p.startsWith('/helix/')) {
+    log.push({ helix: p + u.search, m: req.method, body: b.length ? JSON.parse(b.toString()) : null });
+    if (p === '/helix/users') return json(res, 200, { data: [{ id: '4711', login: 'michamodus', display_name: 'MichaModus' }] });
+    if (p === '/helix/streams') return json(res, 200, { data: process.env.MOCK_LIVE ? [{ id: 'live1', started_at: new Date(Date.now() - 60000).toISOString(), title: 'Live-Test', game_name: 'Fortnite' }] : [] });
+    if (p === '/helix/eventsub/subscriptions') return json(res, 202, { data: [{ id: 'sub' + Math.random() }] });
+    if (p === '/helix/videos') return json(res, 200, { data: [{ id: '555', stream_id: 's555', created_at: process.env.MOCK_VOD_START || '2026-10-18T18:00:00Z', title: 'Fortnite Abend', duration: '3m0s', view_count: 42 }] });
+    if (p === '/helix/clips') return json(res, 200, { data: [{ id: 'c1', title: 'Was war DAS', view_count: 120, duration: 20, vod_offset: 95, video_id: '555', created_at: '2026-10-18T18:10:00Z', url: 'https://clips.twitch.tv/c1' }] });
+    if (p === '/helix/streams/markers') return json(res, 200, { data: [{ videos: [{ video_id: '555', markers: [{ id: 'm1', created_at: '', description: 'krass', position_seconds: 150 }] }] }] });
+    return json(res, 404, { message: 'helix ' + p });
+  }
+  if (p === '/youtube/v3/videos' && req.method === 'GET') {
+    const ids = (u.searchParams.get('id') || '').split(',');
+    return json(res, 200, { items: ids.map((id, i) => ({ id, statistics: { viewCount: String(1000 * (i + 1)), likeCount: '10', commentCount: '2' } })) });
+  }
+  if (p === '/v2/reports') return json(res, 200, { columnHeaders: [{ name: 'video' }, { name: 'views' }, { name: 'averageViewDuration' }, { name: 'averageViewPercentage' }],
+    rows: (u.searchParams.get('filters') || '').replace('video==', '').split(',').map((id) => [id, 100, 20, 77.5]) });
+  if (p === '/v2/video/list/') return json(res, 200, { data: { videos: [{ id: 'tt1', title: '', video_description: process.env.MOCK_TT_DESC || 'Clutch', create_time: Math.floor(Date.now() / 1000), duration: 25, view_count: 5000, like_count: 300, comment_count: 12, share_count: 40 }], has_more: false }, error: { code: 'ok' } });
   if (p === '/youtube/v3/channels') {
     const d = String(req.headers.authorization).replace('Bearer at-', '');
     return json(res, 200, { items: [{ id: 'UC-' + d, snippet: { title: YT_NAMES[d] || d } }] });
@@ -150,6 +174,19 @@ http.createServer(async (req, res) => {
       return json(res, 200, { id: 'msg_t', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn',
         content: [{ type: 'text', text: JSON.stringify(out) }], usage: { input_tokens: 2000, output_tokens: 200 } });
     }
+    if (j.output_config?.format?.schema?.properties?.moments) {
+      const t = j.messages[0].content[0].text;
+      const sents = [...t.matchAll(/^S(\d+) \[([\d.]+)–([\d.]+)\](?: \(([^)]*)\))?/gm)].map((m) => ({ id: +m[1], s: +m[2], e: +m[3], tag: m[4] || '' }));
+      const tagged = sents.filter((x) => x.tag);
+      log.push({ scout: { sents: sents.length, tagged: tagged.length, tags: tagged.slice(0, 5).map((x) => x.tag), twitch: /Zuschauer-Clip|Chat:/.test(t), examples: /ECHTE ZAHLEN/.test(t), effort: j.output_config.effort } });
+      const pick = (tagged.length ? tagged : sents).slice(0, 3).map((x) => ({ fromSentence: Math.max(1, x.id - 1), toSentence: x.id + 1, why: 'Ausraster mit Lachen' }));
+      return json(res, 200, { id: 'msg_m', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ moments: pick }) }], usage: { input_tokens: 30000, output_tokens: 300 } });
+    }
+    if (j.output_config?.format?.schema?.properties?.fixWish) {
+      log.push({ qc: { imgs: j.messages[0].content.filter((c) => c.type === 'image').length, effort: j.output_config.effort, text: j.messages[0].content[0].text.slice(0, 300) } });
+      const out = process.env.MOCK_QC_BAD ? { ok: false, score: 5, issues: ['Hook-Text verdeckt das Spiel-HUD'], fixWish: 'Hook-Text kürzer, Ausschnitt weiter nach links' } : { ok: true, score: 8, issues: [], fixWish: '' };
+      return json(res, 200, { id: 'msg_q', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(out) }], usage: { input_tokens: 2000, output_tokens: 100 } });
+    }
     if (j.output_config?.format?.schema?.properties?.ideas) {
       log.push({ coach: j.messages[0].content.slice(0, 300) });
       const out = { summary: 'Viele starke Reaktionen, aber oft langsamer Einstieg.', strengths: ['Echte Reaktionen', 'Klare Highlights'],
@@ -185,7 +222,10 @@ http.createServer(async (req, res) => {
       const a = Number(m[1]), b2 = Number(m[2]);
       const out = { start: a + 2, end: b2 - 6, title: 'Neue Fassung 🔥', hook: { mode: 'preview', at: b2 - 12, len: 2.5, text: 'Achtung, gleich knallt es' },
         tempo: 'schnell', music: !/ohne musik/i.test(wish), changes: 'Ich steige jetzt mit dem Knall ein und habe den Leerlauf am Ende gekürzt.',
-        viral: 8, viralWhy: 'Stärkerer Einstieg.', viralTip: 'Titel als Frage formulieren.' };
+        viral: 8, viralWhy: 'Stärkerer Einstieg.', viralTip: 'Titel als Frage formulieren.',
+        layout: { mode: 'cam', camX: 70, camY: 4, camW: 28, camH: 28, focus: 35 },
+        fx: [{ at: a + 6, kind: 'cam', emoji: '', sound: '', soundIdea: '', text: '', pos: 'mitte', sticker: '' }] };
+      log.push({ reviseExtra: { layoutRules: /BILDAUFBAU/.test(t0), prevLayout: /Bisheriger Bildaufbau/.test(t0), tone: /\((laut|LACHEN|schnell)/.test(t0) } });
       return json(res, 200, { id: 'msg_r', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn',
         content: [{ type: 'text', text: JSON.stringify(out) }], usage: { input_tokens: 6000, output_tokens: 300 } });
     }
@@ -193,7 +233,7 @@ http.createServer(async (req, res) => {
       const wish = /Wunsch des Creators für diesen Schnitt: „([^“]*)“/.exec(j.messages[0].content[0].text)?.[1];
       if (wish) log.push({ hlWish: wish });
       const texts = j.messages[0].content.filter((c) => c.type === 'text').map((c) => c.text);
-      log.push({ highlights: { imgs: j.messages[0].content.filter((c) => c.type === 'image').length, cands: texts.filter((t) => t.startsWith('Kandidat')) } });
+      log.push({ highlights: { imgs: j.messages[0].content.filter((c) => c.type === 'image').length, cands: texts.filter((t) => t.startsWith('Kandidat')), layoutRules: /BILDAUFBAU/.test(texts[0]) } });
       const sec = texts.filter((t) => t.startsWith('Kandidat')).map((t) => /Sekunde (\d+)–(\d+)/.exec(t)).map((m) => [Number(m[1]), Number(m[2])]);
       const clipHints = /Worauf der Creator bei diesem Kanal Wert legt: ([^\n]*)/.exec(texts[0])?.[1] || '';
       if (clipHints) log.push({ clipHints: clipHints.slice(0, 60) });
@@ -205,12 +245,14 @@ http.createServer(async (req, res) => {
         mood: i ? 'episch' : 'lustig', music: i ? 'epic orchestral hybrid with big drums' : 'quirky playful pizzicato',
         viral: i ? 6 : 9, viralWhy: i ? 'Solider Sieg-Moment, aber bekannter Ablauf.' : 'Lauter Ausraster mit Pointe – hoher Teilwert.', viralTip: 'Mit dem Ausruf direkt einsteigen.',
         hook: { mode: i ? 'cold' : 'preview', at: a + 1 + Math.round((b2 - a - 3) * 0.7), len: 2, text: i ? 'Das gibt es nicht!' : 'Wie konnte das passieren?' },
+        layout: i ? { mode: 'blur', camX: 0, camY: 0, camW: 0, camH: 0, focus: 50 } : { mode: 'cam', camX: 70, camY: 4, camW: 28, camH: 28, focus: 40 },
         fx: i ? [
           { at: a + 5, kind: 'punch', emoji: '', sound: '', soundIdea: '', text: '', pos: 'mitte', sticker: '' },
           { at: a + 9, kind: 'flash', emoji: '', sound: 'boom', soundIdea: '', text: '', pos: 'mitte', sticker: '' },
           { at: a + 12, kind: 'emoji', emoji: '😂', sound: '', soundIdea: '', text: '', pos: 'links-oben', sticker: '' },
         ] : [
           { at: a + 4, kind: 'emoji', emoji: '😱', sound: '', soundIdea: '', text: '', pos: 'rechts-oben', sticker: '' },
+          { at: a + 6, kind: 'cam', emoji: '', sound: '', soundIdea: '', text: '', pos: 'mitte', sticker: '' },
           { at: a + 8, kind: 'freeze', emoji: '', sound: '', soundIdea: '', text: 'Warte …', pos: 'mitte', sticker: '' },
           { at: a + 13, kind: 'replay', emoji: '', sound: '', soundIdea: '', text: 'Nochmal!', pos: 'mitte', sticker: '' },
           { at: a + 17, kind: 'shake', emoji: '', sound: 'hit', soundIdea: '', text: '', pos: 'mitte', sticker: '' },
@@ -246,4 +288,24 @@ http.createServer(async (req, res) => {
       content: [{ type: 'text', text: JSON.stringify(out) }], usage: { input_tokens: 7000, output_tokens: 900 } });
   }
   json(res, 404, { error: 'mock 404 ' + p });
-}).listen(9300, () => console.log('mock 9300'));
+});
+// Twitch EventSub-WebSocket (nur Server → Client): Willkommen, stream.online, Chat-Ausbruch
+const crypto = require('crypto');
+const frame = (str) => { const d = Buffer.from(str); const h = d.length < 126 ? Buffer.from([0x81, d.length]) : Buffer.from([0x81, 126, d.length >> 8, d.length & 255]); return Buffer.concat([h, d]); };
+server.on('upgrade', (req, sock) => {
+  const key = req.headers['sec-websocket-key'];
+  const acc = crypto.createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
+  sock.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${acc}\r\n\r\n`);
+  log.push({ ws: req.url });
+  const send = (type, payload, sub) => sock.write(frame(JSON.stringify({ metadata: { message_type: type, ...(sub ? { subscription_type: sub } : {}) }, payload })));
+  send('session_welcome', { session: { id: 'sess1', keepalive_timeout_seconds: 10 } });
+  let n = 0;
+  const iv = setInterval(() => {
+    n++;
+    if (n === 2) send('notification', { event: { id: 'live1', started_at: new Date(Date.now() - 60000).toISOString() } }, 'stream.online');
+    else if (n > 2 && n < 30) send('notification', { event: { message: { text: n % 3 ? 'KEKW KEKW' : 'was war das', fragments: [{ type: 'emote', text: 'KEKW' }] }, chatter_user_login: 'zuschauer' + n } }, 'channel.chat.message');
+    else send('session_keepalive', {});
+  }, 150);
+  sock.on('close', () => clearInterval(iv)); sock.on('error', () => clearInterval(iv));
+});
+server.listen(9300, () => console.log('mock 9300'));

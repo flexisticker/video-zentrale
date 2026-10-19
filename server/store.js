@@ -56,7 +56,7 @@ const empty = () => ({
   profiles: defaultProfiles(),                                   // Kanäle mit eigenen Verbindungen und Vorgaben
   youtube: { clientId: '', clientSecret: '' },                   // Google-App (für alle Kanäle gleich)
   tiktok: { clientKey: '', clientSecret: '', redirectUri: '' },  // TikTok-App (für alle Konten gleich)
-  ai: { apiKey: '', auto: true, autoTips: true, hints: '', spent: 0, count: 0 },  // Claude (Anthropic-API)
+  ai: { apiKey: '', auto: true, autoTips: true, qc: true, scout: true, hints: '', spent: 0, count: 0 },  // Claude (Anthropic-API)
   fal: { key: '', count: 0, model: 'fal-ai/flux-pro/kontext', boosts: 0,     // fal.ai: Freistellen + KI-Aufwertung
     genModel: 'fal-ai/nano-banana/edit', autoThumb: true, generated: 0 },     //   + KI-Titelbild aus Foto & Standbild
   music: { enabled: true, shorts: true, long: false, source: 'mixed', level: 'mittel', lufs: -30, duck: true, duckLevel: 'leicht', longMax: 180,  // Hintergrundmusik
@@ -64,12 +64,13 @@ const empty = () => ({
   helper: { enabled: false, token: '', model: 'large-v3', lastSeen: '', name: '', gpu: '', done: 0, failed: 0 },   // Rechenhelfer-PC
   backup: { auto: true, time: '03:30', keep: 14, lastAt: '', lastFile: '', lastError: '' },        // Sicherung
   photos: [],                                                      // Fotos des Creators für Titelbilder
-  cut: { auto: true, hookText: true, longVersion: true, longCopy: false, summary: 0, cutPauses: true, silenceDb: -45, minPause: 20, shorts: 3, shortMin: 30, shortMax: 45,
+  cut: { auto: true, hookText: true, longVersion: true, longCopy: false, summary: 0, cutPauses: true, silenceDb: -45, minPause: 20, shorts: 3, shortMin: 15, shortMax: 60,
+    voiceTrack: 'auto',                                                              // Tonspur der Stimme (OBS-Mehrspur): auto = Spur 2
     moveRaw: true, whisper: { enabled: true, model: 'small', threads: 4, gpu: true },
     window: { enabled: false, from: '01:00', to: '07:00' },                          // Nachtbetrieb
     captions: { enabled: true, color: '#FFE14D' },                                   // animierte Untertitel in Shorts
     linkedin: { format: '4:5', captions: true },                                     // Clips für LinkedIn (Profi-Stil)
-    facecam: { enabled: false, x: 0, y: 0, w: 0, h: 0 } },                           // Bereich der Facecam (Anteile 0–1)
+    facecam: { enabled: false, auto: true, x: 0, y: 0, w: 0, h: 0 } },        // feste Facecam (enabled) bzw. automatisch erkennen (auto)                           // Bereich der Facecam (Anteile 0–1)
 });
 
 let state = empty();
@@ -106,8 +107,8 @@ function normalize(raw) {
     if (raw.youtube?.refreshToken) p.youtube = { refreshToken: raw.youtube.refreshToken, channel: raw.youtube.channel || null };
     if (raw.tiktok?.refreshToken) p.tiktok = { refreshToken: raw.tiktok.refreshToken, refreshExpires: raw.tiktok.refreshExpires || 0, user: raw.tiktok.user || null };
   }
-  state.youtube = { clientId: raw.youtube?.clientId || '', clientSecret: raw.youtube?.clientSecret || '' };
-  state.tiktok = { clientKey: raw.tiktok?.clientKey || '', clientSecret: raw.tiktok?.clientSecret || '', redirectUri: raw.tiktok?.redirectUri || '', directPost: !!raw.tiktok?.directPost };
+  state.youtube = { clientId: raw.youtube?.clientId || '', clientSecret: raw.youtube?.clientSecret || '', analytics: !!raw.youtube?.analytics };
+  state.tiktok = { clientKey: raw.tiktok?.clientKey || '', clientSecret: raw.tiktok?.clientSecret || '', redirectUri: raw.tiktok?.redirectUri || '', directPost: !!raw.tiktok?.directPost, statsList: !!raw.tiktok?.statsList };
   state.ai = { ...base.ai, ...raw.ai };
   state.fal = { ...base.fal, ...raw.fal };
   state.music = { ...base.music, ...raw.music };
@@ -124,6 +125,9 @@ function normalize(raw) {
   // 1.25: beste Spracherkennung auf dem Rechenhelfer (genauere Wort-Zeitmarken und Satzzeichen → sauberere Schnitte)
   if (!raw.migMaxCut && state.helper?.model === 'large-v3-turbo') state.helper.model = 'large-v3';
   state.migMaxCut = true;
+  // 1.27: Länge folgt dem Moment (vorher feste 30–45 s) – nur wenn der Kunde die alten Startwerte nie geändert hat
+  if (!raw.migVarLen && state.cut.shortMin === 30 && state.cut.shortMax === 45) { state.cut.shortMin = 15; state.cut.shortMax = 60; }
+  state.migVarLen = true;
   const defaults = Object.fromEntries(defaultProfiles().map((p) => [p.id, p]));
   for (const p of state.profiles) {
     const c = emptyConnections();

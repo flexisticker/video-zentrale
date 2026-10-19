@@ -143,33 +143,37 @@ export function hookTextUntil(parts, hook) {
   return 2.2;
 }
 
-// ffmpeg-Filter: Abschnitte schneiden und zusammensetzen → [cv] (+ [ca]). base = Startzeit der Eingabe (-ss).
-export function concatGraph(parts, { base, hasAudio, W0, H0 }) {
+// ffmpeg-Filter: Abschnitte schneiden und zusammensetzen → { graph ([cv] + [ca]), inputs (ffmpeg-Argumente) }.
+// Jeder Abschnitt ist eine eigene Eingabe (-ss/-t auf die Datei): hingen alle Teile an einer Eingabe und stand die
+// Hook-Vorschau vorne, musste ffmpeg alle übrigen Teile bis zum Ende der Vorschau als Rohbilder puffern (mehrere GB).
+export function concatGraph(parts, { file, hasAudio, W0, H0 }) {
   let g = '';
+  const inputs = [];
   parts.forEach((p, i) => {
-    const a = (p.a - base).toFixed(3), b = (p.b - base).toFixed(3);
     const z = p.zoom && W0 && H0 ? `,crop=trunc(iw/${p.zoom}/2)*2:trunc(ih/${p.zoom}/2)*2,scale=${W0}:${H0}` : '';
     // Zurückspulen im VHS-Look (Rauschen, blasse Farben, wandernder heller Streifen)
     const rev = p.rev ? ',reverse,setpts=PTS/3,noise=alls=22:allf=t+u,eq=saturation=0.45:contrast=1.15,'
       + "drawbox=x=0:y='mod(t*1400,ih)':w=iw:h=ih/40:color=white@0.25:t=fill" : '';
     const speed = p.speed ? `,setpts=PTS/${p.speed}` : '';
+    const len = p.freeze ? 0.1 : Math.max(0.05, p.b - p.a);
+    inputs.push('-ss', Math.max(0, p.a).toFixed(3), '-t', len.toFixed(3), '-i', file);
     if (p.freeze) {
       // Standbild: ein Bild halten, entsättigt (wirkt wie „Pause“)
-      g += `[0:v]trim=start=${a}:end=${(p.a - base + 0.05).toFixed(3)},setpts=PTS-STARTPTS,fps=30${z},eq=saturation=0.35,`
+      g += `[${i}:v:0]trim=end=0.05,setpts=PTS-STARTPTS,fps=30${z},eq=saturation=0.35,`
         + `tpad=stop_mode=clone:stop_duration=${p.freeze},trim=duration=${p.freeze},setsar=1[v${i}];`;
       if (hasAudio) g += `aevalsrc=0|0:s=48000:d=${p.freeze}[a${i}];`;
       return;
     }
-    g += `[0:v]trim=start=${a}:end=${b},setpts=PTS-STARTPTS,fps=30${z}${rev}${speed},fps=30,setsar=1[v${i}];`;
+    g += `[${i}:v:0]setpts=PTS-STARTPTS,fps=30${z}${rev}${speed},fps=30,setsar=1[v${i}];`;
     if (hasAudio) {
       const d = partLen(p).toFixed(3);
       const ar = p.rev ? ',areverse,atempo=2,atempo=1.5,volume=0.5' : p.speed ? `,atempo=${Math.max(0.5, p.speed)}` : '';
-      g += `[0:a:0]atrim=start=${a}:end=${b},asetpts=PTS-STARTPTS${ar},aformat=sample_rates=48000:channel_layouts=stereo,`
+      g += `[${i}:a:0]asetpts=PTS-STARTPTS${ar},aformat=sample_rates=48000:channel_layouts=stereo,apad,atrim=0:${d},`
         + `afade=t=in:d=0.02,afade=t=out:st=${Math.max(0, d - 0.03).toFixed(3)}:d=0.03[a${i}];`;
     }
   });
   g += parts.map((_, i) => `[v${i}]` + (hasAudio ? `[a${i}]` : '')).join('') + `concat=n=${parts.length}:v=1:a=${hasAudio ? 1 : 0}[cv]` + (hasAudio ? '[ca]' : '');
-  return g;
+  return { graph: g, inputs };
 }
 
 // kurze Beschreibung für die Notiz am Video
@@ -191,11 +195,12 @@ export function describe(hook, tempo, parts, start, end) {
 // Stufen je Kanal: wie viele Effekte, welche Arten, wie laut die Sounds
 export const FX_LEVELS = {
   aus: { max: 0, kinds: [], vol: 0, auto: false },
-  dezent: { max: 3, kinds: ['emoji', 'sound', 'flash', 'text'], vol: 0.35, auto: false },
-  normal: { max: 6, kinds: ['emoji', 'sound', 'flash', 'text', 'shake', 'punch', 'freeze', 'replay'], vol: 0.6, auto: true },
-  viel: { max: 10, kinds: ['emoji', 'sound', 'flash', 'text', 'shake', 'punch', 'freeze', 'replay', 'sticker'], vol: 0.8, auto: true },
+  dezent: { max: 3, kinds: ['emoji', 'sound', 'flash', 'text', 'cam'], vol: 0.35, auto: false },
+  normal: { max: 6, kinds: ['emoji', 'sound', 'flash', 'text', 'shake', 'punch', 'freeze', 'replay', 'cam'], vol: 0.6, auto: true },
+  viel: { max: 10, kinds: ['emoji', 'sound', 'flash', 'text', 'shake', 'punch', 'freeze', 'replay', 'sticker', 'cam'], vol: 0.8, auto: true },
 };
-export const FX_KINDS = ['emoji', 'sound', 'flash', 'text', 'shake', 'punch', 'freeze', 'replay', 'sticker'];
+// cam = Facecam für ~1,6 s groß (Reaktion) – wirkt nur im Facecam-Layout (layout.js)
+export const FX_KINDS = ['emoji', 'sound', 'flash', 'text', 'shake', 'punch', 'freeze', 'replay', 'sticker', 'cam'];
 export const POSITIONS = { oben: [0.5, 0.2], mitte: [0.5, 0.42], unten: [0.5, 0.6], 'links-oben': [0.24, 0.22], 'rechts-oben': [0.76, 0.22],
   'links-unten': [0.24, 0.58], 'rechts-unten': [0.76, 0.58] };
 
@@ -276,6 +281,7 @@ export function applyFx(parts0, fx, { level = 'normal', start, end, stickers = f
     if (x.kind === 'punch' && !ev.sound && L.auto) ev.sound = 'hit';
     if (x.kind === 'emoji' && !ev.sound && !ev.soundIdea) ev.sound = 'pop';
     if (x.kind === 'sticker' && !ev.sound) ev.sound = 'whoosh';
+    if (x.kind === 'cam') ev.dur = 1.6;
     add(ev);
   }
   // 3) automatische Begleitung: Zurückspulen klingt nach Band + ⏪, Hook-Vorschau startet mit Bass-Boom
@@ -295,7 +301,7 @@ export function describeFx(events) {
   const bits = [];
   const em = events.filter((e) => e.kind === 'emoji' && e.emoji !== '⏪').map((e) => e.emoji).join('');
   if (em) bits.push('Emojis ' + em);
-  for (const [k, name] of [['freeze', 'Freeze'], ['replay', 'Zeitlupe'], ['punch', 'Zoom-Punch'], ['shake', 'Wackeln'], ['flash', 'Blitz'], ['sticker', 'KI-Sticker']]) if (n(k)) bits.push(`${n(k)}× ${name}`);
+  for (const [k, name] of [['cam', 'Reaktion groß'], ['freeze', 'Freeze'], ['replay', 'Zeitlupe'], ['punch', 'Zoom-Punch'], ['shake', 'Wackeln'], ['flash', 'Blitz'], ['sticker', 'KI-Sticker']]) if (n(k)) bits.push(`${n(k)}× ${name}`);
   const snd = events.filter((e) => e.sound || e.soundIdea).length;
   if (snd) bits.push(`${snd} Sound${snd === 1 ? '' : 's'}`);
   return bits.length ? 'Effekte: ' + bits.join(', ') : '';

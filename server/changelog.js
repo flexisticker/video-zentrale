@@ -1,5 +1,16 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.27.0', date: '19.10.2026', items: [
+    '🎯 Momente finden wie die Profis: Statt nur „wo ist es laut“ zählen jetzt deine Stimme (bei OBS-Mehrspur getrennt vom Spiel), dein Tonfall je Satz (lauter als sonst, schneller, Ausrufe, „Alter!“, Wiederholungen), erkannte Lacher/Schreie, Bildwechsel und Twitch-Signale.',
+    '👀 Claude liest vor dem Schnitt die ganze Aufnahme und meldet starke Momente – auch leise, witzige Stellen, die keine Lautstärke-Spitze haben. Je Kandidat sieht Claude jetzt einen Bildraster aus 9 Bildern statt eines einzelnen Standbilds.',
+    '🖼 Bildaufbau wie StreamLadder: Claude erkennt die Facecam (auch wenn sie je Szene woanders sitzt), die Zentrale legt den Ausschnitt genau an den Rahmen an. Facecam oben + Spiel unten, Ausschnitt um die Action oder ganzes Bild mit Blur-Hintergrund. Bei starken Reaktionen wird die Facecam kurz groß.',
+    'Hook-Text und Emojis liegen nie mehr über deinem Gesicht. Shorts in besserer Bildqualität; Länge folgt dem Moment (15–60 s statt fest 30–45 s).',
+    '✔ Jeder fertige Short wird geprüft: schwarze/eingefrorene Stellen, Stille, Lautheit – und Claude schaut sich den fertigen Clip an (Gesicht verdeckt? Untertitel lesbar? Action im Bild?). Mängel fließen in die automatische Überarbeitung.',
+    '🟣 Twitch: Chat wird live mitgeschrieben (nur Zeit + Text), Chat-Ausschläge, Zuschauer-Clips und Stream-Marker werden Highlight-Signale. Optional lädt die Zentrale das VOD nach dem Stream selbst in den Eingang.',
+    '📈 Neuer Reiter „Zahlen“: Aufrufe/Likes von YouTube (optional % angesehen über Analytics), TikTok (sobald freigegeben) und Twitch. Claude bekommt deine besten und schwächsten Clips als Beispiele für den nächsten Schnitt, der Coach arbeitet mit echten Zahlen.',
+    '✅ Freigabe: sortiert nach Viral-Punkten, „🔁 Mit neuen Erkenntnissen überarbeiten“ für ausgewählte Videos, „🧹 Doppelte aufräumen“ legt ältere Fassungen in den Papierkorb, wenn es schon eine überarbeitete gibt (hochgeladene bleiben).',
+    'Fehler behoben: Shorts mit Höhepunkt vorweg konnten wie früher die Kurzfassung sehr viel Speicher brauchen – jeder Abschnitt wird jetzt direkt angesprungen.',
+  ] },
   { version: '1.26.1', date: '18.10.2026', items: [
     'Info-Seite: TikTok wird jetzt so beschrieben, wie es nach der Freigabe läuft – Videos gehen direkt aus der Zentrale live auf das eigene Profil (Veröffentlichungsdialog mit Sichtbarkeit, Interaktionen, Kennzeichnung); Entwurf in den Posteingang nur noch als Alternative.',
   ] },

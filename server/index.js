@@ -25,6 +25,8 @@ import * as credits from './credits.js';
 import * as org from './organize.js';
 import * as info from './info.js';
 import * as ai2 from './ai.js';
+import * as twitch from './twitch.js';
+import * as stats from './stats.js';
 
 const PORT = Number(process.env.PORT || 8090);
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -42,6 +44,8 @@ org.init();
 autocut.init();
 ver.init();
 backup.init();
+twitch.init();
+stats.init();
 const scanAll = () => lib.scan().then(() => { ai.autoQueue(); autocut.autoQueue(); });
 autocut.onDone(() => scanAll().catch(() => {}));
 
@@ -477,6 +481,12 @@ async function api(req, res, url) {
       v.revisionKept = new Date().toISOString(); saveNow();
       return send(res, 200, publicVideo(v));
     }
+    // Twitch-Stream von Hand zuordnen (streamId + offset) oder „kein Stream“
+    if (sub === '/twitch' && m === 'POST') {
+      const b = await readJson(req);
+      twitch.assign(v, { streamId: String(b.streamId || ''), offset: b.offset, none: b.none === true });
+      return send(res, 200, publicVideo(v));
+    }
     if (sub === '/topic' && m === 'POST') {
       const b = await readJson(req);
       org.setTopic(v, b.topic || '');
@@ -587,7 +597,8 @@ async function api(req, res, url) {
   }
 
   if (p === '/api/settings' && m === 'GET') {
-    return send(res, 200, { settings: db().settings, youtube: youtube.status(), tiktok: tiktok.status(), ai: ai.status(), cut: autocut.status(), fal: thumbs.falStatus(), music: music.status(),
+    return send(res, 200, { settings: db().settings, youtube: { ...youtube.status(), analytics: !!db().youtube.analytics }, tiktok: { ...tiktok.status(), statsList: !!db().tiktok.statsList },
+      ai: ai.status(), cut: autocut.status(), fal: thumbs.falStatus(), music: music.status(), twitch: twitch.status(), stats: { enabled: stats.overview().enabled, lastRun: db().stats?.lastRun || '' },
       profiles: profiles.list().map(profiles.publicProfile), version: VERSION });
   }
   if (p === '/api/public-info' && m === 'GET') return send(res, 200, info.cfg());
@@ -693,6 +704,12 @@ async function api(req, res, url) {
         } else if (b.action === 'restore') {
           if (v.folder !== 'papierkorb') continue;
           lib.moveVideo(v, lib.FOLDERS.includes(v.trash?.from) && v.trash.from !== 'papierkorb' ? v.trash.from : 'geschnitten'); delete v.trash;
+        } else if (b.action === 'revise') {
+          // Mit den neuen Erkenntnissen (Signale, Bildaufbau, Prüfung, Viral-Tipps) neu schneiden
+          const tips = autocut.tipsWish(v);
+          const wish = String(b.wish || '').trim() || ('Mit allen neuen Erkenntnissen neu schneiden: Tonfall/Lacher/Chat-Signale nutzen, Bildaufbau (Facecam, Ausschnitt) prüfen, starker Hook, Länge nach dem Moment.'
+            + (tips ? ' ' + tips : ''));
+          try { autocut.enqueueRevision(v, wish); } catch (e) { skipped.push((v.title || v.file) + ' – ' + e.message); continue; }
         } else if (b.action === 'delete') {
           if (v.folder !== 'papierkorb') { skipped.push(v.title || v.file); continue; }   // endgültig nur aus dem Papierkorb
           purge(v);
@@ -704,6 +721,34 @@ async function api(req, res, url) {
     if (b.action === 'restore') org.soon();
     return send(res, 200, { done: done.length, skipped });
   }
+  // Doppelte aufräumen: in der Freigabe ältere Fassungen, zu denen es schon eine neuere (überarbeitete) gibt → Papierkorb
+  if (p === '/api/videos/dedupe' && m === 'POST') {
+    const b = await readJson(req);
+    const list = autocut.duplicates();
+    if (b.dryRun) return send(res, 200, { items: list.map((x) => ({ id: x.old.id, file: x.old.file, title: x.old.title || '', newer: x.newer.file, viralOld: x.old.viral?.score || null, viralNew: x.newer.viral?.score || null })) });
+    let n = 0; const skipped = [];
+    for (const { old, newer } of list) {
+      if (isUploading(old) || ['queued', 'running'].includes(old.revise?.state)) { skipped.push(old.title || old.file); continue; }
+      const from = old.folder; lib.moveVideo(old, 'papierkorb');
+      old.trash = { from, at: new Date().toISOString(), reason: 'doppelt – neuere Fassung ' + newer.file }; n++;
+    }
+    saveNow();
+    return send(res, 200, { moved: n, skipped });
+  }
+  // Twitch: Verbindung, Chat-Mitschnitt, Streams, VOD-Import
+  if (p === '/api/twitch' && m === 'GET') return send(res, 200, twitch.status());
+  if (p === '/api/twitch/config' && m === 'POST') { twitch.configure(await readJson(req)); return send(res, 200, twitch.status()); }
+  if (p === '/api/twitch/connect' && m === 'POST') { try { await twitch.startDevice(); } catch (e) { throw new HttpError(409, e.message); } return send(res, 200, twitch.status()); }
+  if (p === '/api/twitch/disconnect' && m === 'POST') { twitch.disconnect(); return send(res, 200, twitch.status()); }
+  if (p === '/api/twitch/sync' && m === 'POST') { try { await twitch.syncVideos(); } catch (e) { throw new HttpError(409, e.message); } return send(res, 200, twitch.status()); }
+  if ((r = /^\/api\/twitch\/import\/([\w-]{1,40})$/.exec(p)) && m === 'POST') {
+    twitch.importVod(r[1]).then(() => scanAll()).catch((e) => console.error('VOD-Import:', e.message));
+    return send(res, 200, twitch.status());
+  }
+  // Zahlen: YouTube/TikTok/Twitch-Statistiken je Video
+  if (p === '/api/stats' && m === 'GET') return send(res, 200, stats.overview());
+  if (p === '/api/stats/refresh' && m === 'POST') { stats.refreshAll(true).catch((e) => console.error('Statistik:', e.message)); return send(res, 200, stats.overview()); }
+  if (p === '/api/stats/config' && m === 'POST') { stats.configure(await readJson(req)); return send(res, 200, stats.overview()); }
   if (p === '/api/trash/empty' && m === 'POST') {
     let n = 0;
     for (const v of Object.values(db().videos)) if (v.folder === 'papierkorb') { purge(v); n++; }

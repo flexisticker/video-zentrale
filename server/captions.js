@@ -95,7 +95,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 }
 
 // Hook-Text oben im Bild für die ersten Sekunden (groß, mit Kasten, kurzer „Pop“). pro = ruhig für LinkedIn.
-export function buildHookAss(text, { until = 2.2, width = 1080, height = 1920, pro = false, color = '#FFE14D' } = {}) {
+// top = Abstand von oben in Pixeln (z. B. an die Naht unter der Facecam, damit das Gesicht frei bleibt)
+export function buildHookAss(text, { until = 2.2, width = 1080, height = 1920, pro = false, color = '#FFE14D', top = null } = {}) {
   const t = clean(text);
   if (!t || until <= 0) return '';
   const size = Math.round(width * (pro ? 0.06 : 0.1));
@@ -110,7 +111,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Hook,${font},${size},&H00FFFFFF,&H00FFFFFF,${box},${box},-1,0,0,0,100,100,1,0,3,${Math.round(size * 0.28)},0,8,80,80,${Math.round(height * (pro ? 0.08 : 0.13))},1
+Style: Hook,${font},${size},&H00FFFFFF,&H00FFFFFF,${box},${box},-1,0,0,0,100,100,1,0,3,${Math.round(size * 0.28)},0,8,80,80,${top != null ? Math.round(top) : Math.round(height * (pro ? 0.08 : 0.13))},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

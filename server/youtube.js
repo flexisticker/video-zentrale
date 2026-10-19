@@ -8,7 +8,10 @@ import * as profiles from './profiles.js';
 const OAUTH = process.env.YT_OAUTH_BASE || 'https://oauth2.googleapis.com';
 const AUTH = process.env.YT_AUTH_BASE || 'https://accounts.google.com';
 const API = process.env.YT_API_BASE || 'https://www.googleapis.com';
-const SCOPE = 'https://www.googleapis.com/auth/youtube';
+// Analytics (Nur-Lese-Recht) nur, wenn in der Statistik eingeschaltet – dann einmal neu verbinden
+const SCOPE_BASE = 'https://www.googleapis.com/auth/youtube';
+const scopes = () => SCOPE_BASE + (db().youtube.analytics ? ' https://www.googleapis.com/auth/yt-analytics.readonly' : '');
+const ANALYTICS = process.env.YT_ANALYTICS_BASE || 'https://youtubeanalytics.googleapis.com';
 const CHUNK = Number(process.env.YT_CHUNK_KB || 32768) * 1024; // Vielfaches von 256 KB
 // Ein Stück darf höchstens so lange dauern (mind. 2 Min., sonst bei 150 KB/s) – danach gilt die Verbindung als hängend,
 // wird abgebrochen und der Upload ab dem Stand fortgesetzt, den YouTube bestätigt.
@@ -55,7 +58,7 @@ export function webAuthUrl(p, origin) {
   const redirect = String(origin || '').replace(/\/$/, '') + '/oauth/google';
   const state = crypto.randomBytes(16).toString('hex');
   webStates.set(state, { profileId: p.id, redirect, until: Date.now() + 15 * 60_000 });
-  const q = new URLSearchParams({ client_id: c.clientId, redirect_uri: redirect, response_type: 'code', scope: SCOPE,
+  const q = new URLSearchParams({ client_id: c.clientId, redirect_uri: redirect, response_type: 'code', scope: scopes(),
     access_type: 'offline', prompt: 'consent select_account', include_granted_scopes: 'true', state });
   return AUTH + '/o/oauth2/v2/auth?' + q;
 }
@@ -80,7 +83,7 @@ export async function finishWeb(code, state) {
 export async function startConnect(p) {
   const c = cfg();
   if (!c.clientId || !c.clientSecret) throw new Error('Erst Client-ID und Client-Secret eintragen.');
-  const { ok, j } = await form(OAUTH + '/device/code', { client_id: c.clientId, scope: SCOPE });
+  const { ok, j } = await form(OAUTH + '/device/code', { client_id: c.clientId, scope: scopes() });
   if (!ok) throw new Error('Google lehnt ab: ' + (j.error_description || j.error || 'unbekannt')
     + (j.error === 'invalid_client' ? ' (Client-Typ muss „Fernseher und Geräte mit begrenzter Eingabe“ sein)' : ''));
   const run = { device: j.device_code, userCode: j.user_code, url: j.verification_url || j.verification_uri,
@@ -233,6 +236,36 @@ export async function setThumbnail(videoId, p, imagePath) {
     return j?.error?.errors?.[0]?.reason === 'forbidden'
       ? 'Titelbild nicht gesetzt: Kanal muss bei YouTube bestätigt sein (Telefonnummer).' : 'Titelbild nicht gesetzt: ' + apiError(j, r.status);
   } catch (e) { return 'Titelbild nicht gesetzt: ' + e.message; }
+}
+
+// Statistik (stats.js): Aufrufe/Likes/Kommentare – geht mit dem normalen YouTube-Recht
+export async function videoStats(p, ids) {
+  const out = {};
+  for (let i = 0; i < ids.length; i += 50) {
+    const r = await fetch(API + '/youtube/v3/videos?part=statistics,contentDetails&id=' + ids.slice(i, i + 50).map(encodeURIComponent).join(','),
+      { headers: { Authorization: 'Bearer ' + await token(p) } });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(apiError(j, 'Statistik nicht abrufbar (' + r.status + ')'));
+    for (const it of j.items || []) out[it.id] = { views: +it.statistics?.viewCount || 0, likes: +it.statistics?.likeCount || 0, comments: +it.statistics?.commentCount || 0 };
+  }
+  return out;
+}
+// YouTube Analytics: durchschnittlich angesehener Anteil/Dauer je Video (braucht das Recht yt-analytics.readonly)
+export async function videoAnalytics(p, ids, startDate) {
+  const out = {};
+  const end = new Date().toISOString().slice(0, 10);
+  for (let i = 0; i < ids.length; i += 40) {
+    const q = new URLSearchParams({ ids: 'channel==MINE', startDate, endDate: end, metrics: 'views,averageViewDuration,averageViewPercentage',
+      dimensions: 'video', filters: 'video==' + ids.slice(i, i + 40).join(','), maxResults: '200' });
+    const r = await fetch(ANALYTICS + '/v2/reports?' + q, { headers: { Authorization: 'Bearer ' + await token(p) } });
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 403) throw new Error('Für YouTube Analytics den Kanal einmal neu verbinden (zusätzliches Nur-Lese-Recht).');
+    if (!r.ok) throw new Error(apiError(j, 'Analytics nicht abrufbar (' + r.status + ')'));
+    const col = (name) => (j.columnHeaders || []).findIndex((h) => h.name === name);
+    const [iv, id, ip] = ['video', 'averageViewDuration', 'averageViewPercentage'].map(col);
+    for (const row of j.rows || []) out[row[iv]] = { avgDuration: +row[id] || 0, avgPercent: +row[ip] || 0 };
+  }
+  return out;
 }
 
 export function init() {

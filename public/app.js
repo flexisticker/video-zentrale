@@ -7,6 +7,7 @@ const CATEGORIES = [['20', 'Gaming'], ['24', 'Unterhaltung'], ['22', 'Menschen &
 const TABS = [
   ['posten', '📱 Zum Posten'],
   ['coach', '💡 Coach'],
+  ['zahlen', '📈 Zahlen'],
   ['geschnitten', 'Zur Freigabe'],
   ['eingang', 'Eingang (roh)'],
   ['hochgeladen', 'Hochgeladen'],
@@ -20,7 +21,8 @@ const INBOXES = ['eingang', 'eingang-profi'];
 const inTab = (v, tab) => v.folder === tab || (tab === 'eingang' && v.folder === 'eingang-profi');
 const FOLDER_NAMES = { papierkorb: 'Papierkorb', eingang: 'Eingang (roh)', 'eingang-profi': 'Eingang Profi (LinkedIn)', geschnitten: 'Zur Freigabe', hochgeladen: 'Hochgeladen', rohvideos: 'Rohvideos (Originale)' };
 const S = { videos: [], busy: false, tab: 'geschnitten', search: '', channel: '', openId: null, settings: null, version: '',
-  topic: '', month: '', group: (() => { try { return !!localStorage.getItem('vz-group'); } catch { return false; } })(), sel: new Set(), selMode: false, selTab: '' };
+  topic: '', month: '', group: (() => { try { return !!localStorage.getItem('vz-group'); } catch { return false; } })(), sel: new Set(), selMode: false, selTab: '',
+  sort: (() => { try { return localStorage.getItem('vz-sort') || ''; } catch { return ''; } })() };
 try { S.channel = localStorage.getItem('vz-channel') || ''; } catch { /* egal */ }
 const app = document.getElementById('app');
 
@@ -65,6 +67,7 @@ const fmtDur = (s) => {
   return (hh ? hh + ':' + String(mm).padStart(2, '0') : mm) + ':' + String(ss).padStart(2, '0');
 };
 const fmtSize = (b) => b > 1e9 ? (b / 1e9).toFixed(2).replace('.', ',') + ' GB' : b >= 1e6 ? Math.round(b / 1e6) + ' MB' : Math.max(1, Math.round(b / 1e3)) + ' KB';
+const fmtNum = (n) => n >= 1e6 ? (n / 1e6).toFixed(1).replace('.', ',') + ' Mio.' : n >= 1e4 ? Math.round(n / 1e3) + ' Tsd.' : String(n || 0);
 const fmtDate = (d) => d ? new Date(d).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) : '';
 const isVertical = (v) => v.width && v.height && v.height > v.width;
 const imgUrl = (v) => `/api/videos/${v.id}/image?v=${v.imageVersion || 0}`;
@@ -258,7 +261,7 @@ let mainEl, countEls = {};
 function render() {
   countEls = {};
   const tabs = h('nav', { class: 'tabs' }, TABS.map(([id, label]) => {
-    const c = ['einstellungen', 'coach', 'bibliothek'].includes(id) ? null : h('span', { class: 'count' });
+    const c = ['einstellungen', 'coach', 'bibliothek', 'zahlen'].includes(id) ? null : h('span', { class: 'count' });
     if (c) countEls[id] = c;
     return h('button', { class: 'tab' + (S.tab === id && !S.openId ? ' on' : ''), onclick: () => go(id) }, label, c);
   }));
@@ -271,7 +274,7 @@ function render() {
     const c = id === 'coach' ? null : h('span', { class: 'bcount' });
     if (c) countEls['b-' + id] = c;
     return h('button', { class: 'bn' + (S.tab === id && !S.openId ? ' on' : ''), onclick: () => go(id) }, h('span', { class: 'bi' }, icon, c), h('span', {}, label));
-  }), h('button', { class: 'bn' + (['bibliothek', 'hochgeladen', 'rohvideos', 'papierkorb', 'einstellungen'].includes(S.tab) && !S.openId ? ' on' : ''), onclick: () => moreSheet(fileInput) },
+  }), h('button', { class: 'bn' + (['bibliothek', 'zahlen', 'hochgeladen', 'rohvideos', 'papierkorb', 'einstellungen'].includes(S.tab) && !S.openId ? ' on' : ''), onclick: () => moreSheet(fileInput) },
     h('span', { class: 'bi' }, '☰'), h('span', {}, 'Mehr')));
   app.replaceChildren(
     h('header', { class: 'top' },
@@ -303,7 +306,7 @@ function moreSheet(fileInput) {
     h('div', { class: 'sheet narrow more' },
       h('button', { class: 'close', onclick: close, title: 'Schließen' }, '×'),
       h('h2', {}, 'Mehr'),
-      item('bibliothek', '📚 Bibliothek'), item('hochgeladen', '📦 Hochgeladen (Archiv)'), item('rohvideos', '🎞 Rohvideos'), item('papierkorb', '🗑 Papierkorb'), item('einstellungen', '⚙ Einstellungen'),
+      item('bibliothek', '📚 Bibliothek'), item('zahlen', '📈 Zahlen'), item('hochgeladen', '📦 Hochgeladen (Archiv)'), item('rohvideos', '🎞 Rohvideos'), item('papierkorb', '🗑 Papierkorb'), item('einstellungen', '⚙ Einstellungen'),
       h('button', { class: 'btn big', onclick: () => { close(); fileInput.click(); } }, '⤒ Video/Bild hochladen'),
       installHint(),
       h('p', { class: 'hint' }, APP_NAME + ' ' + versionText())));
@@ -316,6 +319,7 @@ function renderMain() {
   if (S.tab === 'posten') return renderPosting();
   if (S.tab === 'coach') return renderCoach();
   if (S.tab === 'bibliothek') return renderLibrary();
+  if (S.tab === 'zahlen') return renderStats();
   const q = S.search.toLowerCase();
   if (S.selTab !== S.tab) { S.sel = new Set(); S.selMode = false; S.selTab = S.tab; }
   const inTabList = S.videos.filter((v) => inTab(v, S.tab) && !v.missing);
@@ -355,7 +359,20 @@ function renderMain() {
   const groupBtn = ['geschnitten', 'hochgeladen', 'papierkorb'].includes(S.tab) ? h('button', { class: 'btn small' + (S.group ? ' on' : ''), title: 'Videos einer Aufnahme zusammen zeigen',
     onclick: () => { S.group = !S.group; try { localStorage.setItem('vz-group', S.group ? '1' : ''); } catch { /* egal */ } renderMain(); } }, '🗂 Nach Aufnahme') : null;
   const selBtn = h('button', { class: 'btn small' + (S.selMode ? ' on' : ''), onclick: () => { S.selMode = !S.selMode; if (!S.selMode) S.sel.clear(); renderMain(); } }, S.selMode ? '✕ Auswahl beenden' : '☑ Auswählen');
-  const shown = list.filter((v) => !v.missing);
+  // Sortierung: in der Freigabe standardmäßig nach Viral-Punkten (beste zuerst), sonst neueste zuerst
+  const sortKey = S.sort || (S.tab === 'geschnitten' ? 'viral' : 'neu');
+  const score = (v) => v.viral?.score || 0;
+  const time = (v) => v.mtime || Date.parse(v.createdAt) || 0;
+  const shown = list.filter((v) => !v.missing).sort(sortKey === 'viral' ? (a, b) => score(b) - score(a) || time(b) - time(a)
+    : sortKey === 'zahlen' ? (a, b) => (b.perf?.yt?.views || 0) + (b.perf?.tt?.views || 0) - (a.perf?.yt?.views || 0) - (a.perf?.tt?.views || 0) || time(b) - time(a)
+      : (a, b) => time(b) - time(a));
+  const sortSel = ['geschnitten', 'hochgeladen'].includes(S.tab) ? h('select', { class: 'small', title: 'Sortierung', onchange: (e) => { S.sort = e.target.value; try { localStorage.setItem('vz-sort', S.sort); } catch { /* egal */ } renderMain(); } },
+    [['viral', '🔥 Viral-Punkte'], ['neu', '🕒 Neueste'], ['zahlen', '👁 Aufrufe']].map(([k, n]) => h('option', { value: k, selected: sortKey === k }, n))) : null;
+  // Doppelte: ältere Fassungen, zu denen es schon eine neuere (überarbeitete) gibt
+  const dupes = S.tab === 'geschnitten' ? shown.filter((v) => S.videos.some((x) => x.folder === 'geschnitten' && !x.missing && x.id !== v.id
+    && (x.revisionRoot || x.id) === (v.revisionRoot || v.id) && String(x.createdAt || '') > String(v.createdAt || ''))
+    && !['done', 'uploading', 'queued', 'processing'].includes(v.yt?.state) && !['done', 'uploading', 'queued', 'processing'].includes(v.tt?.state) && v.li?.state !== 'done').length : 0;
+  const dupeBtn = dupes ? h('button', { class: 'btn small', title: 'Ältere Fassungen, zu denen es schon eine überarbeitete gibt, in den Papierkorb', onclick: dedupe }, `🧹 Doppelte aufräumen (${dupes})`) : null;
   let grid;
   if (S.group) {
     const groups = new Map();
@@ -378,9 +395,12 @@ function renderMain() {
     S.tab === 'papierkorb' ? [
       h('button', { class: 'btn small', disabled: !S.sel.size, onclick: () => bulk('restore') }, '↩ Wiederherstellen'),
       h('button', { class: 'btn small danger', disabled: !S.sel.size, onclick: () => bulk('delete') }, '✕ Endgültig löschen'),
-    ] : h('button', { class: 'btn small danger', disabled: !S.sel.size, onclick: () => bulk('trash') }, '🗑 In den Papierkorb')) : null;
+    ] : [
+      S.tab === 'geschnitten' ? h('button', { class: 'btn small primary', disabled: !S.sel.size, title: 'Aus dem Rohvideo neu schneiden – mit Tonfall-/Chat-Signalen, Bildaufbau, Prüfung und Viral-Tipps (je Video ein Claude-Aufruf)',
+        onclick: () => bulk('revise') }, '🔁 Mit neuen Erkenntnissen überarbeiten') : null,
+      h('button', { class: 'btn small danger', disabled: !S.sel.size, onclick: () => bulk('trash') }, '🗑 In den Papierkorb')]) : null;
   mainEl.replaceChildren(...[
-    h('div', { class: 'bar' }, search, filter, topicSel, monthSel, groupBtn, selBtn, h('span', { class: 'hint' }, hints[S.tab]),
+    h('div', { class: 'bar' }, search, filter, topicSel, monthSel, sortSel, groupBtn, selBtn, dupeBtn, h('span', { class: 'hint' }, hints[S.tab]),
       h('div', { style: { flex: '1' } }), emptyTrash,
       h('button', { class: 'btn small ghost', onclick: async () => { await api('POST', '/api/scan'); await refresh(); renderMain(); updateCounts(); toast('Ordner neu eingelesen.'); } }, '↻ Ordner prüfen')),
     selBar,
@@ -401,6 +421,19 @@ const fmtMonth = (m) => { const [y, mo] = m.split('-'); return ['Januar', 'Febru
 async function bulk(action) {
   const ids = [...S.sel];
   if (!ids.length) return;
+  let wish = '';
+  if (action === 'revise') {
+    wish = prompt(`${ids.length} Video(s) mit den neuen Erkenntnissen neu schneiden (Tonfall, Lacher, Twitch-Chat, Facecam-Bildaufbau, Prüfung, Viral-Tipps)?\n\n`
+      + 'Optional ein gemeinsamer Wunsch (leer lassen = Claude entscheidet). Jede neue Fassung erscheint als v2 daneben; kostet je Video einen Claude-Aufruf.', '');
+    if (wish === null) return;
+    try {
+      const r = await api('POST', '/api/videos/bulk', { action, ids, wish });
+      toast(`${r.done} Video(s) werden überarbeitet.` + (r.skipped.length ? ` Übersprungen: ${r.skipped.slice(0, 2).join('; ')}${r.skipped.length > 2 ? ' …' : ''}` : ''), !!r.skipped.length);
+      S.sel.clear(); S.selMode = false;
+      await refresh(); renderMain(); updateCounts(); pollActivity(); startPolling();
+    } catch (x) { toast(x.message, true); }
+    return;
+  }
   const text = { trash: `${ids.length} Video(s) in den Papierkorb legen?\n\nDu kannst sie dort wiederherstellen.`, restore: `${ids.length} Video(s) wiederherstellen?`,
     delete: `${ids.length} Video(s) endgültig löschen?\n\nVideo, Titelbild und Texte werden vom Server entfernt. Das lässt sich nicht rückgängig machen.` }[action];
   if (!confirm(text)) return;
@@ -408,6 +441,19 @@ async function bulk(action) {
     const r = await api('POST', '/api/videos/bulk', { action, ids });
     toast(`${r.done} erledigt.` + (r.skipped.length ? ` Übersprungen (wird gerade bearbeitet/hochgeladen): ${r.skipped.slice(0, 3).join(', ')}${r.skipped.length > 3 ? ' …' : ''}` : ''), !!r.skipped.length);
     S.sel.clear(); S.selMode = false;
+    await refresh(); renderMain(); updateCounts();
+  } catch (x) { toast(x.message, true); }
+}
+
+// Doppelte aufräumen: ältere Fassungen (wenn es schon eine überarbeitete gibt) in den Papierkorb
+async function dedupe() {
+  try {
+    const r = await api('POST', '/api/videos/dedupe', { dryRun: true });
+    if (!r.items.length) { toast('Keine doppelten Fassungen gefunden.'); return; }
+    const lines = r.items.slice(0, 12).map((x) => `• ${x.title || x.file}${x.viralOld ? ` (🔥${x.viralOld})` : ''} → ersetzt durch ${x.newer}${x.viralNew ? ` (🔥${x.viralNew})` : ''}`).join('\n');
+    if (!confirm(`${r.items.length} ältere Fassung(en) in den Papierkorb legen?\n\n${lines}${r.items.length > 12 ? '\n…' : ''}\n\nDu kannst sie im Papierkorb wiederherstellen.`)) return;
+    const d = await api('POST', '/api/videos/dedupe', {});
+    toast(`${d.moved} in den Papierkorb gelegt.` + (d.skipped.length ? ` Übersprungen (wird gerade hochgeladen/überarbeitet): ${d.skipped.length}` : ''), !!d.skipped.length);
     await refresh(); renderMain(); updateCounts();
   } catch (x) { toast(x.message, true); }
 }
@@ -443,12 +489,47 @@ function card(v) {
         v.cut?.state === 'done' ? h('span', { class: 'chip ok' }, `✂ ${v.cut.outputs?.length || 0} Videos`) : null,
         v.folder === 'eingang-profi' ? h('span', { class: 'chip li' }, 'Profi') : null,
         viralChip(v),
+        v.qc ? h('span', { class: 'chip ' + (v.qc.ok ? 'ok' : 'bad'), title: v.qc.ok ? 'Render-Prüfung bestanden' + (v.qc.score ? ` (${v.qc.score}/10)` : '') : 'Prüfung: ' + (v.qc.issues || []).join('; ') }, v.qc.ok ? '✔ geprüft' : '⚠ Prüfung') : null,
+        v.perf?.yt || v.perf?.tt ? h('span', { class: 'chip', title: [v.perf.yt ? `YouTube: ${v.perf.yt.views} Aufrufe${v.perf.yt.avgPercent ? `, ${Math.round(v.perf.yt.avgPercent)} % angesehen` : ''}` : '', v.perf.tt ? `TikTok: ${v.perf.tt.views} Aufrufe` : ''].filter(Boolean).join(' · ') },
+          '👁 ' + fmtNum((v.perf.yt?.views || 0) + (v.perf.tt?.views || 0))) : null,
         v.revisionOf ? h('span', { class: 'chip ver', title: 'Überarbeitete Fassung' + (v.revisionWish ? ': ' + v.revisionWish : '') }, '🔁 ' + (/ v(\d+)\.[^.]+$/.exec(v.file)?.[0].replace(/\.[^.]+$/, '').trim() || 'neu') + (v.revisionKept ? ' ✓' : '')) : null,
         hasNewer(v) ? h('span', { class: 'chip', title: 'Es gibt eine überarbeitete Fassung' }, '↳ hat ' + hasNewer(v)) : null,
         ['queued', 'running'].includes(v.revise?.state) ? h('span', { class: 'chip run' }, '🔁 wird überarbeitet') : null,
         v.folder === 'papierkorb' ? h('span', { class: 'chip bad' }, '🗑 ' + fmtDate(v.trash?.at)) : null,
         ...(isPro(channelOf(v)) ? [stateChip('LinkedIn', v.li)] : [stateChip('YouTube', v.yt), stateChip('TikTok', v.tt)])),
       running ? h('div', { class: 'bar-progress' }, h('i', { style: { width: (running.progress || 0) + '%' } })) : null));
+}
+
+// ---------- 📈 Zahlen ----------
+async function renderStats() {
+  const st = await api('GET', '/api/stats').catch((e) => ({ error: e.message }));
+  if (S.tab !== 'zahlen') return;
+  if (st.error) { mainEl.replaceChildren(h('div', { class: 'empty' }, st.error)); return; }
+  const row = (x, i) => h('a', { class: 'statrow', href: '#video/' + x.id },
+    h('span', { class: 'rank' }, String(i + 1)),
+    h('span', { class: 'st-title' }, x.title),
+    h('span', { class: 'chip ' + (x.rel >= 1.5 ? 'ok' : x.rel < 0.6 ? 'bad' : '') }, `${String(x.rel).replace('.', ',')}×`),
+    h('span', { class: 'hint' }, [x.yt ? `YT ${fmtNum(x.yt.views)}` : '', x.tt ? `TT ${fmtNum(x.tt.views)}` : '', x.pct ? `${Math.round(x.pct)} % gesehen` : '', x.viral ? `🔥${x.viral}` : ''].filter(Boolean).join(' · ')));
+  const chBox = (c) => h('div', { class: 'box' },
+    h('h3', {}, h('span', { class: 'dot', style: { background: c.color } }), ' ', c.name, h('span', { class: 'hint' }, ` · ${c.count} Video${c.count === 1 ? '' : 's'} mit Zahlen`)),
+    !c.count ? h('p', { class: 'hint' }, 'Noch keine Zahlen – sobald Videos hochgeladen sind und YouTube/TikTok verbunden ist, kommen sie hier an (alle 6 Stunden).') : [
+      c.corr != null ? h('p', { class: 'hint' }, `Trefferquote von Claudes Viral-Einschätzung: ${c.corr >= 0.5 ? 'gut' : c.corr >= 0.2 ? 'mittel' : 'schwach'} (Rangkorrelation ${String(c.corr).replace('.', ',')})`) : null,
+      h('b', {}, '🏆 Lief am besten'), h('div', { class: 'statlist' }, c.top.map(row)),
+      c.count > 10 ? [h('b', {}, '📉 Lief am schwächsten'), h('div', { class: 'statlist' }, c.flop.map(row))] : null,
+      h('p', { class: 'hint' }, '„2×“ = doppelt so viele Aufrufe wie üblich auf diesem Kanal. Ab 6 Videos mit Zahlen bekommt Claude die besten und schwächsten als Beispiele für den nächsten Schnitt.')]);
+  const errs = Object.entries(st.errors || {});
+  const tw = st.twitch;
+  mainEl.replaceChildren(...[
+    h('div', { class: 'bar' }, h('h2', { class: 'h2' }, '📈 Zahlen'),
+      h('span', { class: 'hint' }, st.lastRun ? 'Stand ' + fmtDate(st.lastRun) : 'Noch nicht abgerufen.'),
+      h('div', { style: { flex: '1' } }),
+      h('button', { class: 'btn small', onclick: async () => { await api('POST', '/api/stats/refresh'); toast('Zahlen werden abgerufen …'); setTimeout(renderStats, 4000); } }, st.running ? '↻ läuft …' : '↻ Jetzt abrufen')),
+    errs.length ? h('div', { class: 'section' }, errs.map(([k, m]) => h('p', { class: 'err' }, `${k}: ${m}`))) : null,
+    h('div', { class: 'settings' }, st.channels.filter((c) => c.count || !c.id.includes('linkedin')).map(chBox),
+      tw ? h('div', { class: 'box' }, h('h3', {}, '🟣 Twitch – letzte Streams'),
+        h('div', { class: 'statlist' }, (tw.streams || []).slice(0, 10).map((x) => h('div', { class: 'statrow' },
+          h('span', { class: 'st-title' }, (x.title || 'Stream') + (x.game ? ' · ' + x.game : '')),
+          h('span', { class: 'hint' }, [fmtDate(x.startedAt), x.messages ? `💬 ${fmtNum(x.messages)} Chat` : '', x.vodId ? 'VOD ✓' : ''].filter(Boolean).join(' · ')))))) : null)].filter(Boolean));
 }
 
 // ---------- 💡 Coach ----------
@@ -901,6 +982,23 @@ function renderGenThumbs(box, v) {
   ].filter(Boolean));
 }
 
+// Render-Prüfung + echte Zahlen + Bildaufbau des fertigen Clips
+function renderQc(v) {
+  const q = v.qc, pf = v.perf, e = v.edit || {};
+  if (!q && !pf && !e.layout) return null;
+  const lay = e.layout ? { cam: 'Facecam oben + Spiel', crop: 'Ausschnitt um die Action', blur: 'ganzes Bild + Blur-Hintergrund' }[e.layout.mode] : '';
+  return h('div', { class: 'section' },
+    q ? h('div', { class: 'row' }, h('b', {}, 'Prüfung'), h('span', { class: 'chip ' + (q.ok ? 'ok' : 'bad') }, q.ok ? '✔ bestanden' : '⚠ Mängel'),
+      q.score ? h('span', { class: 'hint' }, `Handwerk ${q.score}/10`) : null, q.lufs != null ? h('span', { class: 'hint' }, `Lautheit ${String(q.lufs).replace('.', ',')} LUFS`) : null) : null,
+    q?.issues?.length ? h('ul', { class: 'vtips' }, q.issues.map((x) => h('li', {}, x))) : null,
+    q && !q.ok && q.fixWish ? h('div', { class: 'hint' }, '💡 Vorschlag für die Überarbeitung: ' + q.fixWish) : null,
+    lay ? h('div', { class: 'hint' }, '🖼 Bildaufbau: ' + lay + (e.layout.cam ? ` (Facecam ${e.layout.cam.refined ? 'am Rahmen ausgerichtet' : 'geschätzt'})` : '')) : null,
+    e.signals?.length ? h('div', { class: 'hint' }, '📡 Signale: ' + e.signals.join(' · ')) : null,
+    pf ? h('div', { class: 'row' }, h('b', {}, 'Zahlen'),
+      pf.yt ? h('span', { class: 'chip' }, `YouTube 👁 ${fmtNum(pf.yt.views)} · 👍 ${fmtNum(pf.yt.likes)}` + (pf.yt.avgPercent ? ` · ${Math.round(pf.yt.avgPercent)} % angesehen` : '')) : null,
+      pf.tt ? h('span', { class: 'chip' }, `TikTok 👁 ${fmtNum(pf.tt.views)} · ❤ ${fmtNum(pf.tt.likes)} · ↗ ${fmtNum(pf.tt.shares || 0)}`) : null,
+      h('span', { class: 'hint' }, 'Stand ' + fmtDate((pf.yt || pf.tt).at))) : null);
+}
 function renderViral(v) {
   const x = v.viral;
   if (!x?.score) return null;
@@ -1034,6 +1132,19 @@ function renderCut(box, v) {
         h('div', { class: 'row' }, (c.outputs || []).map((id) => { const o = S.videos.find((x) => x.id === id); return o ? h('a', { class: 'btn small', href: '#video/' + id }, o.title || o.file) : null; })));
     }
     if (c?.warning) add(sec, h('div', { class: 'hint' }, 'Hinweis: ' + c.warning));
+    if (c?.signals) add(sec, h('div', { class: 'hint' }, '📡 Signale beim Schnitt: ' + [c.voiceTrack ? `Stimme aus Spur ${c.voiceTrack}` : 'Mischspur (keine eigene Stimmspur)',
+      c.signals.events ? `${c.signals.events} Geräusch-Marker (Lachen …)` : '', c.signals.twitch ? `${c.signals.twitch} Twitch-Signale` : '', c.signals.scout ? `${c.signals.scout} Momente von Claudes Durchsicht` : ''].filter(Boolean).join(' · ')));
+    const tws = S.settings?.twitch?.streams || [];
+    if (tws.length || v.twitch) {
+      const sel = h('select', { class: 'small', onchange: async (e) => {
+        const val = e.target.value;
+        try { Object.assign(v, await api('POST', `/api/videos/${v.id}/twitch`, val === 'none' ? { none: true } : val ? { streamId: val, offset: 0 } : {})); toast('Gespeichert – gilt beim nächsten Schnitt/Überarbeiten.'); }
+        catch (x) { toast(x.message, true); }
+      } }, h('option', { value: '' }, 'automatisch zuordnen'), h('option', { value: 'none', selected: !!v.twitch?.none }, 'kein Twitch-Stream'),
+      tws.map((x) => h('option', { value: x.id, selected: v.twitch?.streamId === x.id }, `${fmtDate(x.startedAt)} · ${x.title || 'Stream'}${x.messages ? ` (💬 ${x.messages})` : ''}`)));
+      add(sec, h('div', { class: 'row' }, h('span', { class: 'hint' }, '🟣 Twitch-Stream:'), sel,
+        v.twitch?.streamId ? h('span', { class: 'hint' }, (v.twitch.manual ? 'von Hand' : v.twitch.guessed ? 'vermutet (Länge/Datum)' : 'erkannt') + (v.twitch.offset ? `, Versatz ${Math.round(v.twitch.offset)} s` : '')) : null));
+    }
     if (!c || ['done', 'error', 'queued'].includes(c.state)) add(sec, cutPlanForm(v, c));
     kids.push(sec);
   }
@@ -1066,9 +1177,9 @@ function updateDetail(force) {
   if (v.hasTranscript !== detail.hasTranscript) { detail.hasTranscript = v.hasTranscript; renderTranscript(detail.transcriptBox, v); }
   const revSig = JSON.stringify([v.revise, v.edit, v.revisionOf, v.revisionKept, v.canRevise, v.folder]);
   if (force || revSig !== detail.revSig) { detail.revSig = revSig; renderRevise(detail.reviseBox, v); }
-  const aiChanged = force === true || JSON.stringify([v.ai || null, v.thumbVariantsAt || 0, v.revise || null, v.viral || null]) !== detail.aiSeen;
+  const aiChanged = force === true || JSON.stringify([v.ai || null, v.thumbVariantsAt || 0, v.revise || null, v.viral || null, v.qc || null, v.perf || null]) !== detail.aiSeen;
   if (aiChanged) {
-    detail.aiSeen = JSON.stringify([v.ai || null, v.thumbVariantsAt || 0, v.revise || null, v.viral || null]);
+    detail.aiSeen = JSON.stringify([v.ai || null, v.thumbVariantsAt || 0, v.revise || null, v.viral || null, v.qc || null, v.perf || null]);
     Object.assign(detail.v, { revise: v.revise, tipsApplied: v.tipsApplied, canRevise: v.canRevise });
     // Vorschlag wurde serverseitig übernommen und hier ist nichts ungespeichert → Felder auffrischen
     if (v.ai?.applied && v.ai?.state === 'done' && !detail.isDirty()) {
@@ -1080,8 +1191,9 @@ function updateDetail(force) {
     Object.assign(detail.v, { ai: v.ai, suggestion: v.suggestion, hasImage: v.hasImage, imageVersion: v.imageVersion, image: v.image,
       thumbVariants: v.thumbVariants, thumbVariantsAt: v.thumbVariantsAt });
     detail.setCover(); detail.chanInfo();
-    detail.aiBox.replaceChildren(); detail.v.viral = v.viral;
+    detail.aiBox.replaceChildren(); Object.assign(detail.v, { viral: v.viral, qc: v.qc, perf: v.perf, edit: v.edit });
     const vb = renderViral(detail.v); if (vb) detail.aiBox.append(vb);
+    const qb = renderQc(detail.v); if (qb) detail.aiBox.append(qb);
     renderAi(detail.aiBox, detail.v);
     renderGenThumbs(detail.genBox, detail.v);
   }
@@ -1490,6 +1602,18 @@ function watchSettings(sig) {
   }, 3000);
 }
 
+// Twitch-Anmeldung per Code: Einstellungen auffrischen, bis verbunden (oder abgelaufen)
+let twTimer = null;
+function watchTwitch() {
+  clearTimeout(twTimer);
+  twTimer = setTimeout(async () => {
+    if (S.tab !== 'einstellungen') return;
+    const t = await api('GET', '/api/twitch').catch(() => null);
+    if (!t) return;
+    if (t.connected || !t.pending) { await loadSettings(); renderSettings(); toast(t.connected ? 'Twitch verbunden.' : 'Twitch-Anmeldung abgebrochen.', !t.connected); return; }
+    watchTwitch();
+  }, 3000);
+}
 async function renderSettings() {
   clearTimeout(settingsTimer);
   const st = await loadSettings();
@@ -1647,6 +1771,8 @@ async function renderSettings() {
   const aKey = h('input', { type: 'password', autocomplete: 'off', placeholder: a.configured ? 'gespeichert (' + a.keyHint + ') – zum Ändern neu eintragen' : 'sk-ant-…' });
   const aAuto = h('input', { type: 'checkbox', checked: a.auto });
   const aTips = h('input', { type: 'checkbox', checked: a.autoTips !== false });
+  const aScout = h('input', { type: 'checkbox', checked: a.scout !== false });
+  const aQc = h('input', { type: 'checkbox', checked: a.qc !== false });
   const aEffort = h('select', {}, [['max', 'Maximum – beste Schnitte (empfohlen, ca. 0,20–1 $ je Aufnahme)'], ['xhigh', 'Sehr hoch'], ['high', 'Hoch'], ['medium', 'Mittel – günstig, schneller']]
     .map(([k, n]) => h('option', { value: k, selected: (a.cutEffort || 'max') === k }, n)));
   const aHints = h('textarea', { rows: 3, value: a.hints, placeholder: 'z. B. „Ich heiße Micha“, „keine Emojis im Titel“, „immer auf Deutsch“' });
@@ -1659,11 +1785,13 @@ async function renderSettings() {
     h('label', {}, 'API-Schlüssel'), aKey,
     h('label', { class: 'check' }, aAuto, 'Neue Videos unter „Zur Freigabe“ automatisch vorschlagen lassen'),
     h('label', { class: 'check' }, aTips, '⚡ Viral-Tipps zu Einstieg und Schnitt einmal automatisch umsetzen (neue Fassung „v2“ zum Vergleichen, kostet je Video einen weiteren Claude-Aufruf)'),
+    h('label', { class: 'check' }, aScout, '👀 Claude liest vor dem Schnitt die ganze Aufnahme und meldet starke Momente (findet auch leise Lacher; ca. 0,10–0,30 $ je Aufnahme)'),
+    h('label', { class: 'check' }, aQc, '✔ Fertige Clips prüfen lassen (Gesicht verdeckt? Untertitel lesbar? Action im Bild? – ca. 1 Cent je Clip)'),
     h('label', {}, '✂ Denkstufe beim Schneiden (Highlights, Kurzfassung, Überarbeiten)'), aEffort,
     h('p', { class: 'hint' }, 'Claude wählt Anfang und Ende als ganze Sätze; je höher die Stufe, desto gründlicher prüft es Pointe, Zusammenhang und saubere Übergänge.'),
     h('label', {}, 'Allgemeine Hinweise an Claude'), aHints,
     h('div', { class: 'row', style: { marginTop: '12px' } },
-      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/ai/config', { apiKey: aKey.value, auto: aAuto.checked, autoTips: aTips.checked, cutEffort: aEffort.value, hints: aHints.value }), 'Gespeichert.') }, 'Speichern'),
+      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/ai/config', { apiKey: aKey.value, auto: aAuto.checked, autoTips: aTips.checked, scout: aScout.checked, qc: aQc.checked, cutEffort: aEffort.value, hints: aHints.value }), 'Gespeichert.') }, 'Speichern'),
       a.configured ? h('button', { class: 'btn ghost danger', onclick: () => confirm('API-Schlüssel entfernen?') && run(() => api('POST', '/api/ai/config', { removeKey: true }), 'Schlüssel entfernt.')() }, 'Schlüssel entfernen') : null));
 
   // ----- Automatischer Schnitt -----
@@ -1678,6 +1806,9 @@ async function renderSettings() {
   const hookTxt = cb(c.hookText !== false);
   const capOn = cb(c.captions?.enabled), capColor = h('input', { type: 'color', value: c.captions?.color || '#FFE14D', class: 'color small' });
   const camOn = cb(c.facecam?.enabled);
+  const camAuto = cb(c.facecam?.auto !== false);
+  const cVoice = h('select', {}, [['auto', 'automatisch: Spur 2, wenn es mehrere gibt (OBS-Mehrspur)'], ['off', 'aus – immer die Mischspur'], ...[1, 2, 3, 4, 5, 6].map((n) => [String(n), 'Spur ' + n])]
+    .map(([k, n]) => h('option', { value: k, selected: String(c.voiceTrack || 'auto') === k }, n)));
   let cam = { ...(c.facecam || {}) };
   const camInfo = h('span', { class: 'hint' }, cam.w ? `markiert: ${Math.round(cam.x * 100)} % / ${Math.round(cam.y * 100)} %, ${Math.round(cam.w * 100)} × ${Math.round(cam.h * 100)} %` : 'noch nicht markiert');
   const camPart = h('div', { class: 'cam' }, h('div', { class: 'row' },
@@ -1713,7 +1844,10 @@ async function renderSettings() {
     h('label', { class: 'check' }, capOn, 'Animierte Untertitel in Shorts (Wort für Wort)'),
     h('label', { class: 'check' }, hookTxt, '⚡ Hook-Text von Claude groß im ersten Bild der Shorts (Hook-Stil und Tempo je Kanal unter „Kanäle“)'),
     h('div', { class: 'row' }, h('span', { class: 'hint' }, 'Farbe des gesprochenen Worts:'), capColor),
-    h('label', { class: 'check' }, camOn, 'Facecam-Layout für Shorts (Facecam oben, Spiel unten)'),
+    h('label', { class: 'check' }, camAuto, '🖼 Bildaufbau automatisch: Claude findet die Facecam (auch wenn sie wandert) und wählt Facecam oben / Ausschnitt um die Action / Blur'),
+    h('label', { class: 'check' }, camOn, 'Feste Facecam statt automatisch (von Hand markierter Bereich)'),
+    h('label', {}, '🎙 Tonspur deiner Stimme (für Tonfall, Lacher, Spracherkennung)'), cVoice,
+    h('p', { class: 'hint' }, 'Mit OBS-Mehrspur (Spur 1 = alles, Spur 2 = Mikrofon, Spur 3 = Spiel) hört die Zentrale deine Reaktionen getrennt vom Spiel. Twitch-VODs haben nur eine Spur – dann wird die Mischspur genutzt.'),
     h('div', { class: 'two' }, h('div', {}, h('label', {}, 'LinkedIn-Clips (Ordner eingang-profi): Format'), liFmt),
       h('div', {}, h('label', {}, '\u00a0'), h('label', { class: 'check' }, liCap, 'ruhige Untertitel einbrennen'))),
     camPart,
@@ -1730,7 +1864,51 @@ async function renderSettings() {
         silenceDb: Number(cDb.value), minPause: Number(cMin.value), shorts: Number(cShorts.value), shortMin: Number(cSmin.value), shortMax: Number(cSmax.value),
         moveRaw: cMove.checked, summary: Number(cSum.value), longCopy: cCopy.checked, hookText: hookTxt.checked, whisper: { enabled: wOn.checked, model: wModel.value, threads: Number(wThreads.value), gpu: wGpu.checked },
         window: { enabled: wnOn.checked, from: wnFrom.value, to: wnTo.value }, linkedin: { format: liFmt.value, captions: liCap.checked },
-        captions: { enabled: capOn.checked, color: capColor.value }, facecam: { enabled: camOn.checked, x: cam.x, y: cam.y, w: cam.w, h: cam.h } }), 'Gespeichert.') }, 'Speichern')));
+        captions: { enabled: capOn.checked, color: capColor.value }, facecam: { enabled: camOn.checked, auto: camAuto.checked, x: cam.x, y: cam.y, w: cam.w, h: cam.h }, voiceTrack: cVoice.value }), 'Gespeichert.') }, 'Speichern')));
+
+  // ----- Twitch -----
+  const tw = st.twitch || {};
+  const twId = h('input', { value: tw.configured ? '' : '', placeholder: tw.configured ? 'gespeichert – zum Ändern neu eintragen' : 'Client-ID aus dev.twitch.tv' });
+  const twSecret = h('input', { type: 'password', autocomplete: 'off', placeholder: tw.hasSecret ? 'gespeichert' : 'nur bei App-Typ „Vertraulich“ (sonst leer lassen)' });
+  const twChat = cb(tw.chat !== false), twVod = cb(!!tw.vodImport);
+  const twFolder = h('select', {}, [['eingang', 'Eingang'], ['eingang-profi', 'Eingang (Profi)']].map(([k, n]) => h('option', { value: k, selected: (tw.vodFolder || 'eingang') === k }, n)));
+  const es = tw.eventsub || {};
+  const twitchBox = h('div', { class: 'box' }, h('h3', {}, '🟣 Twitch (Chat-Ausschläge, Zuschauer-Clips, Marker)'),
+    tw.connected ? h('p', { class: 'ok-text' }, `✓ verbunden als ${tw.user?.name || '?'} · Chat-Mitschnitt: ${es.state || 'aus'}${es.error ? ' (' + es.error + ')' : ''}`
+      + (tw.live ? ` · 🔴 live seit ${fmtDate(tw.live.startedAt)}` : '')) : null,
+    tw.pending ? h('div', { class: 'section' }, h('p', {}, 'Auf ', h('a', { href: tw.pending.url, target: '_blank', rel: 'noopener' }, 'twitch.tv/activate'), ' den Code eingeben:'),
+      h('div', { class: 'code' }, tw.pending.code), tw.pending.error ? h('p', { class: 'err' }, tw.pending.error) : h('p', { class: 'hint' }, 'Wartet auf deine Bestätigung …')) : null,
+    !tw.connected ? h('ol', { class: 'steps' },
+      h('li', {}, 'dev.twitch.tv/console → „Register Your Application“: Name z. B. „Micha Video-Zentrale“, OAuth Redirect URL ', h('code', {}, 'http://localhost'), ' (wird nicht genutzt, ist aber Pflicht), Kategorie „Application Integration“, Client-Typ „Öffentlich“.'),
+      h('li', {}, 'Client-ID hier eintragen, speichern, dann „Mit Twitch verbinden“ – Code auf twitch.tv/activate eingeben.'),
+      h('li', {}, 'Rechte: Chat lesen (user:read:chat) und Stream-Marker lesen (user:read:broadcast) – nichts wird gepostet.')) : null,
+    h('label', {}, 'Client-ID'), twId,
+    h('label', {}, 'Client-Secret (optional)'), twSecret,
+    h('label', { class: 'check' }, twChat, '💬 Chat live mitschreiben (nur Uhrzeit + Text, keine Namen) – Chat-Ausschläge werden Highlight-Signale'),
+    h('label', { class: 'check' }, twVod, '⬇ VOD nach Streamende automatisch in den Eingang laden (inoffizieller Download-Weg über yt-dlp – kann brechen, wenn Twitch etwas ändert)'),
+    h('div', { class: 'row' }, h('span', { class: 'hint' }, 'Ziel:'), twFolder,
+      h('span', { class: 'hint' }, tw.ytdlp?.ok ? 'yt-dlp ' + tw.ytdlp.version : 'yt-dlp fehlt (kommt mit dem nächsten Update des Containers)')),
+    h('p', { class: 'hint' }, 'Tipp: Setz im Stream bei starken Momenten einen Marker (/marker oder Stream-Deck) – die Zentrale nimmt diese Stellen sicher als Kandidaten. Nimmt OBS beim Streamen mit auf, wird die Aufnahme über die Uhrzeit im Dateinamen zugeordnet; Twitch-VODs über ihre Nummer bzw. Länge.'),
+    (tw.streams || []).length ? h('details', {}, h('summary', {}, `Streams (${tw.streams.length})`),
+      tw.streams.map((x) => h('div', { class: 'row' }, h('span', {}, fmtDate(x.startedAt) + ' · ' + (x.title || 'Stream')),
+        h('span', { class: 'hint' }, [x.messages ? `💬 ${x.messages}` : '', x.vodId ? 'VOD ' + x.vodId : 'kein VOD', x.imported ? '✓ importiert' : '', x.importError ? '⚠ ' + x.importError : ''].filter(Boolean).join(' · ')),
+        x.vodId && !x.imported ? h('button', { class: 'btn small', onclick: run(() => api('POST', '/api/twitch/import/' + x.id), 'VOD wird geladen – erscheint danach im Eingang.') }, '⬇ VOD laden') : null))) : null,
+    h('div', { class: 'row', style: { marginTop: '12px' } },
+      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/twitch/config', { ...(twId.value.trim() ? { clientId: twId.value.trim() } : {}), clientSecret: twSecret.value, chat: twChat.checked, vodImport: twVod.checked, vodFolder: twFolder.value }), 'Gespeichert.') }, 'Speichern'),
+      tw.configured && !tw.connected ? h('button', { class: 'btn primary', onclick: run(async () => { await api('POST', '/api/twitch/connect'); watchTwitch(); }) }, 'Mit Twitch verbinden') : null,
+      tw.connected ? h('button', { class: 'btn small', onclick: run(() => api('POST', '/api/twitch/sync'), 'Streams abgeglichen.') }, '↻ Streams abgleichen') : null,
+      tw.connected ? h('button', { class: 'btn ghost danger', onclick: () => confirm('Twitch trennen?') && run(() => api('POST', '/api/twitch/disconnect'), 'Getrennt.')() }, 'Trennen') : null));
+
+  // ----- Zahlen (Statistik) -----
+  const sYa = cb(!!y.analytics), sTl = cb(!!t.statsList);
+  const statsBox = h('div', { class: 'box' }, h('h3', {}, '📈 Zahlen von YouTube, TikTok und Twitch'),
+    h('p', { class: 'hint' }, 'Alle 6 Stunden holt die Zentrale Aufrufe, Likes und Kommentare deiner hochgeladenen Videos (Reiter „📈 Zahlen“). Claude lernt daraus, was bei deinem Publikum läuft.'
+      + (st.stats?.lastRun ? ' Zuletzt: ' + fmtDate(st.stats.lastRun) + '.' : '')),
+    h('label', { class: 'check' }, sYa, 'YouTube Analytics: wie viel % angesehen wird (danach jeden Kanal unter „YouTube“ einmal trennen und neu verbinden – zusätzliches Nur-Lese-Recht)'),
+    h('label', { class: 'check' }, sTl, 'TikTok-Zahlen (Recht video.list) – erst einschalten, wenn TikTok die App freigegeben hat und „Display API“ hinzugefügt ist, danach Kanäle neu verbinden'),
+    h('div', { class: 'row', style: { marginTop: '12px' } },
+      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/stats/config', { ytAnalytics: sYa.checked, ttList: sTl.checked }), 'Gespeichert.') }, 'Speichern'),
+      h('button', { class: 'btn small', onclick: run(() => api('POST', '/api/stats/refresh'), 'Zahlen werden abgerufen.') }, '↻ Jetzt abrufen')));
 
   // ----- Musik -----
   const mu = st.music || {};
@@ -1966,9 +2144,9 @@ async function renderSettings() {
           h('button', { class: 'btn small ghost', title: 'Zurück an den alten Platz; das Video wird danach nicht mehr automatisch verschoben.',
             onclick: run(async () => { await api('POST', '/api/org/undo', { index: i }); await refresh(); }, 'Rückgängig gemacht.') }, '↶ Rückgängig'))))) : null,
     ] : null);
-  const jumps = [['s-kanaele', 'Kanäle'], ['s-claude', 'Claude'], ['s-schnitt', 'Schnitt'], ['s-musik', 'Musik'], ['s-sfx', 'Sounds'], ['s-guthaben', 'Guthaben'], ['s-ordnung', 'Ordnung'], ['s-bilder', 'Titelbilder'],
+  const jumps = [['s-kanaele', 'Kanäle'], ['s-claude', 'Claude'], ['s-schnitt', 'Schnitt'], ['s-twitch', 'Twitch'], ['s-zahlen', 'Zahlen'], ['s-musik', 'Musik'], ['s-sfx', 'Sounds'], ['s-guthaben', 'Guthaben'], ['s-ordnung', 'Ordnung'], ['s-bilder', 'Titelbilder'],
     ['s-helfer', 'Rechenhelfer'], ['s-google', 'YouTube-App'], ['s-tiktok', 'TikTok-App'], ['s-info', 'Info-Seite'], ['s-sicherung', 'Sicherung'], ['s-allgemein', 'Allgemein']];
-  [[claudeBox, 's-claude'], [cutBox, 's-schnitt'], [musicBox, 's-musik'], [sfxBox, 's-sfx'], [creditBox, 's-guthaben'], [orgBox, 's-ordnung'], [thumbBox, 's-bilder'], [helperBox, 's-helfer'], [googleBox, 's-google'],
+  [[claudeBox, 's-claude'], [cutBox, 's-schnitt'], [twitchBox, 's-twitch'], [statsBox, 's-zahlen'], [musicBox, 's-musik'], [sfxBox, 's-sfx'], [creditBox, 's-guthaben'], [orgBox, 's-ordnung'], [thumbBox, 's-bilder'], [helperBox, 's-helfer'], [googleBox, 's-google'],
     [tiktokBox, 's-tiktok'], [infoBox, 's-info'], [backupBox, 's-sicherung'], [account, 's-allgemein']].forEach(([el, id]) => { el.id = id; el.style.scrollMarginTop = '110px'; });
   const jumpBar = h('div', { class: 'setjump' }, jumps.map(([id, label]) => h('button', { class: 'btn small', onclick: () => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, label)));
   mainEl.replaceChildren(jumpBar,
@@ -1977,7 +2155,7 @@ async function renderSettings() {
       h('button', { class: 'btn small', onclick: () => { const n = prompt('Name des neuen Kanals:'); if (n) run(() => api('POST', '/api/profiles', { name: n }), 'Kanal angelegt.')(); } }, '+ Kanal')),
     h('div', { class: 'settings' }, st.profiles.map(channelBox)),
     h('h2', { class: 'h2', style: { marginTop: '24px' } }, 'Apps & Zugang'),
-    h('div', { class: 'settings' }, claudeBox, cutBox, musicBox, sfxBox, creditBox, orgBox, thumbBox, helperBox, googleBox, tiktokBox, infoBox, backupBox, account));
+    h('div', { class: 'settings' }, claudeBox, cutBox, twitchBox, statsBox, musicBox, sfxBox, creditBox, orgBox, thumbBox, helperBox, googleBox, tiktokBox, infoBox, backupBox, account));
 }
 
 start();

@@ -16,6 +16,11 @@ import * as fx from './cutfx.js';
 import * as bounds from './bounds.js';
 import * as sfx from './sfx.js';
 import * as thumbs from './thumbs.js';
+import * as layout from './layout.js';
+import * as signals from './signals.js';
+import * as vision from './vision.js';
+import * as qc from './qc.js';
+import * as twitch from './twitch.js';
 import { fileURLToPath } from 'node:url';
 
 const FONTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fonts');
@@ -40,6 +45,7 @@ export function configure(b) {
   if (b.shortMin != null && !isNaN(b.shortMin)) c.shortMin = Math.round(num(b.shortMin, 10, 170));
   if (b.shortMax != null && !isNaN(b.shortMax)) c.shortMax = Math.round(num(b.shortMax, c.shortMin, 180));
   if (typeof b.moveRaw === 'boolean') c.moveRaw = b.moveRaw;
+  if (['auto', 'off', '1', '2', '3', '4', '5', '6'].includes(String(b.voiceTrack))) c.voiceTrack = String(b.voiceTrack);
   if (typeof b.longCopy === 'boolean') c.longCopy = b.longCopy;
   if (typeof b.hookText === 'boolean') c.hookText = b.hookText;
   if (b.summary != null && !isNaN(b.summary)) c.summary = Math.round(num(b.summary, 0, 1800));
@@ -61,6 +67,7 @@ export function configure(b) {
   if (b.facecam) {
     const f = b.facecam, ok = (x) => typeof x === 'number' && x >= 0 && x <= 1;
     if (typeof f.enabled === 'boolean') c.facecam.enabled = f.enabled;
+    if (typeof f.auto === 'boolean') c.facecam.auto = f.auto;
     if (ok(f.x) && ok(f.y) && ok(f.w) && ok(f.h) && f.x + f.w <= 1.001 && f.y + f.h <= 1.001) Object.assign(c.facecam, { x: f.x, y: f.y, w: f.w, h: f.h });
   }
   const w = b.whisper || {};
@@ -93,13 +100,13 @@ function progressFrom(total, cb) {
   return (l) => { const m = /out_time_(?:ms|us)=(\d+)/.exec(l); if (m && total > 0) cb(Math.min(100, Number(m[1]) / 1e6 / total * 100)); };
 }
 
-// Lautheit (LUFS, „momentary“) je Sekunde.
-async function loudness(file, duration, range = null) {
+// Lautheit (LUFS, „momentary“) je Sekunde. track = Tonspur (0 = erste/Mischung, 1 = bei OBS-Mehrspur meist das Mikrofon)
+async function loudness(file, duration, range = null, track = 0) {
   const per = new Map(), fine = [];
   const off = range ? range.from : 0;
   const seek = range ? ['-ss', range.from.toFixed(2), '-t', range.span.toFixed(2)] : [];
   // framelog=verbose schreibt die Werte nur bei Protokollstufe „verbose“ (alle 0,1 s)
-  const r = await ffmpeg(['-nostats', '-loglevel', 'verbose', ...seek, '-i', file, '-map', '0:a:0', '-vn', '-filter:a', 'ebur128=framelog=verbose', '-f', 'null', '-'], (l) => {
+  const r = await ffmpeg(['-nostats', '-loglevel', 'verbose', ...seek, '-i', file, '-map', `0:a:${track}`, '-vn', '-filter:a', 'ebur128=framelog=verbose', '-f', 'null', '-'], (l) => {
     const m = /\bt:\s*([\d.]+)\s+TARGET.*?\bM:\s*(-?[\d.]+|-inf)/.exec(l);
     if (!m) return;
     const t = Number(m[1]) + off, val = m[2] === '-inf' ? -70 : Math.max(-70, Number(m[2]));
@@ -266,29 +273,51 @@ async function prepareFx(s, profile, warn) {
   return fx.describeFx(s.events);
 }
 
+// Bildaufbau ohne Claude: feste Facecam aus den Einstellungen, sonst Bildmitte
+function defaultLayout() {
+  const fc = cfg().facecam;
+  const cam = fc?.enabled && fc.w > 0.02 && fc.h > 0.02 ? { x: fc.x, y: fc.y, w: fc.w, h: fc.h } : null;
+  return { mode: cam ? 'cam' : 'crop', cam, focus: 0.5 };
+}
+// Claudes Bildaufbau übernehmen und die Facecam an ihren echten Rahmen anlegen (Kanten im Mittelbild)
+async function resolveLayout(v, file, s) {
+  const fc = cfg().facecam;
+  const fixed = fc?.enabled && fc.w > 0.02 ? { x: fc.x, y: fc.y, w: fc.w, h: fc.h } : null;
+  if (!s.layoutRaw || fc?.auto === false) return defaultLayout();
+  const L = layout.normalize(s.layoutRaw, fixed);
+  if (fixed) L.cam = fixed;   // von Hand eingestellte Facecam hat Vorrang
+  else if (L.cam && v.width && v.height) {
+    try { L.cam = await vision.refineBox(file, s.start, s.end, L.cam, { srcW: v.width, srcH: v.height }); } catch { /* Schätzung behalten */ }
+  }
+  return L;
+}
+
 // Short im Hochformat: Bildmitte oder Facecam oben + Spiel unten, animierte Untertitel, Grafikkarte wenn vorhanden.
 // s.parts = Abschnitte der Quelle (Hook-Vorschau, Zurückspulen, Tempo-Schnitte – siehe cutfx.js); ohne parts am Stück.
 async function renderShort(v, file, s, hasAudio, out, onP, words, track, pro = false) {
   const c = cfg();
   const vertical = v.height > v.width;
-  const fc = c.facecam;
-  const useCam = !pro && !vertical && fc?.enabled && fc.w > 0.02 && fc.h > 0.02;
-  const n = (x) => Number(x).toFixed(4);
   const parts = s.parts?.length ? s.parts : [{ a: s.start, b: s.end }];
   const total = fx.totalLen(parts);
-  const base = Math.max(0, Math.min(...parts.map((p) => p.a)) - 0.5);
-  const span = Math.max(...parts.map((p) => p.b)) - base + 0.5;
   // LinkedIn: 4:5 (1080 × 1350), 1:1 (1080 × 1080) oder 16:9 (1920 × 1080, nur aus Querformat)
   const fmt = pro ? (c.linkedin?.format === '16:9' && vertical ? '4:5' : c.linkedin?.format || '4:5') : '';
   const [W, H] = fmt === '1:1' ? [1080, 1080] : fmt === '4:5' ? [1080, 1350] : fmt === '16:9' ? [1920, 1080] : [1080, 1920];
   const even = (x) => Math.max(2, Math.round((x || 0) / 2) * 2);
-  let graph = fx.concatGraph(parts, { base, hasAudio, W0: v.width ? even(v.width) : 0, H0: v.height ? even(v.height) : 0 }) + ';';
+  const L = s.layout || defaultLayout();
+  // Zoom-Punch verschiebt das ganze Bild – im Facecam-Layout würde die Facecam aus ihrem Ausschnitt rutschen → dort ohne Zoom
+  const noZoom = !pro && !vertical && L.mode === 'cam';
+  const cg = fx.concatGraph(parts, { file, hasAudio, W0: v.width && !noZoom ? even(v.width) : 0, H0: v.height && !noZoom ? even(v.height) : 0 });
+  let graph = cg.graph + ';';
+  const nIn = parts.length;   // Eingaben 0 … nIn-1 = Abschnitte, danach Musik, Emojis/Sticker, Sounds
+  // Bildaufbau: Facecam oben / Ausschnitt um die Action / Blur (layout.js); Reaktionen = Facecam kurz groß
+  const reactions = (s.events || []).filter((e) => e.kind === 'cam').map((e) => ({ t: e.t, dur: e.dur || 1.6 }));
+  let seam = 0, useCam = false;
   if (pro) graph += `[cv]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1[base]`;
   else if (vertical) graph += '[cv]scale=1080:-2,setsar=1[base]';
-  else if (useCam) {
-    graph += `[cv]split[a][b];[a]crop=iw*${n(fc.w)}:ih*${n(fc.h)}:iw*${n(fc.x)}:ih*${n(fc.y)},scale=1080:704:force_original_aspect_ratio=increase,crop=1080:704[top];`
-      + '[b]scale=-2:1216,crop=1080:1216[bot];[top][bot]vstack,setsar=1[base]';
-  } else graph += '[cv]crop=trunc(ih*9/16/2)*2:ih,scale=1080:1920,setsar=1[base]';
+  else {
+    const lg = layout.graph('cv', 'base', { srcW: even(v.width), srcH: even(v.height), layout: L, reactions });
+    graph += lg.graph; seam = lg.seam; useCam = lg.mode === 'cam';
+  }
   const tmpFiles = [];
   let last = 'base';
   const clipWords = fx.mapWords(words, parts);
@@ -299,15 +328,18 @@ async function renderShort(v, file, s, hasAudio, out, onP, words, track, pro = f
     tmpFiles.push(ass);
     graph += `;[${last}]ass=${ass}:fontsdir=${FONTS}[cap]`; last = 'cap';
   }
-  const hookAss = s.hook?.text && c.hookText !== false ? buildHookAss(s.hook.text, { until: fx.hookTextUntil(parts, s.hook), width: W, height: H, pro, color: c.captions?.color }) : '';
+  // Hook-Text nie über das Gesicht: bei Facecam-Layout an die Naht darunter
+  const hookAss = s.hook?.text && c.hookText !== false ? buildHookAss(s.hook.text, { until: fx.hookTextUntil(parts, s.hook), width: W, height: H, pro, color: c.captions?.color,
+    top: seam ? seam + 24 : null }) : '';
   if (hookAss) {
     const f = path.join(TMP, `${v.id}-h${Math.round(s.start)}.ass`);
     fs.writeFileSync(f, hookAss); tmpFiles.push(f);
     graph += `;[${last}]ass=${f}:fontsdir=${FONTS}[hk]`; last = 'hk';
   }
   // Effekte (Emojis, Blitz, Wackeln, Texte, Sticker, Sounds) – Zeiten schon im fertigen Short (cutfx.applyFx)
+  // (Reaktion groß = „cam“ steckt schon im Bildaufbau)
   const fxIn = [];
-  const firstFx = track ? 2 : 1;
+  const firstFx = nIn + (track ? 1 : 0);
   const events = s.events || [];
   const shakes = events.filter((e) => e.kind === 'shake');
   if (shakes.length) {
@@ -332,7 +364,8 @@ async function renderShort(v, file, s, hasAudio, out, onP, words, track, pro = f
     if (!img) continue;
     const D = e.dur || (e.kind === 'sticker' ? 1.6 : 1.4);
     const S = Math.round(W * (e.big ? 0.36 : e.kind === 'sticker' ? 0.46 : 0.26) / 2) * 2;
-    const [px, py] = fx.POSITIONS[e.pos] || fx.POSITIONS.mitte;
+    let [px, py] = fx.POSITIONS[e.pos] || fx.POSITIONS.mitte;
+    if (seam && py * H < seam + S / 2) py = (seam + S / 2 + 20) / H;   // Emojis nicht übers Gesicht
     const idx = firstFx + fxIn.length;
     fxIn.push({ img, D });
     graph += `;[${idx}:v]format=rgba,scale=256:256:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000,`
@@ -345,7 +378,7 @@ async function renderShort(v, file, s, hasAudio, out, onP, words, track, pro = f
   let audio = [];
   let aMain = '';
   if (track) {
-    graph += ';' + music.mixGraph({ hasVoice: hasAudio, dur: total, track, voiceIn: 'ca' });
+    graph += ';' + music.mixGraph({ hasVoice: hasAudio, idx: nIn, dur: total, track, voiceIn: 'ca' });
     aMain = 'aout';
   } else if (hasAudio) {
     graph += `;[ca]${LOUDNORM},aresample=48000[aout]`;
@@ -374,9 +407,9 @@ async function renderShort(v, file, s, hasAudio, out, onP, words, track, pro = f
   const extraIn = [...fxIn.flatMap((x) => ['-loop', '1', '-framerate', '30', '-t', x.D.toFixed(2), '-i', x.img]), ...sIn.flatMap((f) => ['-i', f])];
   const script = path.join(TMP, `${v.id}-s${Math.round(s.start)}.filter`);
   fs.writeFileSync(script, graph); tmpFiles.push(script);
-  const r = await gpu.encodeWithFallback((venc) => ffmpeg(['-ss', base.toFixed(3), '-t', span.toFixed(3), '-i', file, ...mInput, ...extraIn,
+  const r = await gpu.encodeWithFallback((venc) => ffmpeg([...cg.inputs, ...mInput, ...extraIn,
     '-filter_complex_script', script, '-map', '[v]', ...audio, ...venc, '-t', total.toFixed(3),
-    '-movflags', '+faststart', '-progress', 'pipe:1', '-y', out], progressFrom(total, onP)));
+    '-movflags', '+faststart', '-progress', 'pipe:1', '-y', out], progressFrom(total, onP)), { hq: true });
   for (const f of tmpFiles) fs.rmSync(f, { force: true });
   if (r.code !== 0) throw new Error('Short: ' + lastError(r));
   return total;
@@ -441,6 +474,12 @@ async function renderSummary(v, file, reel, hasAudio, out, onP, track, teaserTex
   if (r.code !== 0) throw new Error('Kurzfassung: ' + lastError(r));
 }
 
+// Render-Prüfung (qc.js) – Ergebnis am Video (v.qc), fließt in die automatische Überarbeitung
+async function checkRender(nv, info) {
+  try { nv.qc = await qc.check(nv, lib.fileOf(nv), info); save(); }
+  catch (e) { console.error('Prüfung', nv.file, e.message); }
+}
+
 // fertige Datei unter freiem Namen in "geschnitten" ablegen und als Video eintragen
 function publish(tmp, name, fields, raw) {
   const target = lib.freeName('geschnitten', name);
@@ -464,6 +503,14 @@ async function runCut(v) {
 
   step('Lautstärke messen');
   const { values: loud, fine, hasAudio } = await loudness(file, duration);
+  // OBS-Mehrspur: Stimme getrennt vom Spiel (Spur 2) → Tonfall, Spracherkennung ohne Spielgeräusche
+  let vIdx = hasAudio ? signals.voiceIndex(await signals.audioTracks(file)) : null, voice = null;
+  if (vIdx != null) {
+    step('Stimme messen');
+    const r = await loudness(file, duration, null, vIdx);
+    if (signals.voiceUsable(r.values)) voice = r; else vIdx = null;
+  }
+  v.cut.voiceTrack = vIdx != null ? vIdx + 1 : null;
   step('Bildwechsel suchen');
   const scenes = await sceneChanges(file);
 
@@ -472,10 +519,11 @@ async function runCut(v) {
   if (!segs && c.whisper.enabled) {
     step('Sprache erkennen (Whisper)');
     try {
-      words = await whisper.transcribe(file, v.id, (p, eng) => step('Sprache erkennen' + (eng ? ' – ' + eng : ' (Whisper)'), p));
+      words = await whisper.transcribe(file, v.id, (p, eng) => step('Sprache erkennen' + (eng ? ' – ' + eng : ' (Whisper)'), p), { track: vIdx ?? 0 });
       whisper.saveTranscript(v, words); segs = whisper.sentences(words);
     } catch (e) { v.cut.warning = e.message; segs = null; words = null; }
   }
+  const events = words?.events || whisper.loadEvents(v);
 
   let cut = c.cutPauses && hasAudio ? bounds.protectWords(pauses(loud, c), words) : [];
   const removedAll = cut.reduce((s, [a, b]) => s + b - a, 0);
@@ -487,20 +535,37 @@ async function runCut(v) {
   }
   const keep = keepRanges(duration, cut);
   const plan = planOf(v);
-  const len = Math.round((c.shortMin + c.shortMax) / 2);
-  const cands = plan.shorts > 0 ? candidates(loud, scenes, duration, cut, len, Math.min(30, Math.max(12, plan.shorts * 3))) : [];
-
   const profile = profiles.effective(v);
   const pro = profiles.isPro(profile);
   const sents = bounds.numbered(segs);
+  // Tonfall je Satz (Stimme lauter als sonst, schneller, Ausrufe, Lachen …) → Claude „hört“ die Stimmung
+  const pros = signals.prosody(sents, words, voice ? voice.fine : hasAudio ? fine : null, events);
+  const sentsA = signals.annotate(sents, pros);
+  // Twitch: Chat-Ausschläge, Zuschauer-Clips, Marker (wenn die Aufnahme einem Stream zugeordnet ist)
+  let tw = { extra: [], forced: [], lines: '' };
+  try { tw = await twitch.signalsFor(v, duration); } catch (e) { console.error('Twitch-Signale:', e.message); }
+  let cands = [];
+  if (plan.shorts > 0) {
+    step('Momente finden');
+    const tl = signals.timeline({ duration, loud, voice: voice?.values, scenes, events, sents, pros, cut, extra: tw.extra });
+    let forced = tw.forced;
+    // Späher: Claude liest die ganze Abschrift und meldet starke Momente (auch leise Lacher, die keine Lautstärke-Spitze haben)
+    if (db().ai.apiKey && db().ai.scout !== false && sents.length >= 15) {
+      step('Claude liest die ganze Aufnahme');
+      try { forced = [...forced, ...await ai.scoutMoments(v, sentsA, profile, { signals: tw.lines, wish: plan.wish, max: Math.min(20, plan.shorts * 3) })]; }
+      catch (e) { v.cut.warning = 'Claude-Späher: ' + e.message; }
+    }
+    cands = signals.peaks(tl, { duration, max: Math.min(30, Math.max(12, plan.shorts * 4)), min: Math.max(4, plan.shorts * 2), forced });
+    v.cut.signals = { voice: !!voice, events: events.length, twitch: tw.extra.length, scout: forced.length - tw.forced.length };
+  }
   let shorts = [];
   if (cands.length) {
     step('Highlights auswählen');
     if (db().ai.apiKey) {
-      try { shorts = await ai.chooseHighlights(v, cands, segs, { ...c, shorts: plan.shorts }, profile, plan.wish); }
-      catch (e) { v.cut.warning = 'Claude-Auswahl: ' + e.message + ' – lauteste Stellen genommen.'; }
+      try { shorts = await ai.chooseHighlights(v, cands, segs, { ...c, shorts: plan.shorts }, profile, plan.wish, { sents: sentsA }); }
+      catch (e) { v.cut.warning = 'Claude-Auswahl: ' + e.message + ' – stärkste Stellen genommen.'; }
     }
-    if (!shorts.length) shorts = cands.slice(0, plan.shorts).map((x) => ({ ...x, title: '', reason: 'laute/bewegte Stelle' }));
+    if (!shorts.length) shorts = [...cands].sort((a, b) => b.score - a.score).slice(0, plan.shorts).map((x) => ({ ...x, title: '', reason: x.why?.length ? x.why.join(', ') : 'laute/bewegte Stelle' }));
     // Schnittgrenzen einrasten: ganze Sätze, Sprechpausen, Bildwechsel – nie mitten im Satz/Wort
     const snapped = [];
     for (const x of shorts) {
@@ -592,6 +657,8 @@ async function runCut(v) {
     s.hook = bounds.snapHook(fx.cleanHook(s.hook, s.start, s.end, hookStyle, pro), { words, fine: hasAudio ? fine : null });
     s.parts = fx.buildParts({ start: s.start, end: s.end, hook: s.hook, words, fine: hasAudio ? fine : null, tempo });
     const fxHow = await prepareFx(s, profile, (m) => { v.cut.warning = m; });
+    step(`Short ${i + 1} von ${shorts.length}: Bildaufbau`);
+    s.layout = pro ? null : await resolveLayout(v, file, s);
     step(`Short ${i + 1} von ${shorts.length} schneiden`);
     const tmp = path.join(TMP, `${v.id}-short${i + 1}.mp4`);
     const label = `Short ${i + 1} von ${shorts.length} schneiden`;
@@ -602,10 +669,11 @@ async function runCut(v) {
       v.cut.warning = 'Mischen mit Musik ging nicht – Short ohne Musik.';
       await renderShort(v, file, s, hasAudio, tmp, (p) => step(label, (done + p / 100) / jobs * 100), words, null, pro);
     }
-    const how = [fx.describe(s.hook, tempo, s.parts, s.start, s.end), fxHow].filter(Boolean).join(' · ');
+    const layoutHow = s.layout && v.width > v.height ? layout.describe(s.layout, s.events.filter((e) => e.kind === 'cam').length) : '';
+    const how = [fx.describe(s.hook, tempo, s.parts, s.start, s.end), fxHow, layoutHow].filter(Boolean).join(' · ');
     const nv = publish(tmp, `${base} – ${pro ? 'LinkedIn-Clip' : 'Short'} ${i + 1}.mp4`, {
-      source: { rawId: v.id, rawFile: v.file, kind: 'short', start: s.start, end: s.end, hook: s.hook || null, tempo, fx: s.fx || [] },
-      edit: { hook: s.hook || null, tempo, parts: s.parts.length, how, fxHow, fxLevel: s.fxLevel },
+      source: { rawId: v.id, rawFile: v.file, kind: 'short', start: s.start, end: s.end, hook: s.hook || null, tempo, fx: s.fx || [], layout: s.layout || null },
+      edit: { hook: s.hook || null, tempo, parts: s.parts.length, how, fxHow, fxLevel: s.fxLevel, layout: s.layout || null, signals: s.signals || [] },
       title: s.title ? s.title.slice(0, 100) : `${base} – Short ${i + 1}`,
       viral: Number.isFinite(s.viral) ? { score: s.viral, why: s.viralWhy || '', tip: s.viralTip || '', by: 'Schnitt' } : undefined,
       note: sourceNote(s.start, s.end) + (s.reason ? ' Warum: ' + s.reason : '') + (how ? ' ' + how + '.' : '')
@@ -613,6 +681,8 @@ async function runCut(v) {
       music: track ? { kind: track.kind, name: track.name, mood: track.mood || '' } : null,
       transcriptText: segs ? whisper.textOf(segs, s.start, s.end) : '',
     }, v);
+    step(`Short ${i + 1} von ${shorts.length} prüfen`);
+    await checkRender(nv, { duration: fx.totalLen(s.parts), hook: s.hook, layoutHow, fxHow, title: nv.title, freezes: s.events.filter((e) => e.kind === 'freeze').length });
     outputs.push(nv.id); done++;
   }
 
@@ -759,18 +829,40 @@ export function revisable(out) {
 // Viral-Tipps (Einstieg/Schnitt) als Überarbeitungswunsch
 export function tipsWish(v) {
   const x = v.viral || {};
-  const parts = [x.hook && 'Einstieg: ' + x.hook, x.edit && 'Schnitt: ' + x.edit, !x.hook && !x.edit && x.tip ? x.tip : ''].filter(Boolean);
+  const parts = [x.hook && 'Einstieg: ' + x.hook, x.edit && 'Schnitt: ' + x.edit, !x.hook && !x.edit && x.tip ? x.tip : '',
+    v.qc && !v.qc.ok && v.qc.fixWish ? 'Prüfung: ' + v.qc.fixWish : ''].filter(Boolean);
   return parts.length ? 'Viral-Tipps umsetzen – ' + parts.join(' · ') : '';
 }
 // Nach dem Claude-Vorschlag: Tipps einmal automatisch umsetzen (nicht bei Fassungen, die selbst schon Überarbeitungen sind)
 export function autoApplyTips(v) {
   if (db().ai.autoTips === false || v.tipsApplied || v.revisionOf || v.folder !== 'geschnitten') return;
-  if (!v.viral?.score || v.viral.score >= 9) return;
+  const qcBad = v.qc && v.qc.ok === false && v.qc.fixWish;
+  if (!qcBad && (!v.viral?.score || v.viral.score >= 9)) return;
   const wish = tipsWish(v);
   if (!wish || revisable(v)) return;
   if (['queued', 'running'].includes(v.revise?.state)) return;
   v.tipsApplied = new Date().toISOString();
   enqueueRevision(v, wish);
+}
+// Doppelte in der Freigabe: je Fassungskette (revisionRoot) bleibt die neueste; ältere, die noch in „geschnitten“ liegen → Liste
+export function duplicates() {
+  const vids = Object.values(db().videos).filter((v) => v.folder === 'geschnitten' && !v.missing);
+  const byRoot = new Map();
+  for (const v of vids) {
+    const root = v.revisionRoot || v.id;
+    if (!byRoot.has(root)) byRoot.set(root, []);
+    byRoot.get(root).push(v);
+  }
+  const out = [];
+  for (const list of byRoot.values()) {
+    if (list.length < 2) continue;
+    list.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+    const newer = list[0];
+    // schon hochgeladene Fassungen bleiben (Zahlen/Verknüpfung), ebenso alles, was gerade läuft
+    const busy = (v) => ['done', 'uploading', 'queued', 'processing'].includes(v.yt?.state) || ['done', 'uploading', 'queued', 'processing'].includes(v.tt?.state) || v.li?.state === 'done';
+    for (const old of list.slice(1)) if (!busy(old)) out.push({ old, newer });
+  }
+  return out;
 }
 export function enqueueRevision(out, wish) {
   const why = revisable(out);
@@ -803,13 +895,20 @@ async function runRevision({ revise: outId, wish }) {
     const profile = profiles.effective(out);
     const pro = profiles.isPro(profile);
     if (out.source.kind !== 'short') return await reviseLongVersion(out, raw, wish, words, segs, profile, step);
-    step('Claude plant die neue Fassung');
     const lim = { minLen: Math.min(c.shortMin || 30, 15), maxLen: Math.max(c.shortMax || 45, 60) };
-    const r = await ai.reviseShort(raw, out, wish, segs, profile, lim);
+    // Lautheit + Stimme im Bereich, den Claude wählen darf (±120 s) → Tonfall je Satz und sauberes Einrasten
     step('Lautstärke messen');
-    const { fine, hasAudio } = await loudness(file, raw.duration, { from: Math.max(0, r.start - 10), span: r.end - r.start + 30 });
+    const win = { from: Math.max(0, out.source.start - 130), span: out.source.end - out.source.start + 260 };
+    const { fine, hasAudio } = await loudness(file, raw.duration, win);
+    let vFine = null;
+    const vIdx = hasAudio ? signals.voiceIndex(await signals.audioTracks(file)) : null;
+    if (vIdx != null) { const r = await loudness(file, raw.duration, win, vIdx); if (signals.voiceUsable(r.values.slice(Math.floor(win.from)))) vFine = r.fine; }
+    const sents = bounds.numbered(segs);
+    const sentsA = signals.annotate(sents, signals.prosody(sents.filter((x) => x.e > win.from && x.s < win.from + win.span), words, vFine || (hasAudio ? fine : null), words?.events || whisper.loadEvents(raw)));
+    step('Claude plant die neue Fassung');
+    const r = await ai.reviseShort(raw, out, wish, segs, profile, { ...lim, sents: sentsA });
     // Grenzen einrasten (ganze Sätze, Sprechpausen)
-    const snap = bounds.snapRange(r.start, r.end, { sents: bounds.numbered(segs), words, fine: hasAudio ? fine : null, dur: raw.duration, ...lim });
+    const snap = bounds.snapRange(r.start, r.end, { sents, words, fine: hasAudio ? fine : null, dur: raw.duration, ...lim });
     r.start = snap.start; r.end = snap.end;
     let style = profile?.hookStyle || (pro ? 'cold' : 'auto');
     if (style === 'off' && /hook|anfang|einstieg/i.test(wish)) style = 'auto';
@@ -818,6 +917,8 @@ async function runRevision({ revise: outId, wish }) {
     s.fx = r.fx; s.fxLevel = r.fxLevel;
     step('Effekte vorbereiten');
     const fxHow = await prepareFx(s, profile, (m) => { out.revise.warning = m; });
+    s.layoutRaw = r.layoutRaw;
+    if (!pro) { step('Bildaufbau'); s.layout = await resolveLayout(raw, file, s); }
     const seconds = fx.totalLen(s.parts);
     let track = null;
     if (r.music && profile?.music !== false && db().music?.enabled !== false) {
@@ -832,10 +933,11 @@ async function runRevision({ revise: outId, wish }) {
     catch (e) { if (!track) throw e; track = null; await renderShort(raw, file, s, hasAudio, tmp, onP, words, null, pro); }
     // Versionsnummer: v2, v3 … bezogen auf die erste Fassung
     const { rootId, n, name } = nextVersionName(out);
-    const how = [fx.describe(s.hook, r.tempo, s.parts, s.start, s.end), fxHow].filter(Boolean).join(' · ');
+    const layoutHow = s.layout && raw.width > raw.height ? layout.describe(s.layout, s.events.filter((e) => e.kind === 'cam').length) : '';
+    const how = [fx.describe(s.hook, r.tempo, s.parts, s.start, s.end), fxHow, layoutHow].filter(Boolean).join(' · ');
     const nv = publish(tmp, name, {
-      source: { ...out.source, start: s.start, end: s.end, hook: s.hook || null, tempo: r.tempo, fx: s.fx || [] },
-      edit: { hook: s.hook || null, tempo: r.tempo, parts: s.parts.length, how, fxHow, fxLevel: s.fxLevel },
+      source: { ...out.source, start: s.start, end: s.end, hook: s.hook || null, tempo: r.tempo, fx: s.fx || [], layout: s.layout || null },
+      edit: { hook: s.hook || null, tempo: r.tempo, parts: s.parts.length, how, fxHow, fxLevel: s.fxLevel, layout: s.layout || null },
       title: r.title || out.title, description: out.description, tags: out.tags, category: out.category,
       viral: r.viral ? { score: r.viral, why: r.viralWhy, tip: r.viralTip, by: 'Überarbeitung' } : out.viral,
       revisionOf: out.id, revisionRoot: rootId, revisionWish: wish, revisionChanges: r.changes,
@@ -843,6 +945,8 @@ async function runRevision({ revise: outId, wish }) {
       music: track ? { kind: track.kind, name: track.name, mood: track.mood || '' } : null,
       transcriptText: segs ? whisper.textOf(segs, s.start, s.end) : '',
     }, { channel: out.channel || profile?.id, channelFrom: out.channelFrom || 'überarbeitung' });
+    step('Prüfen');
+    await checkRender(nv, { duration: seconds, hook: s.hook, layoutHow, fxHow, title: nv.title, freezes: s.events.filter((e) => e.kind === 'freeze').length });
     out.revise = { ...out.revise, state: 'done', step: '', progress: 100, doneAt: new Date().toISOString(), newId: nv.id, newFile: nv.file };
     saveNow();
   } catch (e) {

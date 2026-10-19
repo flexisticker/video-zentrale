@@ -13,6 +13,7 @@ import * as fx from './cutfx.js';
 import * as sfx from './sfx.js';
 import * as credits from './credits.js';
 import * as bounds from './bounds.js';
+import * as vision from './vision.js';
 
 const MODEL = 'claude-opus-5-5';
 const FRAMES = [0.08, 0.25, 0.42, 0.58, 0.75, 0.92];
@@ -23,7 +24,7 @@ const cfg = () => db().ai;
 
 export function status() {
   const c = cfg();
-  return { configured: !!c.apiKey, auto: c.auto, autoTips: c.autoTips !== false, cutEffort: cutEffort(), hints: c.hints, keyHint: c.apiKey ? '…' + c.apiKey.slice(-4) : '',
+  return { configured: !!c.apiKey, auto: c.auto, autoTips: c.autoTips !== false, qc: c.qc !== false, scout: c.scout !== false, cutEffort: cutEffort(), hints: c.hints, keyHint: c.apiKey ? '…' + c.apiKey.slice(-4) : '',
     spent: c.spent || 0, count: c.count || 0 };
 }
 
@@ -37,6 +38,8 @@ export function configure(b) {
   if (b.removeKey === true) c.apiKey = '';
   if (typeof b.auto === 'boolean') c.auto = b.auto;
   if (typeof b.autoTips === 'boolean') c.autoTips = b.autoTips;
+  if (typeof b.qc === 'boolean') c.qc = b.qc;
+  if (typeof b.scout === 'boolean') c.scout = b.scout;
   if (CUT_EFFORTS.includes(b.cutEffort)) c.cutEffort = b.cutEffort;
   if (typeof b.hints === 'string') c.hints = b.hints.slice(0, 3000);
   saveNow();
@@ -50,11 +53,11 @@ export function afterSuggest(fn) { suggested = fn; }
 // Schnitt-Entscheidungen (Highlights, Kurzfassung, Überarbeiten): höchste Denkstufe, gestreamt (lange Denkzeit → kein HTTP-Timeout)
 export const CUT_EFFORTS = ['medium', 'high', 'xhigh', 'max'];
 export const cutEffort = () => (CUT_EFFORTS.includes(cfg().cutEffort) ? cfg().cutEffort : 'max');
-async function cutCall(content, schema) {
+async function cutCall(content, schema, { effort } = {}) {
   let r;
   try {
     r = await api().beta.messages.stream({ model: MODEL, max_tokens: 64000, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
-      output_config: { effort: cutEffort(), format: { type: 'json_schema', schema } }, messages: [{ role: 'user', content }] }).finalMessage();
+      output_config: { effort: effort || cutEffort(), format: { type: 'json_schema', schema } }, messages: [{ role: 'user', content }] }).finalMessage();
   } catch (e) { throw new Error(friendly(e)); }
   const cost = (r.usage?.input_tokens || 0) * PRICE.input + (r.usage?.output_tokens || 0) * PRICE.output;
   const a = cfg(); a.spent = Math.round(((a.spent || 0) + cost) * 10000) / 10000; a.count = (a.count || 0) + 1; save();
@@ -324,8 +327,6 @@ export async function suggest(v, extra = '') {
   return v.ai;
 }
 
-// Aus Kandidaten-Stellen eines Rohvideos die besten Shorts wählen.
-// cands: [{start, end, peak, scenes}] (Sekunden); segs: Whisper-Segmente oder null.
 // Effekt-Regie: Claude plant je Short Emojis, Sounds und Bild-Effekte (siehe cutfx.applyFx)
 const FX_SCHEMA = { type: 'array', description: 'Effekte im Clip (leer, wenn nichts passt)', items: { type: 'object', additionalProperties: false,
   required: ['at', 'kind', 'emoji', 'sound', 'soundIdea', 'text', 'pos', 'sticker'], properties: {
@@ -373,10 +374,60 @@ const HOOK_RULES = (pro, profile) => {
   ].filter(Boolean).join('\n');
 };
 
-export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
-  fs.mkdirSync(FRAME_DIR, { recursive: true });
-  const sents = bounds.numbered(segs);
+// Bildaufbau je Clip (Querformat → 9:16): Claude liest auf den Kontaktbögen ab, wo die Facecam sitzt und wo die Action ist
+const LAYOUT_SCHEMA = { type: 'object', additionalProperties: false, required: ['mode', 'camX', 'camY', 'camW', 'camH', 'focus'], properties: {
+  mode: { type: 'string', enum: ['cam', 'crop', 'blur'], description: 'cam = Facecam oben + Spiel unten; crop = 9:16-Ausschnitt um die Action; blur = ganzes Bild mit unscharfem Hintergrund' },
+  camX: { type: 'number', description: 'Facecam: linker Rand in Prozent der Bildbreite (0–100), 0 wenn keine' },
+  camY: { type: 'number', description: 'Facecam: oberer Rand in Prozent der Bildhöhe, 0 wenn keine' },
+  camW: { type: 'number', description: 'Facecam: Breite in Prozent der Bildbreite, 0 wenn keine' },
+  camH: { type: 'number', description: 'Facecam: Höhe in Prozent der Bildhöhe, 0 wenn keine' },
+  focus: { type: 'number', description: 'waagerechte Mitte der wichtigen Action in Prozent der Bildbreite (50 = Mitte; Fadenkreuz bei Shootern = 50)' },
+} };
+const LAYOUT_RULES = [
+  'BILDAUFBAU (layout) je Clip – das Video wird ins Hochformat 9:16 gebracht. Jede Kachel der Kontaktbögen zeigt das GANZE Bild verkleinert.',
+  'Ist eine Facecam (eingeblendetes Kamerabild des Creators) zu sehen: mode "cam" und ihre Lage in Prozent (camX/camY = linke obere Ecke, camW/camH = Größe) – möglichst genau am Rand des Kamerabilds; sie kann je Szene woanders sitzen.',
+  'Ohne Facecam: "crop" (Ausschnitt um focus) oder "blur", wenn wichtige Dinge über das ganze Bild verteilt sind (Übersicht, Menüs/Text, Strategie-Karte, Drucker in Totale).',
+  'Ist die ganze Szene ein Kamerabild (kein Spiel), nimm "crop" mit focus auf das Gesicht.',
+].join('\n');
+// Top/Flop-Beispiele aus echten Zahlen (stats.js meldet sich hier an, sonst leer)
+let examplesFn = null;
+export function setExamples(fn) { examplesFn = fn; }
+const examplesFor = (profile) => { try { return examplesFn ? examplesFn(profile) : ''; } catch { return ''; } };
+
+// Späher: Claude liest das GANZE Transkript (mit Tonfall-Markern und Twitch-Signalen) und nennt starke Momente –
+// auch leise, witzige Stellen, die die Lautstärke nicht findet. Ergebnis = zusätzliche Kandidaten.
+export async function scoutMoments(v, sents, profile, { signals = '', wish = '', max = 20 } = {}) {
+  if (!sents?.length || sents.length < 15) return [];
   const pro = profiles.isPro(profile);
+  const text = [
+    pro ? 'Du suchst in der Abschrift einer Aufnahme die stärksten Stellen für kurze LinkedIn-Clips (Kernaussagen, Tipps, Ergebnisse).'
+      : 'Du suchst in der Abschrift einer Gaming-/Creator-Aufnahme die stärksten Momente für Shorts/TikTok: Lacher, Rage, Fails, Überraschungen, Pointen, Clutches, absurde Sprüche, Geschichten mit Auflösung.',
+    'Du siehst die ganze Aufnahme als nummerierte Sätze (Sekunden ab Videoanfang). In Klammern stehen gemessene Signale: „laut +9 dB“ = deutlich lauter als die normale Stimme,',
+    '„schnell“ = schneller gesprochen, LACHEN/SCHREIT = Geräusch erkannt, „…“ = typischer Ausruf. Das sind Hinweise, keine Pflicht – witzige leise Stellen zählen genauso.',
+    profile?.clipHints ? `Worauf der Creator Wert legt: ${profile.clipHints}` : '',
+    wish ? `Wunsch des Creators: „${wish}“` : '',
+    examplesFor(profile),
+    signals ? 'Weitere Signale (Twitch-Chat, Zuschauer-Clips, Marker):\n' + signals : '',
+    `Nenne bis zu ${max} Momente, beste zuerst. Je Moment den Satzbereich, der für sich verständlich ist (Vorgeschichte bis Reaktion), und kurz warum.`,
+    '', 'Abschrift:', bounds.sentenceLines(sents, 0, Infinity, 150000),
+  ].filter(Boolean).join('\n');
+  const schema = { type: 'object', additionalProperties: false, required: ['moments'], properties: { moments: { type: 'array', items: {
+    type: 'object', additionalProperties: false, required: ['fromSentence', 'toSentence', 'why'], properties: {
+      fromSentence: { type: 'integer' }, toSentence: { type: 'integer' }, why: { type: 'string', description: 'höchstens 12 Wörter' } } } } } };
+  const o = await cutCall([{ type: 'text', text }], schema, { effort: 'high' });
+  return (o.moments || []).slice(0, max).map((m) => {
+    const r = bounds.fromSentences(sents, m.fromSentence, m.toSentence);
+    return r && r.end - r.start < 240 ? { start: r.start, end: r.end, t: (r.start + r.end) / 2, label: 'Claude: ' + String(m.why || '').slice(0, 80) } : null;
+  }).filter(Boolean);
+}
+
+// Aus Kandidaten-Stellen eines Rohvideos die besten Shorts wählen.
+// cands: [{start, end, why[]}] (Sekunden); opts.sents = nummerierte Sätze mit Tonfall-Markern (signals.annotate)
+export async function chooseHighlights(v, cands, segs, c, profile, wish = '', opts = {}) {
+  fs.mkdirSync(FRAME_DIR, { recursive: true });
+  const sents = opts.sents || bounds.numbered(segs);
+  const pro = profiles.isPro(profile);
+  const vertical = v.height > v.width;
   const content = [{ type: 'text', text: [
     ...(pro ? [
       'Du schneidest aus einer Rohaufnahme die besten kurzen Clips für LinkedIn – gepostet vom Inhaber eines Druck- und 3D-Druck-Betriebs als Person.',
@@ -385,41 +436,38 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
       'Der Anfang muss in den ersten 2 Sekunden zeigen, worum es geht; Ende nach einem abgeschlossenen Gedanken. Lieber weniger, wenn nichts taugt.',
       `Kanalbeschreibung: ${profile.aiStyle || ''}`,
     ] : [
-      'Du schneidest aus einer Rohaufnahme die besten Kurzvideos (Shorts/TikTok) für einen deutschen Creator.',
-      `Wähle bis zu ${c.shorts} Stellen, die allein funktionieren: klarer Moment (Sieg, Fail, Überraschung, Lacher, Erklärung mit Pointe),`,
-      'starker Anfang in den ersten 2 Sekunden, Ende nach der Pointe. Lieber weniger, wenn nichts taugt (dann leere Liste).',
+      'Du schneidest aus einer Rohaufnahme die besten Kurzvideos (Shorts/TikTok) für einen deutschen Creator – auf dem Niveau von Profi-Clippern (StreamLadder, Opus Clip).',
+      `Wähle bis zu ${c.shorts} Stellen, die allein funktionieren: klarer Moment (Sieg, Fail, Überraschung, Lacher, Rage, Erklärung mit Pointe),`,
+      'starker Anfang in den ersten 1–2 Sekunden, Ende direkt nach Pointe/Reaktion (kein Auslaufen – ein Ende, das zum Nochmal-Schauen einlädt). Lieber weniger, wenn nichts taugt (dann leere Liste).',
     ]),
-    `Länge je Short ${c.shortMin}–${c.shortMax} Sekunden. Start/Ende dürfen bis zu 15 Sekunden um den Kandidaten verschoben werden.`,
+    `LÄNGE folgt dem Moment: ${c.shortMin}–${c.shortMax} Sekunden; meist sind 20–40 s am stärksten, länger nur für eine Geschichte mit Auflösung. Start/Ende dürfen bis zu 15 Sekunden um den Kandidaten verschoben werden.`,
     profile?.clipHints ? `Worauf der Creator bei diesem Kanal Wert legt: ${profile.clipHints}` : '',
+    examplesFor(profile),
     'Nimm ruhig viele Stellen, wenn sie taugen – jede, die Zuschauer bindet (Hook, Emotion, Pointe), ist ein eigener Clip wert.',
     'Schätze für jeden Clip das Viral-Potenzial ehrlich ein (1 = kaum, 10 = sehr hoch): starker Hook in den ersten 2 Sekunden, Emotion,'
       + ' Überraschung, Wiederschau- und Teilwert, Verständlichkeit ohne Kontext. Keine Gefälligkeitswerte.',
     wish ? `WICHTIG – Wunsch des Creators für diesen Schnitt: „${wish}“. Richte die Auswahl danach aus (auch wenn dadurch weniger Shorts entstehen).` : '',
     HOOK_RULES(pro, profile),
     FX_RULES(fxLevelOf(profile), fxStickers(profile)),
+    !pro && !vertical ? LAYOUT_RULES + '\nEffekt "cam" = Facecam 1,6 s groß bei der stärksten Gesichts-Reaktion (nur mit mode "cam", höchstens 2 je Clip).' : '',
     `Video: „${v.file}“, Länge ${whisper.fmtTime(v.duration)}. ${v.note ? 'Notiz: ' + v.note : ''}`,
-    segs?.length ? 'Gesprochenes ist je Kandidat als nummerierte Sätze angegeben (automatisch erkannt, kann Fehler enthalten).' : 'Kein gesprochener Text verfügbar.',
-    segs?.length ? SENTENCE_RULES : '',
+    sents.length ? 'Gesprochenes ist je Kandidat als nummerierte Sätze angegeben (automatisch erkannt, kann Fehler enthalten). In Klammern gemessene Signale (laut +x dB = lauter als die normale Stimme, LACHEN/SCHREIT = Geräusch erkannt).' : 'Kein gesprochener Text verfügbar.',
+    sents.length ? SENTENCE_RULES : '',
     '',
-    'Kandidaten (aus Lautstärke und Bildwechseln vorsortiert); zu jedem folgt ein Standbild aus der Mitte:',
-  ].join('\n') }];
+    'Kandidaten (aus Signalen vorsortiert: Stimme, Tonfall, Lacher, Lautstärke, Bildwechsel, Twitch, Claude-Späher). Zu jedem folgt ein Kontaktbogen aus 9 Bildern quer durch den Kandidaten (Sekunde oben links):',
+  ].filter(Boolean).join('\n') }];
   for (let i = 0; i < cands.length; i++) {
     const k = cands[i];
-    const mid = (k.start + k.end) / 2;
     const file = path.join(FRAME_DIR, `${v.id}-k${i + 1}.jpg`);
-    const ok = await ffmpeg(['-hide_banner', '-loglevel', 'error', '-y', '-ss', mid.toFixed(2), '-i', fileOf(v),
-      '-vf', "scale='if(gt(iw,ih),min(640,iw),-2)':'if(gt(iw,ih),-2,min(640,ih))'", '-frames:v', '1', '-q:v', '5', file]);
+    const sheet = await vision.contactSheet(fileOf(v), k.start, k.end, file, { vertical });
     const said = sents.length ? bounds.sentenceLines(sents, k.start - 15, k.end + 15, 3000) : '';
-    content.push({ type: 'text', text: `Kandidat ${i + 1}: ${whisper.fmtTime(k.start)}–${whisper.fmtTime(k.end)} (Sekunde ${k.start}–${k.end}), `
-      + `lauteste Stelle ${k.peak} LUFS, ${k.scenes} Bildwechsel${said ? `\nGesprochen:\n${said}` : ''}` });
-    if (ok && fs.existsSync(file)) {
-      content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: fs.readFileSync(file).toString('base64') } });
-      fs.rmSync(file, { force: true });
-    }
+    content.push({ type: 'text', text: `Kandidat ${i + 1}: ${whisper.fmtTime(k.start)}–${whisper.fmtTime(k.end)} (Sekunde ${k.start}–${k.end})`
+      + (k.why?.length ? `, Signale: ${k.why.join('; ')}` : '') + (k.peak != null ? `, lauteste Stelle ${k.peak} LUFS` : '') + (said ? `\nGesprochen:\n${said}` : '') });
+    if (sheet) { content.push(vision.asImage(sheet)); fs.rmSync(sheet, { force: true }); }
   }
   const schemaH = {
     type: 'object', additionalProperties: false, required: ['shorts'],
-    properties: { shorts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['candidate', 'fromSentence', 'toSentence', 'start', 'end', 'title', 'reason', 'mood', 'music', 'viral', 'viralWhy', 'viralTip', 'hook', 'fx'],
+    properties: { shorts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['candidate', 'fromSentence', 'toSentence', 'start', 'end', 'title', 'reason', 'mood', 'music', 'viral', 'viralWhy', 'viralTip', 'hook', 'fx', 'layout'],
       properties: {
         candidate: { type: 'integer', description: 'Nummer des Kandidaten' },
         fromSentence: { type: 'integer', description: 'Nummer des ersten Satzes (S…), 0 wenn an der Stelle nicht gesprochen wird' },
@@ -435,6 +483,7 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
         viralTip: { type: 'string', description: 'Ein konkreter Tipp, wie der Clip mehr Potenzial bekommt (z. B. Hook-Text, früher einsteigen)' },
         hook: HOOK_SCHEMA,
         fx: FX_SCHEMA,
+        layout: LAYOUT_SCHEMA,
       } } } },
   };
   const out = await cutCall(content, schemaH);
@@ -455,9 +504,27 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '') {
       mood: String(s.mood || ''), music: String(s.music || '').slice(0, 200),
       viral: Math.max(1, Math.min(10, Math.round(Number(s.viral) || 0))) || undefined, viralWhy: String(s.viralWhy || '').slice(0, 300), viralTip: String(s.viralTip || '').slice(0, 300),
       hook: s.hook && typeof s.hook === 'object' ? { mode: s.hook.mode, at: Number(s.hook.at), len: Number(s.hook.len), text: String(s.hook.text || '').slice(0, 60) } : null,
-      fx: Array.isArray(s.fx) ? s.fx.slice(0, 15) : [] });
+      fx: Array.isArray(s.fx) ? s.fx.slice(0, 15) : [], layoutRaw: s.layout && typeof s.layout === 'object' ? s.layout : null, signals: k.why || [] });
   }
   return picked;
+}
+
+// Render-Prüfung (qc.js): Claude sieht den FERTIGEN Clip als Kontaktbogen und prüft ihn wie ein Editor vor dem Posten
+export async function reviewClip(sheetFile, info = {}) {
+  const text = [
+    'Du bist Qualitätsprüfer für Shorts/TikTok. Hier ist ein Kontaktbogen des FERTIG geschnittenen Clips (12 Bilder in zeitlicher Folge, Sekunde oben links).',
+    `Titel: „${info.title || ''}“. Länge ${Math.round(info.duration || 0)} s.` + (info.hook?.text ? ` Hook-Text (erste Sekunden): „${info.hook.text}“.` : '')
+      + (info.layoutHow ? ` ${info.layoutHow}.` : '') + (info.fxHow ? ` ${info.fxHow}.` : ''),
+    info.machine?.length ? `Technische Prüfung meldet: ${info.machine.join('; ')}.` : '',
+    'Prüfe nur, was man sieht: Ist das Gesicht/die Facecam abgeschnitten oder von Text/Emojis verdeckt? Ist die Action im Bild oder schneidet der Ausschnitt das Wichtige ab?',
+    'Sind Untertitel lesbar (nicht zu viel, nicht am Rand, nicht über dem Spiel-HUD)? Zieht das erste Bild sofort rein? Wirkt es überladen? Endet es sauber?',
+    'ok = true, wenn man es so posten kann. score 1–10 = handwerkliche Qualität. issues = konkrete Mängel (kurz, Deutsch). fixWish = Anweisung für eine Überarbeitung (Du-Form an den Schnitt, z. B. „Ausschnitt nach rechts auf die Action, Hook-Text kürzer“), leer wenn ok.',
+  ].filter(Boolean).join('\n');
+  const schema = { type: 'object', additionalProperties: false, required: ['ok', 'score', 'issues', 'fixWish'], properties: {
+    ok: { type: 'boolean' }, score: { type: 'integer' }, issues: { type: 'array', items: { type: 'string' } }, fixWish: { type: 'string' } } };
+  const o = await cutCall([{ type: 'text', text }, vision.asImage(sheetFile)], schema, { effort: 'medium' });
+  return { ok: !!o.ok, score: Math.max(1, Math.min(10, Math.round(Number(o.score) || 0))) || null,
+    issues: (o.issues || []).slice(0, 6).map((x) => String(x).slice(0, 160)), fixWish: String(o.fixWish || '').slice(0, 400) };
 }
 
 // Kurzfassung: aus Bausteinen (je ~15 s) die besten in Summe ca. `target` Sekunden wählen – zeitliche Reihenfolge bleibt.
@@ -585,7 +652,7 @@ export async function coach(profileId) {
         `Du bist ein erfahrener, ehrlicher Coach für Kurzvideos und YouTube. Der Creator Michael (Deutsch, Du-Form) will mit dem Kanal „${prof.name}“ mehr Reichweite.`,
         `Kanal: ${prof.aiStyle || ''}`, prof.clipHints ? `Worauf er Wert legt: ${prof.clipHints}` : '',
         'Schau dir seine letzten Videos an und gib ihm persönliche, konkrete Tipps – keine Allgemeinplätze. Sei ehrlich, aber motivierend.',
-        'Zahlen zu Aufrufen liegen nicht vor; stütze dich auf Inhalte, Titel und die Viral-Einschätzungen.', '', 'Letzte Videos:', lines,
+        examplesFor(prof) || 'Zahlen zu Aufrufen liegen noch nicht vor; stütze dich auf Inhalte, Titel und die Viral-Einschätzungen.', '', 'Letzte Videos:', lines,
       ].filter(Boolean).join('\n') }] });
   } catch (e) { throw new Error(friendly(e)); }
   if (r.stop_reason === 'refusal') throw new Error('abgelehnt');
@@ -650,12 +717,13 @@ export function init() {
 
 // Überarbeitung eines Shorts nach Wunsch: Claude sieht den bisherigen Schnitt, das Gesprochene ringsum und Standbilder
 // und legt Start/Ende, Hook, Tempo und Musik neu fest. raw = Rohvideo, out = bisheriger Short.
-export async function reviseShort(raw, out, wish, segs, profile, { minLen = 15, maxLen = 60 } = {}) {
+export async function reviseShort(raw, out, wish, segs, profile, { minLen = 15, maxLen = 60, sents: sentsA = null } = {}) {
   fs.mkdirSync(FRAME_DIR, { recursive: true });
   const pro = profiles.isPro(profile);
+  const vertical = raw.height > raw.width;
   const src = out.source;
   const from = Math.max(0, src.start - 120), to = Math.min(raw.duration || src.end + 120, src.end + 120);
-  const sents = bounds.numbered(segs);
+  const sents = sentsA || bounds.numbered(segs);
   const said = bounds.sentenceLines(sents, from, to, 12000);
   const hook = out.edit?.hook || src.hook;
   const content = [{ type: 'text', text: [
@@ -671,26 +739,27 @@ export async function reviseShort(raw, out, wish, segs, profile, { minLen = 15, 
     HOOK_RULES(pro, profile),
     FX_RULES(fxLevelOf(profile, wish), fxStickers(profile)),
     out.edit?.fxHow ? `Bisherige Effekte: ${out.edit.fxHow}.` : '',
+    out.edit?.layout ? `Bisheriger Bildaufbau: ${out.edit.layout.mode}${out.edit.layout.cam ? ` (Facecam bei ${Math.round(out.edit.layout.cam.x * 100)} %/${Math.round(out.edit.layout.cam.y * 100)} %, ${Math.round(out.edit.layout.cam.w * 100)} × ${Math.round(out.edit.layout.cam.h * 100)} %)` : ''}, focus ${Math.round((out.edit.layout.focus ?? 0.5) * 100)} %.` : '',
+    out.qc?.issues?.length ? `Prüfung des bisherigen Clips: ${out.qc.issues.join('; ')}.` : '',
     profile?.clipHints ? `Worauf der Creator bei diesem Kanal Wert legt: ${profile.clipHints}` : '',
+    examplesFor(profile),
+    !pro && !vertical ? LAYOUT_RULES + '\nEffekt "cam" = Facecam 1,6 s groß bei der stärksten Gesichts-Reaktion (nur mit mode "cam", höchstens 2).' : '',
     said ? SENTENCE_RULES : '',
-    said ? 'Gesprochenes in diesem Bereich als nummerierte Sätze (Sekunden ab Videoanfang, automatisch erkannt):\n' + said : 'Kein gesprochener Text verfügbar.',
-    '', 'Standbilder (Sekunde steht jeweils davor):',
+    said ? 'Gesprochenes in diesem Bereich als nummerierte Sätze (Sekunden ab Videoanfang, automatisch erkannt; in Klammern gemessener Tonfall):\n' + said : 'Kein gesprochener Text verfügbar.',
+    '', 'Kontaktbögen (je 9 Bilder, Sekunde oben links): bisheriger Clip, davor, danach.',
   ].filter(Boolean).join('\n') }];
-  const times = [...new Set([src.start + 1, hook?.at, (src.start + src.end) / 2, src.end - 1, from + 5, to - 5]
-    .filter((t) => Number.isFinite(t) && t >= 0).map((t) => Math.round(t)))].slice(0, 6);
-  for (const t of times) {
-    const file = path.join(FRAME_DIR, `${raw.id}-r${t}.jpg`);
-    const ok = await ffmpeg(['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(t), '-i', fileOf(raw),
-      '-vf', "scale='if(gt(iw,ih),min(640,iw),-2)':'if(gt(iw,ih),-2,min(640,ih))'", '-frames:v', '1', '-q:v', '5', file]);
-    content.push({ type: 'text', text: `Sekunde ${t}:` });
-    if (ok && fs.existsSync(file)) {
-      content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: fs.readFileSync(file).toString('base64') } });
-      fs.rmSync(file, { force: true });
-    }
+  const ranges = [[src.start, src.end, 'Bisheriger Clip'], [from, src.start, 'Davor'], [src.end, to, 'Danach']].filter(([a, b]) => b - a >= 4);
+  for (const [a, b, label] of ranges) {
+    const file = path.join(FRAME_DIR, `${raw.id}-r${Math.round(a)}.jpg`);
+    const sheet = await vision.contactSheet(fileOf(raw), a, b, file, { vertical });
+    if (!sheet) continue;
+    content.push({ type: 'text', text: `${label} (Sekunde ${Math.round(a)}–${Math.round(b)}):` }, vision.asImage(sheet));
+    fs.rmSync(sheet, { force: true });
   }
   const schema = { type: 'object', additionalProperties: false,
-    required: ['fromSentence', 'toSentence', 'start', 'end', 'title', 'hook', 'tempo', 'music', 'changes', 'viral', 'viralWhy', 'viralTip', 'fx'], properties: {
+    required: ['fromSentence', 'toSentence', 'start', 'end', 'title', 'hook', 'tempo', 'music', 'changes', 'viral', 'viralWhy', 'viralTip', 'fx', 'layout'], properties: {
       fx: FX_SCHEMA,
+      layout: LAYOUT_SCHEMA,
       fromSentence: { type: 'integer', description: 'erster Satz (S…) des neuen Clips, 0 ohne Sprache' },
       toSentence: { type: 'integer', description: 'letzter Satz (S…) des neuen Clips, 0 ohne Sprache' },
       start: { type: 'number', description: 'neuer Start (Sekunde ab Videoanfang)' },
@@ -716,7 +785,7 @@ export async function reviseShort(raw, out, wish, segs, profile, { minLen = 15, 
     hook: o.hook ? { mode: o.hook.mode, at: Number(o.hook.at), len: Number(o.hook.len), text: String(o.hook.text || '').slice(0, 60) } : null,
     tempo: fx.TEMPO[o.tempo] !== undefined ? o.tempo : 'normal', music: !!o.music, changes: String(o.changes || '').slice(0, 500),
     viral: Math.max(1, Math.min(10, Math.round(Number(o.viral) || 0))) || undefined, viralWhy: String(o.viralWhy || '').slice(0, 300), viralTip: String(o.viralTip || '').slice(0, 300),
-    fx: Array.isArray(o.fx) ? o.fx.slice(0, 15) : [], fxLevel: fxLevelOf(profile, wish) };
+    fx: Array.isArray(o.fx) ? o.fx.slice(0, 15) : [], fxLevel: fxLevelOf(profile, wish), layoutRaw: o.layout && typeof o.layout === 'object' ? o.layout : null };
 }
 
 // Effekt-Stufe des Kanals; „mehr/weniger Effekte“ im Überarbeitungswunsch verschiebt sie um eine Stufe

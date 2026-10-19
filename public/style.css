@@ -354,3 +354,10 @@ select.small { padding: 4px 8px; font-size: 13px; width: auto; }
   border: 1px solid #b8860b; background: rgba(184, 134, 11, .12); }
 .lib-rec .btn.small { margin-left: 8px; padding: 2px 8px; }
 .snippet { font: 13px/1.5 ui-monospace, Consolas, monospace; background: var(--bg); border: 1px solid var(--line); padding: 10px 12px; border-radius: 8px; overflow-x: auto; white-space: pre; margin: 6px 0; }
+
+/* 📈 Zahlen */
+.statlist { display: grid; gap: 4px; margin: 6px 0 12px; }
+.statrow { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; background: var(--bg); color: inherit; text-decoration: none; min-width: 0; flex-wrap: wrap; }
+a.statrow:hover { outline: 1px solid var(--line, rgba(255,255,255,.15)); }
+.statrow .rank { width: 22px; text-align: right; opacity: .6; font-variant-numeric: tabular-nums; }
+.statrow .st-title { flex: 1 1 200px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

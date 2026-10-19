@@ -26,21 +26,24 @@ export async function check() {
 
 export const status = () => ({ ...state });
 
-// Encoder-Argumente für H.264 in guter Qualität
-export function videoArgs(useGpu = state.nvenc) {
-  return useGpu
-    ? ['-c:v', 'h264_nvenc', '-preset', 'p5', '-rc', 'vbr', '-cq', '23', '-b:v', '0', '-pix_fmt', 'yuv420p']
+// Encoder-Argumente für H.264. hq = Shorts: TikTok/YouTube kodieren ohnehin neu – je besser die Vorlage, desto weniger Matsch
+// (vor allem nach dem Hochskalieren des 9:16-Ausschnitts). Lange Fassungen bleiben schneller.
+export function videoArgs(useGpu = state.nvenc, hq = false) {
+  if (useGpu) return hq
+    ? ['-c:v', 'h264_nvenc', '-preset', 'p6', '-rc', 'vbr', '-cq', '19', '-b:v', '0', '-spatial-aq', '1', '-rc-lookahead', '20', '-pix_fmt', 'yuv420p']
+    : ['-c:v', 'h264_nvenc', '-preset', 'p5', '-rc', 'vbr', '-cq', '23', '-b:v', '0', '-pix_fmt', 'yuv420p'];
+  return hq ? ['-c:v', 'libx264', '-preset', 'medium', '-crf', '19', '-pix_fmt', 'yuv420p']
     : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p'];
 }
 
 // Erst mit Grafikkarte versuchen; schlägt das fehl, einmal mit dem Prozessor.
-export async function encodeWithFallback(run) {
+export async function encodeWithFallback(run, { hq = false } = {}) {
   if (state.nvenc) {
-    const r = await run(videoArgs(true));
+    const r = await run(videoArgs(true, hq));
     if (r.code === 0) return { ...r, gpu: true };
     if (/nvenc|cuda|nvcuvid|No capable devices|OpenEncodeSessionEx|libnvidia/i.test(r.err)) {
       state = { ...state, nvenc: false, error: 'Fehler beim Kodieren auf der Grafikkarte – weiter mit Prozessor' };
     } else return r;
   }
-  return { ...(await run(videoArgs(false))), gpu: false };
+  return { ...(await run(videoArgs(false, hq))), gpu: false };
 }

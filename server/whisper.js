@@ -70,19 +70,20 @@ function run(cmd, args, onLine, env) {
 let chain = Promise.resolve();
 
 // → Wörter [{ s, e, t }] (Sekunden, Text) – ein Eintrag je Wort (für Untertitel)
-export function transcribe(videoFile, key, onProgress = () => {}) {
-  const job = chain.then(() => doTranscribe(videoFile, key, onProgress));
+// track = Tonspur (bei OBS-Mehrspur das Mikrofon → keine Spielgeräusche, genauere Wörter)
+export function transcribe(videoFile, key, onProgress = () => {}, { track = 0 } = {}) {
+  const job = chain.then(() => doTranscribe(videoFile, key, onProgress, track));
   chain = job.catch(() => {});
   return job;
 }
 
-async function doTranscribe(videoFile, key, onProgress) {
+async function doTranscribe(videoFile, key, onProgress, track = 0) {
   const c = cfg();
   const model = await ensureModel(c.model || 'small');
   fs.mkdirSync(TMP, { recursive: true });
   const wav = path.join(TMP, key + '.wav'), base = path.join(TMP, key);
   try {
-    const a = await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', videoFile, '-map', '0:a:0', '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav]);
+    const a = await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', videoFile, '-map', `0:a:${track || 0}`, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav]);
     if (a.code !== 0 || !fs.existsSync(wav)) return []; // keine Tonspur
     // -ml 1 -sow: ein Segment je Wort → Zeitmarken pro Wort
     const args = ['-m', model, '-f', wav, '-l', 'de', '-ml', '1', '-sow', '-oj', '-of', base, '-pp'];
@@ -118,8 +119,23 @@ async function doTranscribe(videoFile, key, onProgress) {
 }
 
 let lastEngine = '';
-const toWords = (j) => (j.transcription || []).map((x) => ({ s: (x.offsets?.from || 0) / 1000, e: (x.offsets?.to || 0) / 1000, t: String(x.text || '').trim() }))
-  .filter((x) => x.t && !/^\[.*\]$|^\(.*\)$/.test(x.t)); // [Musik], (Lachen) o. Ä. weglassen
+// [Lachen], (schreit), *lacht* … sind keine Wörter, aber wertvolle Ereignisse (Highlights!) → eigene Liste words.events
+const TAG = /^[[(*].*[\])*]$/;
+export function eventKind(t) {
+  const x = String(t).toLowerCase();
+  if (/lach|gelächter|kicher|laugh|chuckl|giggl|haha/.test(x)) return 'laugh';
+  if (/schrei|kreisch|brüll|ruf|scream|shout|yell/.test(x)) return 'shout';
+  if (/applaus|jubel|klatsch|cheer|applause/.test(x)) return 'cheer';
+  if (/musik|music|gesang|sing/.test(x)) return 'music';
+  if (/explosion|schuss|knall|schüsse|gunshot|bang/.test(x)) return 'bang';
+  return 'other';
+}
+const toWords = (j) => {
+  const all = (j.transcription || []).map((x) => ({ s: (x.offsets?.from || 0) / 1000, e: (x.offsets?.to || 0) / 1000, t: String(x.text || '').trim() })).filter((x) => x.t);
+  const words = all.filter((x) => !TAG.test(x.t));
+  words.events = all.filter((x) => TAG.test(x.t)).map((x) => ({ s: x.s, e: x.e, kind: eventKind(x.t), t: x.t.slice(0, 40) }));
+  return words;
+};
 
 // Wörter zu Sätzen/Zeilen gruppieren (Anzeige, Text für Claude)
 // Satzgrenzen: Satzzeichen von Whisper oder deutliche Sprechpause. Lange Monologe ohne Punkt (beim Zocken häufig)
@@ -160,7 +176,7 @@ export const fmtTime = (s) => {
 const TDIR = path.join(DATA_DIR, 'transkripte');
 export function saveTranscript(v, words) {
   fs.mkdirSync(TDIR, { recursive: true });
-  fs.writeFileSync(path.join(TDIR, v.id + '.json'), JSON.stringify({ words }));
+  fs.writeFileSync(path.join(TDIR, v.id + '.json'), JSON.stringify({ words, events: words.events || [] }));
   v.transcriptAt = new Date().toISOString();
   v.transcriptText = textOf(words).slice(0, 20000);
   save();
@@ -170,6 +186,10 @@ export function loadWords(v) {
     const j = JSON.parse(fs.readFileSync(path.join(TDIR, v.id + '.json'), 'utf8'));
     return Array.isArray(j) ? j : j.words; // 1.3.0 speicherte Sätze als Liste
   } catch { return null; }
+}
+// Geräusch-Ereignisse aus dem Transkript ([Lachen] …) – ältere Transkripte haben keine
+export function loadEvents(v) {
+  try { return JSON.parse(fs.readFileSync(path.join(TDIR, v.id + '.json'), 'utf8')).events || []; } catch { return []; }
 }
 // Sätze mit Zeitmarken (für Anzeige und Claude)
 export function loadTranscript(v) {

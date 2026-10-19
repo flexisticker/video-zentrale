@@ -274,17 +274,49 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   **Beim Kunden eingerichtet (18.10.2026):** NPM-Version mit Access List je Custom Location → Access List „Öffentlich“ (Satisfy Any, allow 0.0.0.0/0 + ::/0),
   Custom Location `/info` → 192.168.1.10:8094 mit „Öffentlich“; Proxy Host selbst weiter „Nur Heimnetz“. `/info` von außen erreichbar (Kunde bestätigt),
   TikTok-Prüfung neu eingereicht. Achtung: „Publicly Accessible“ im Reiter Details würde die ganze Zentrale öffnen.
-- **Ideen-Plan „Virale Clips“ (19.10.2026, nicht gebaut):** `docs/ideen-plan-virale-clips.md` (Recherche mit 5 Agenten: Profi-Tools,
-  Erkennungssignale, Viral-Handwerk, RTX 3070, Code-Analyse). Kunde: streamt live auf **Twitch + TikTok**, Aufnahme Full HD **30 fps**,
-  Facecam-Position wechselt, OBS-Mehrspur unklar. Wunsch: Zahlen von YouTube/TikTok/Twitch holen und auswerten. Vorschlag: Paket A
-  (Sofort-Fixes inkl. Speicher-Falle `concatGraph`, Hook-Text über Facecam, Mehrspur/Tonfall, 9er-Bildraster, Facecam-Erkennung) +
-  Paket B (Twitch-Chat live per EventSub als Highlight-Signal, Zuschauer-Clips, Statistik-Zentrale, Top/Flop-Beispiele an Claude).
-  PC: Kunde will die Grafikkarte **von Hand freigeben** (Modus „nur nach Freigabe“, Knopf + Desktop-Verknüpfung, Warteschlange, Abbruch bei OBS/Spiel bleibt).
-  **Quelle = Twitch-VOD** (lädt er von Twitch herunter, keine OBS-Aufnahme) → eine Tonspur (Stimme per Demucs auf dem PC), Chat/Clips/Marker
-  exakt aufs VOD, Idee automatischer VOD-Import (yt-dlp, inoffiziell). TikTok-Live = OBS-Virtual-Cam → TikTok Live Studio (gleiches Bild).
-  Empfehlung: OBS automatisch mitaufnehmen mit Stream-Encoder + Mehrspur (OBS-Sortierer holt es). Wartet auf „leg los“.
+- **Ideen-Plan „Virale Clips“ (19.10.2026):** `docs/ideen-plan-virale-clips.md` (Recherche mit 5 Agenten). Kunde: streamt live auf **Twitch + TikTok**
+  (OBS → Twitch, OBS-Virtual-Cam → TikTok Live Studio), lädt bisher das **Twitch-VOD** herunter (keine OBS-Aufnahme, eine Tonspur), Full HD **30 fps**,
+  Facecam-Position wechselt. Empfehlung an ihn: OBS automatisch mitaufnehmen (Stream-Encoder, Spuren 1 alles / 2 Mikro / 3 Spiel).
+  Paket A + B + Freigabe-Wünsche = **1.27.0 gebaut**. **Paket C offen:** Rechenhelfer als Auftragsliste, Grafikkarte **von Hand freigeben**
+  (Modus „nur nach Freigabe“, Knopf + Desktop-Verknüpfung, Abbruch bei OBS/Spiel bleibt), dort Demucs (Stimme aus VOD), Audio-Ereignisse, OCR, WhisperX.
+- 1.27.0 (19.10.2026): **Momentfindung/Bildaufbau/Prüfung/Twitch/Zahlen.**
+  - `server/signals.js`: Tonspuren (`audioTracks`, `voiceIndex` aus `cut.voiceTrack` auto = Spur 2 bei Mehrspur, `voiceUsable`), `prosody()` je Satz (laut +dB
+    ggü. Sprech-Median, Tempo, Ausruf, `HYPE`-Wörter, Wiederholung, Whisper-Ereignisse) → `annotate()` (bounds.sentenceLines zeigt `(tag)`), `timeline()` je Sekunde,
+    `peaks()` (Fenster 22 s vor/14 s nach dem Moment, forced = Twitch-Clips/Marker/Claude-Späher mit Bereich, Labels werden zusammengeführt, `min` schwache).
+    Alte `candidates()` nur noch für die Kurzfassung ohne Sätze. whisper.js: `[Lachen]` usw. → `words.events` (`eventKind`), im Transkript gespeichert (`loadEvents`),
+    `transcribe(…, {track})`. `loudness(…, track)`.
+  - ai.js: `scoutMoments()` (ganze Abschrift mit Tonfall + Twitch-Zeilen, effort high, Schalter `ai.scout`), `chooseHighlights(…, {sents})` mit **Kontaktbögen**
+    (`vision.contactSheet` 3×3, Sekunde eingebrannt – drawtext VOR fps, sonst falsche Zeit) + `LAYOUT_SCHEMA` (mode cam|crop|blur, cam in %, focus) → `layoutRaw`;
+    `reviseShort` mit 3 Kontaktbögen (Clip/davor/danach), Tonfall, bisherigem Layout und QC-Mängeln; `reviewClip()` (QC, effort medium, Schalter `ai.qc`);
+    `setExamples()`/`examplesFor()` (Top/Flop aus stats.js in Highlights, Späher, Überarbeiten, Coach). `cutCall(…, {effort})`.
+  - `server/vision.js`: `refineBox()` legt Claudes Facecam-Schätzung an echte Kanten (Mittelbild aus 16 Graustufenbildern, Kantensuche ±20 %). `server/layout.js`:
+    Graph cam (Facecam-Seitenverhältnis 4:3–16:9 oben, Spiel-Ausschnitt um focus) / crop / blur, Reaktion = fx `cam` (1080×1080 Facecam oben per overlay enable).
+    autocut: `resolveLayout()` (feste Facecam `cut.facecam.enabled` hat Vorrang, `facecam.auto`), Hook-Text an die Naht (`buildHookAss({top})`), Emojis unter die Naht,
+    **kein Zoom im cam-Layout** (Zoom auf der Quelle verschiebt die Facecam). `concatGraph` = **eine Eingabe je Abschnitt** (Speicher-Falle behoben). Shorts `hq` (NVENC p6 cq19 / x264 medium crf19, lanczos).
+    Migration `migVarLen`: shortMin/Max 30/45 → 15/60.
+  - `server/qc.js`: blackdetect/freezedetect/silencedetect/ebur128 + Claude-Kontaktbogen 4×3 des fertigen Clips → `v.qc {ok, score, issues, fixWish, lufs}`;
+    `tipsWish` nimmt `qc.fixWish` mit, `autoApplyTips` auch bei QC-Mängeln.
+  - `server/twitch.js`: Device Code Flow (Client-ID, Secret optional, Scopes user:read:chat user:read:broadcast), EventSub-WebSocket (Node-22-`WebSocket`, Abos
+    stream.online/offline + channel.chat.message, session_reconnect), Chat `/data/twitch/chat-<stream>.jsonl` ([ms, text, emotes], keine Namen, 120 Tage),
+    `syncVideos` (VODs → streams mit vodId), `clipsFor` (vod_offset), `markersFor`, `matchStream` (VOD-Nr. im Namen › Uhrzeit im Dateinamen › Länge/Datum),
+    `signalsFor` (Chat je 10 s ggü. Median, −6 s Versatz, Clips forced, Marker −8 s), `assign`, `importVod` (yt-dlp, Dockerfile `ADD yt-dlp_linux`, Name „… (Twitch v<id>).mp4“,
+    Schalter `twitch.vodImport`, 10 Min. nach stream.offline). Env `TWITCH_ID_BASE/API_BASE/WS_URL`, `YTDLP_BIN`.
+  - `server/stats.js`: alle 6 h YouTube `videos?part=statistics` (+ Analytics `averageViewPercentage` wenn `youtube.analytics` → Scope yt-analytics.readonly, neu verbinden),
+    TikTok `video/list` (wenn `tiktok.statsList` → Scope video.list, braucht TikTok-Freigabe Display API; Zuordnung Zeit/Länge/Text), Twitch-Abgleich; `v.perf {yt, tt}` mit Verlauf;
+    `overview()` (relativ zum Kanal-Median, Rangkorrelation Viral-Score ↔ Zahlen), `examples(profile)` ab 6 Videos.
+  - Routen: `/api/twitch[/config|/connect|/disconnect|/sync|/import/:stream]`, `/api/videos/:id/twitch`, `/api/stats[/refresh|/config]`, `/api/videos/dedupe {dryRun}`,
+    `/api/videos/bulk {action: 'revise', wish}`. `autocut.duplicates()` (je revisionRoot bleibt die neueste; hochgeladene/laufende nie).
+  - UI: Reiter 📈 Zahlen (`renderStats`), Freigabe-Sortierung (`S.sort`, vz-sort; viral|neu|zahlen), Sammel-Überarbeiten, „🧹 Doppelte aufräumen“, Chips ✔ geprüft/⚠/👁,
+    Detail `renderQc`, Rohvideo: Signale + Twitch-Stream-Auswahl, Einstellungen: Twitch-Kasten (Code-Anmeldung `watchTwitch`), Zahlen-Kasten, Claude Späher/Prüfung, Schnitt: Stimmspur + Facecam automatisch.
+  - Getestet (Mock + fake-whisper `FAKE_WHISPER_RICH` + 3-Spur-Testvideo mit Facecam-Rahmen + Playwright): Signale/Tonfall/Lachen, Späher, Kontaktbögen, Facecam-Rahmen
+    auf ±1 %, cam/blur/Reaktion im Bild, QC, Langfassung/Kurzfassung/2 Shorts, Sammel-Überarbeiten, Duplikate, YouTube-Statistik + Analytics, Twitch-Code-Anmeldung,
+    EventSub-Chat, VOD-Import (fake yt-dlp), 390 px ohne Überlauf. **Nicht getestet:** echtes Twitch (EventSub, Clips/vod_offset, Marker-Recht), echtes yt-dlp mit Twitch,
+    echte Claude-Antworten (Facecam-Genauigkeit in %!), YouTube Analytics mit echtem Konto (Device-Flow erlaubt evtl. kein yt-analytics-Scope → Web-Anmeldung nutzen),
+    TikTok video.list (Prüfung nötig), NVENC-Qualitätsparameter auf der 1050 Ti (Pascal: spatial-aq/lookahead sollten gehen).
 - **Offen – Paket 4 Zusammenstellung (angeboten, Kunde will es):** „Best of“ aus mehreren Videos (Zeitraum/Auswahl, 16:9 oder 9:16, Claude
   ordnet Highlights, Platz-Einblendungen), später automatisch wöchentlich. Nach 1.18.0 als eigenes Paket bauen.
+  19.10.2026 erneut gewünscht als **Kanal-Trailer/Highlight-Video**: max. ~5 Min., nur „geiles Zeug“ quer über ALLE Videos eines Kanals,
+  mit Kanal-Logo (hochladen oder vom Kanal holen – YouTube channels.snippet.thumbnails / Twitch profile_image_url). Plan geschickt, wartet auf „leg los“.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
   Sendeplätze je Kanal **stellt der Kunde selbst ein** (keine festen Startzeiten), „Einplanen“ auf nächsten freien Platz, Shorts
   eines Langvideos über Tage verteilen, Übersicht Heute/Woche, Lückenwarnung. YouTube `publishAt` erst nach YouTube-Audit

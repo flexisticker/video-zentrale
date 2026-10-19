@@ -9,7 +9,7 @@ import * as profiles from './profiles.js';
 
 const AUTH = process.env.TT_AUTH_BASE || 'https://www.tiktok.com';
 const API = process.env.TT_API_BASE || 'https://open.tiktokapis.com';
-const scope = () => 'user.info.basic,video.upload' + (cfg().directPost ? ',video.publish' : '');
+const scope = () => 'user.info.basic,video.upload' + (cfg().directPost ? ',video.publish' : '') + (cfg().statsList ? ',video.list' : '');
 const CHUNK = 10 * 1024 * 1024; // 5–64 MB, letzter Teil darf größer sein (bis 128 MB)
 const SINGLE_MAX = 64 * 1000 * 1000; // bis hierhin in einem Stück (TikTok: chunk_size darf nie größer als das Video sein)
 
@@ -182,6 +182,25 @@ export async function creatorInfo(p) {
 }
 
 // PROCESSING_UPLOAD → SEND_TO_USER_INBOX (Entwurf zugestellt) bzw. PUBLISH_COMPLETE (veröffentlicht) | FAILED
+// Statistik (stats.js): eigene Videos mit Aufrufen (Display API, Recht video.list – muss in der TikTok-App freigegeben sein)
+export async function listVideos(p, pages = 5) {
+  const out = [];
+  let cursor = 0;
+  for (let i = 0; i < pages; i++) {
+    const r = await fetch(API + '/v2/video/list/?fields=id,title,video_description,create_time,duration,view_count,like_count,comment_count,share_count,share_url', {
+      method: 'POST', headers: { Authorization: 'Bearer ' + await token(p), 'Content-Type': 'application/json' }, body: JSON.stringify({ max_count: 20, ...(cursor ? { cursor } : {}) }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || (j.error?.code && j.error.code !== 'ok')) {
+      if (j.error?.code === 'scope_not_authorized') throw new Error('TikTok-Recht video.list fehlt – in der TikTok-App „Display API“ hinzufügen, freigeben lassen und neu verbinden.');
+      throw new Error(apiErr(j, 'Videoliste nicht abrufbar (' + r.status + ')'));
+    }
+    out.push(...(j.data?.videos || []));
+    if (!j.data?.has_more) break;
+    cursor = j.data.cursor;
+  }
+  return out;
+}
+
 export async function checkStatus(p, publishId) {
   const r = await fetch(API + '/v2/post/publish/status/fetch/', { method: 'POST',
     headers: { Authorization: 'Bearer ' + await token(p), 'Content-Type': 'application/json; charset=UTF-8' },

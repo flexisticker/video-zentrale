@@ -17,7 +17,7 @@ export function sentenceLines(sents, from = 0, to = Infinity, maxChars = 9000) {
   let n = 0;
   for (const x of sents) {
     if (x.e <= from || x.s >= to) continue;
-    const l = `S${x.id} [${x.s.toFixed(1)}–${x.e.toFixed(1)}] ${x.t}`;
+    const l = `S${x.id} [${x.s.toFixed(1)}–${x.e.toFixed(1)}]${x.tag ? ` (${x.tag})` : ''} ${x.t}`;
     n += l.length + 1;
     if (n > maxChars) { lines.push('[… gekürzt]'); break; }
     lines.push(l);

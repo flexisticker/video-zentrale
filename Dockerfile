@@ -22,6 +22,8 @@ RUN git clone --depth 1 --branch v1.9.5 https://github.com/ggml-org/whisper.cpp 
 
 FROM node:22-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+# yt-dlp (eigenständige Datei, ohne Python): Twitch-VODs nach dem Stream in den Eingang laden (optional, Einstellungen → Twitch)
+ADD --chmod=755 https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux /usr/local/bin/yt-dlp
 COPY --from=whisper /src/build/bin/whisper-cli /usr/local/bin/whisper-cli
 COPY --from=whisper-cuda /src/build/bin/whisper-cli /usr/local/bin/whisper-cli-cuda
 COPY --from=whisper-cuda /cudalibs /usr/local/lib/whisper-cuda
