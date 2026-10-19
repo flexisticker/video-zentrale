@@ -1,5 +1,11 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.29.0', date: '19.10.2026', items: [
+    '🧠 PC-Analyse auf deiner Grafikkarte (Rechenhelfer 1.5): trennt deine Stimme vom Spielton (Demucs – wichtig für Twitch-VODs mit nur einer Tonspur), erkennt Lachen, Schreie, Jubel, Explosionen und Schüsse per KI und liest Spieltexte wie „VICTORY“, „ELIMINATED“ oder „#1“.',
+    'Alles fließt in die Momentfindung: genauere Spracherkennung auf der sauberen Stimme, echter Tonfall, Geräusche und Spieltexte als Highlight-Signale für Claude.',
+    'Der Schnitt wartet (einstellbar, höchstens 12 Std.), bis du die Grafikkarte freigibst – „Jetzt schneiden“ schneidet sofort ohne. In der Liste steht dann „🔒 wartet auf PC-Freigabe“.',
+    'Einrichtung auf dem PC passiert von selbst: Python, PyTorch (CUDA) und die Modelle werden einmalig in den Ordner des Rechenhelfers geladen (ca. 5–6 GB, ohne Administratorrechte).',
+  ] },
   { version: '1.28.0', date: '19.10.2026', items: [
     '🎬 Highlight-Video / Kanal-Trailer (Freigabe → „🎬 Trailer“): die besten Momente quer über alle Shorts eines Kanals, 30 Sekunden bis 5 Minuten, quer (YouTube-Kanaltrailer) oder hoch (Short/TikTok). Claude baut den Spannungsbogen: stärkster Einstieg, Abwechslung, bestes Highlight zum Schluss.',
     'Mit Logo-Intro, „Jetzt abonnieren“-Outro, Logo als Wasserzeichen, kurzen Einblendungen, Spiel/Thema, Blitz + Whoosh an jedem Schnitt und Musik. Zeitraum wählbar (z. B. „Best of der Woche“).',

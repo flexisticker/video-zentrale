@@ -1,6 +1,7 @@
 ﻿# Rechenhelfer für Micha's Video-Zentrale
-# Läuft auf einem Windows-PC mit NVIDIA-Grafikkarte und übernimmt die Spracherkennung (Whisper, großes Modell),
-# solange der PC an ist. Ist er aus, rechnet die Zentrale wie bisher selbst.
+# Läuft auf einem Windows-PC mit NVIDIA-Grafikkarte und übernimmt die Spracherkennung (Whisper, großes Modell)
+# und ab 1.5 die PC-Analyse (Stimme trennen, Geräusche, Spieltexte – analyse.py mit Python/PyTorch),
+# sobald die Grafikkarte freigegeben ist. Ist er aus oder gesperrt, rechnet die Zentrale wie bisher selbst.
 #
 #   Rechenhelfer.ps1             -> läuft im Fenster (Strg+C beendet)
 #   Rechenhelfer.ps1 -Install    -> startet künftig automatisch bei der Anmeldung (Aufgabenplanung)
@@ -11,7 +12,7 @@ param([switch]$Install, [switch]$Uninstall, [string]$Release = '')
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # macht Downloads in Windows PowerShell deutlich schneller
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$Version = '1.4'
+$Version = '1.5'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ConfigFile = Join-Path $Here 'rechenhelfer.json'
 $Home2 = if ($env:VZ_HELPER_HOME) { $env:VZ_HELPER_HOME } else { Join-Path $env:LOCALAPPDATA 'VideoZentrale-Rechenhelfer' }
@@ -166,12 +167,57 @@ function Send-Json($path, $obj) {
   Invoke-RestMethod -Uri "$Base$path" -Method Post -Headers $Headers -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($json)) -TimeoutSec 30 | Out-Null
 }
 $Gaming = @{ enabled = $true; gpuLoad = 25; games = @() }   # kommt von der Zentrale
+$Caps = @('whisper')            # was dieser PC kann (analyse kommt dazu, sobald Python eingerichtet ist)
+$WantAnalyse = $true
+
+# ---------- Python + PyTorch (CUDA) für die PC-Analyse einrichten (einmalig, ohne Administratorrechte) ----------
+# uv (Astral) lädt eine eigene Python-Version und die Pakete in den Ordner des Rechenhelfers – nichts wird systemweit installiert.
+$PyDir = Join-Path $Home2 'py'
+$PyExe = if ($env:VZ_PYTHON) { $env:VZ_PYTHON } else { Join-Path $PyDir 'Scripts\python.exe' }
+$PyMarker = Join-Path $Home2 'py-bereit-1.txt'
+$env:HF_HOME = Join-Path $Home2 'hf'; $env:TORCH_HOME = Join-Path $Home2 'torch'
+$env:UV_CACHE_DIR = Join-Path $Home2 'uv-cache'; $env:UV_PYTHON_INSTALL_DIR = Join-Path $Home2 'python'
+$env:PYTHONIOENCODING = 'utf-8'
+function Ensure-Python {
+  if ($env:VZ_PYTHON -or (Test-Path $PyMarker)) { return $true }
+  try {
+    $uvDir = Join-Path $Home2 'uv'
+    $uv = Get-ChildItem -Path $uvDir -Recurse -Filter 'uv.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $uv) {
+      Say-Hello 'lädt Python-Werkzeug (uv)'
+      $zip = Join-Path $Home2 'uv.zip'
+      Get-Download 'https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip' $zip 'uv'
+      Expand-Archive -Path $zip -DestinationPath $uvDir -Force; Remove-Item $zip -Force
+      $uv = Get-ChildItem -Path $uvDir -Recurse -Filter 'uv.exe' | Select-Object -First 1
+    }
+    $uv = $uv.FullName
+    Log 'Richte Python für die PC-Analyse ein (einmalig, ca. 5 GB, 15–60 Min.) …'
+    Say-Hello 'lädt Python (einmalig)'
+    & $uv venv --python 3.11 $PyDir 2>&1 | ForEach-Object { Log "uv: $_" }
+    if ($LASTEXITCODE -ne 0) { throw 'Python-Umgebung konnte nicht angelegt werden.' }
+    Say-Hello 'lädt PyTorch mit CUDA (einmalig, ca. 2,5 GB)'
+    & $uv pip install --python $PyExe torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124 2>&1 | ForEach-Object { Log "uv: $_" }
+    if ($LASTEXITCODE -ne 0) { throw 'PyTorch konnte nicht installiert werden.' }
+    Say-Hello 'lädt Demucs, Geräusch- und Texterkennung (einmalig)'
+    & $uv pip install --python $PyExe demucs==4.0.1 transformers easyocr soundfile 2>&1 | ForEach-Object { Log "uv: $_" }
+    if ($LASTEXITCODE -ne 0) { throw 'Analyse-Pakete konnten nicht installiert werden.' }
+    $test = & $PyExe -c "import torch, demucs, transformers, easyocr, soundfile; print('CUDA' if torch.cuda.is_available() else 'CPU')" 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "Selbsttest fehlgeschlagen: $test" }
+    Set-Content -Path $PyMarker -Value "eingerichtet $(Get-Date) – $test" -Encoding UTF8
+    Log "Python für die PC-Analyse bereit ($test). Modelle (Demucs, AST, EasyOCR, zusammen ca. 600 MB) lädt der erste Auftrag."
+    return $true
+  } catch {
+    Log "PC-Analyse nicht eingerichtet: $($_.Exception.Message) – Spracherkennung läuft weiter, neuer Versuch beim nächsten Start."
+    return $false
+  }
+}
 function Say-Hello($status, $paused = $false) {
   $script:Status = $status
   try {
     $r = Invoke-RestMethod -Uri "$Base/api/helper/hello" -Method Post -Headers $Headers -ContentType 'application/json; charset=utf-8' -TimeoutSec 30 `
-      -Body ([Text.Encoding]::UTF8.GetBytes((@{ name = $Pc; gpu = $gpu; version = $Version; status = $status; paused = [bool]$paused } | ConvertTo-Json -Compress)))
+      -Body ([Text.Encoding]::UTF8.GetBytes((@{ name = $Pc; gpu = $gpu; version = $Version; status = $status; paused = [bool]$paused; caps = $script:Caps } | ConvertTo-Json -Compress)))
     if ($r.gaming) { $script:Gaming = $r.gaming }
+    if ($null -ne $r.analyse) { $script:WantAnalyse = [bool]$r.analyse }
   } catch { Log "Zentrale nicht erreichbar: $($_.Exception.Message)" }
 }
 
@@ -209,8 +255,65 @@ try {
   $hi = Invoke-RestMethod -Uri "$Base/api/helper/hello" -Method Post -Headers $Headers -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes('{"status":"startet"}')) -TimeoutSec 30
   if ($hi.model) { Say-Hello "lädt Modell $($hi.model)"; [void](Get-Model $hi.model) }
 } catch { Log "Modell vorab laden ging nicht: $($_.Exception.Message)" }
+if ($WantAnalyse -and (Ensure-Python)) { $Caps = @('whisper', 'analyse') }
 Say-Hello 'bereit'
 Log "Verbunden mit $Base – warte auf Aufträge (Fenster offen lassen bzw. minimieren)."
+$Analyse = Join-Path $Here 'analyse.py'
+
+# Läuft ein Prozess, prüft alle 3 s, ob gezockt wird (OBS/Spieleliste) → abbrechen und Grafikkarte freigeben
+function Wait-Proc($proc, $onTick) {
+  while (-not $proc.HasExited) {
+    Start-Sleep 3
+    if ($onTick) { & $onTick }
+    $obs = Get-Process -Name 'obs64', 'obs32', 'obs' -ErrorAction SilentlyContinue | Select-Object -First 1
+    $game = @($Gaming.games) | Where-Object { $_ -and (Get-Process -Name $_ -ErrorAction SilentlyContinue) } | Select-Object -First 1
+    if ($Gaming.enabled -and ($obs -or $game)) { Stop-Process -Id $proc.Id -Force; return $(if ($obs) { 'OBS gestartet' } else { "$game gestartet" }) }
+  }
+  return $null
+}
+
+# PC-Analyse: Ton + Bilder holen, analyse.py rechnen lassen, Stimme hochladen, Ergebnis schicken
+function Run-Analyse($job) {
+  $tmp = Join-Path $Home2 'tmp'
+  $dir = Join-Path $tmp $job.id
+  New-Item -ItemType Directory -Force -Path $dir | Out-Null
+  try {
+    $audio = Join-Path $dir 'audio.flac'; $frames = Join-Path $dir 'bilder.zip'; $out = Join-Path $dir 'out'
+    Invoke-WebRequest -Uri "$Base/api/helper/job/$($job.id)/file/audio" -Headers $Headers -OutFile $audio -UseBasicParsing
+    if (@($job.files) -contains 'frames') { Invoke-WebRequest -Uri "$Base/api/helper/job/$($job.id)/file/frames" -Headers $Headers -OutFile $frames -UseBasicParsing }
+    $p = $job.params
+    $argsA = @("`"$Analyse`"", '--audio', "`"$audio`"", '--out', "`"$out`"", '--home', "`"$Home2`"",
+      '--demucs', [int][bool]$p.demucs, '--events', [int][bool]$p.events, '--ocr', [int]([bool]$p.ocr -and (Test-Path $frames)))
+    if (Test-Path $frames) { $argsA += @('--frames', "`"$frames`"") }
+    $logOut = Join-Path $dir 'analyse.log'; $logErr = Join-Path $dir 'analyse-fehler.log'
+    $sp = @{ FilePath = $PyExe; ArgumentList = $argsA; PassThru = $true; RedirectStandardOutput = $logOut; RedirectStandardError = $logErr }
+    if (-not $IsLinux) { $sp.WindowStyle = 'Hidden' }
+    $proc = Start-Process @sp
+    $null = $proc.Handle
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    $tick = {
+      $last = Get-Content $logOut -Tail 5 -ErrorAction SilentlyContinue | Where-Object { $_ -like 'PROGRESS *' } | Select-Object -Last 1
+      if ($last -and $last -ne $script:LastProg) { $script:LastProg = $last; $parts = $last -split ' ', 3; Say-Hello ("PC-Analyse {0} % – {1}" -f $parts[1], $parts[2]) }
+    }
+    $stopped = Wait-Proc $proc $tick
+    if ($stopped) { throw "abgebrochen – $stopped (Grafikkarte freigegeben)" }
+    $res = Join-Path $out 'result.json'
+    if ($proc.ExitCode -ne 0 -or -not (Test-Path $res)) {
+      $why = (Get-Content $logOut, $logErr -ErrorAction SilentlyContinue | Where-Object { $_ -match 'FEHLER|Error|error' } | Select-Object -Last 2) -join ' '
+      throw "Analyse beendet mit Code $($proc.ExitCode) $why"
+    }
+    $voice = Join-Path $out 'voice.wav'
+    if (Test-Path $voice) {
+      Say-Hello 'PC-Analyse: lade Stimme hoch'
+      Invoke-WebRequest -Uri "$Base/api/helper/job/$($job.id)/upload/voice.wav" -Method Post -Headers $Headers -InFile $voice -ContentType 'application/octet-stream' -UseBasicParsing -TimeoutSec 1800 | Out-Null
+    }
+    $json = [IO.File]::ReadAllText($res, [Text.Encoding]::UTF8)
+    Invoke-RestMethod -Uri "$Base/api/helper/job/$($job.id)/result" -Method Post -Headers $Headers -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($json)) -TimeoutSec 120 | Out-Null
+    Log ("PC-Analyse fertig in {0:N0} s." -f $sw.Elapsed.TotalSeconds)
+  } finally {
+    Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}
 
 while ($true) {
   try {
@@ -223,8 +326,17 @@ while ($true) {
     }
     if ($Status -like 'pausiert*') { Log 'Weiter – Grafikkarte wieder frei.' }
     Say-Hello 'bereit'
-    $job = Invoke-RestMethod -Uri "$Base/api/helper/next" -Headers $Headers -TimeoutSec 40
+    $job = Invoke-RestMethod -Uri "$Base/api/helper/next?caps=$($Caps -join ',')" -Headers $Headers -TimeoutSec 40
     if (-not $job -or -not $job.id) { continue }
+    if ($job.kind -eq 'analyse') {
+      Log "Auftrag $($job.id): PC-Analyse (Stimme trennen, Geräusche, Spieltexte) …"
+      try { Run-Analyse $job }
+      catch {
+        Log "Fehler: $($_.Exception.Message)"
+        try { Send-Json "/api/helper/job/$($job.id)/error" @{ message = $_.Exception.Message } } catch { }
+      }
+      continue
+    }
     Log "Auftrag $($job.id): Spracherkennung mit Modell $($job.model) …"
     $tmp = Join-Path $Home2 'tmp'
     $wav = Join-Path $tmp "$($job.id).wav"

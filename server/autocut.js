@@ -22,6 +22,17 @@ import * as vision from './vision.js';
 import * as qc from './qc.js';
 import * as twitch from './twitch.js';
 import * as trailer from './trailer.js';
+import * as analyse from './analyse.js';
+import * as helper from './helper.js';
+
+// Schnitt wartet auf die PC-Analyse (Grafikkarte noch nicht freigegeben) → später erneut versuchen
+class WaitForPc extends Error {}
+function shouldWaitPc(v) {
+  const h = db().helper;
+  if (!h.enabled || h.analyse === false || h.waitPc === false || v.cut?.now || !helper.can('analyse')) return false;
+  const since = Date.parse(v.cut?.waitSince || '') || Date.now();
+  return Date.now() - since < (h.waitHours || 12) * 3600_000;
+}
 import { fileURLToPath } from 'node:url';
 
 const FONTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fonts');
@@ -502,6 +513,8 @@ async function runCut(v) {
   const duration = v.duration || 0;
   if (!duration) throw new Error('Länge des Videos unbekannt (Datei beschädigt?).');
 
+  // Grafikkarte noch nicht freigegeben → später schneiden (sofort prüfen, bevor teure Messungen laufen)
+  if (analyse.needed(v) && !analyse.available() && shouldWaitPc(v)) throw new WaitForPc('wartet auf PC-Analyse');
   step('Lautstärke messen');
   const { values: loud, fine, hasAudio } = await loudness(file, duration);
   // OBS-Mehrspur: Stimme getrennt vom Spiel (Spur 2) → Tonfall, Spracherkennung ohne Spielgeräusche
@@ -511,7 +524,22 @@ async function runCut(v) {
     const r = await loudness(file, duration, null, vIdx);
     if (signals.voiceUsable(r.values)) voice = r; else vIdx = null;
   }
-  v.cut.voiceTrack = vIdx != null ? vIdx + 1 : null;
+  // PC-Analyse (Rechenhelfer): Stimme trennen (Demucs), Geräusche (Lachen, Schreie …), Spieltexte. Wartet ggf. auf die Freigabe.
+  let an = { events: [], extra: [], lines: '' };
+  if (analyse.needed(v)) {
+    if (analyse.available()) {
+      try { await analyse.run(v, file, { duration, voiceTrack: vIdx, onStep: (s) => step(s) }); }
+      catch (e) { v.cut.warning = 'PC-Analyse: ' + e.message + ' – ohne sie weiter.'; }
+    }
+  }
+  if (v.analyse?.at) { try { an = analyse.signals(v, duration); } catch (e) { console.error('PC-Analyse auswerten:', e.message); } }
+  // Stimme aus Demucs, wenn es keine eigene Stimmspur gibt
+  let whisperFile = file, whisperTrack = vIdx ?? 0;
+  if (!voice && analyse.hasVoice(v)) {
+    const r = await loudness(analyse.voicePath(v), duration);
+    if (signals.voiceUsable(r.values)) { voice = r; whisperFile = analyse.voicePath(v); whisperTrack = 0; }
+  }
+  v.cut.voiceTrack = vIdx != null ? vIdx + 1 : voice ? 'pc' : null;
   step('Bildwechsel suchen');
   const scenes = await sceneChanges(file);
 
@@ -520,11 +548,11 @@ async function runCut(v) {
   if (!segs && c.whisper.enabled) {
     step('Sprache erkennen (Whisper)');
     try {
-      words = await whisper.transcribe(file, v.id, (p, eng) => step('Sprache erkennen' + (eng ? ' – ' + eng : ' (Whisper)'), p), { track: vIdx ?? 0 });
+      words = await whisper.transcribe(whisperFile, v.id, (p, eng) => step('Sprache erkennen' + (eng ? ' – ' + eng : ' (Whisper)'), p), { track: whisperTrack });
       whisper.saveTranscript(v, words); segs = whisper.sentences(words);
     } catch (e) { v.cut.warning = e.message; segs = null; words = null; }
   }
-  const events = words?.events || whisper.loadEvents(v);
+  const events = [...(words?.events || whisper.loadEvents(v)), ...an.events];
 
   let cut = c.cutPauses && hasAudio ? bounds.protectWords(pauses(loud, c), words) : [];
   const removedAll = cut.reduce((s, [a, b]) => s + b - a, 0);
@@ -548,16 +576,16 @@ async function runCut(v) {
   let cands = [];
   if (plan.shorts > 0) {
     step('Momente finden');
-    const tl = signals.timeline({ duration, loud, voice: voice?.values, scenes, events, sents, pros, cut, extra: tw.extra });
+    const tl = signals.timeline({ duration, loud, voice: voice?.values, scenes, events, sents, pros, cut, extra: [...tw.extra, ...an.extra] });
     let forced = tw.forced;
     // Späher: Claude liest die ganze Abschrift und meldet starke Momente (auch leise Lacher, die keine Lautstärke-Spitze haben)
     if (db().ai.apiKey && db().ai.scout !== false && sents.length >= 15) {
       step('Claude liest die ganze Aufnahme');
-      try { forced = [...forced, ...await ai.scoutMoments(v, sentsA, profile, { signals: tw.lines, wish: plan.wish, max: Math.min(20, plan.shorts * 3) })]; }
+      try { forced = [...forced, ...await ai.scoutMoments(v, sentsA, profile, { signals: [tw.lines, an.lines].filter(Boolean).join('\n'), wish: plan.wish, max: Math.min(20, plan.shorts * 3) })]; }
       catch (e) { v.cut.warning = 'Claude-Späher: ' + e.message; }
     }
     cands = signals.peaks(tl, { duration, max: Math.min(30, Math.max(12, plan.shorts * 4)), min: Math.max(4, plan.shorts * 2), forced });
-    v.cut.signals = { voice: !!voice, events: events.length, twitch: tw.extra.length, scout: forced.length - tw.forced.length };
+    v.cut.signals = { voice: !!voice, events: events.length, twitch: tw.extra.length, scout: forced.length - tw.forced.length, pc: an.events.length + an.extra.length };
   }
   let shorts = [];
   if (cands.length) {
@@ -687,7 +715,7 @@ async function runCut(v) {
     outputs.push(nv.id); done++;
   }
 
-  v.cut = { ...v.cut, state: 'done', step: '', progress: 100, at: new Date().toISOString(), outputs,
+  v.cut = { ...v.cut, state: 'done', step: '', progress: 100, at: new Date().toISOString(), outputs, waitPc: false, retryAt: '',
     removed: Math.round(cut.reduce((s, [a, b]) => s + b - a, 0)), shorts: shorts.length };
   saveNow();
   if (c.moveRaw) lib.moveVideo(v, 'rohvideos');
@@ -724,14 +752,17 @@ const priority = new Set(); // „Jetzt schneiden“ von Hand: ignoriert das Zei
 let windowTimer = null;
 async function next() {
   if (running) return;
+  // Wartet ein Video auf die PC-Analyse, kommt es erst wieder dran, wenn der PC frei ist oder die nächste Prüfung fällig ist
+  const ready = (x) => { if (typeof x === 'object') return true; const v = db().videos[x]; return !(v?.cut?.waitPc && !v.cut.now && Date.parse(v.cut.retryAt || '') > Date.now() && !analyse.available()); };
   // Von Hand angestoßene zuerst; sonst nur im Zeitfenster
-  let i = queue.findIndex((x) => typeof x === 'object' || priority.has(x));   // Überarbeitungen sind immer von Hand angestoßen
+  let i = queue.findIndex((x) => (typeof x === 'object' || priority.has(x)) && ready(x));   // Überarbeitungen sind immer von Hand angestoßen
   if (i < 0 && !inWindow()) {
     clearTimeout(windowTimer);
     windowTimer = setTimeout(next, 60_000); // jede Minute nachsehen, ob das Fenster offen ist
     return;
   }
-  if (i < 0) i = 0;
+  if (i < 0) i = queue.findIndex(ready);
+  if (i < 0) { clearTimeout(windowTimer); if (queue.length) windowTimer = setTimeout(next, 60_000); return; }
   const [item] = queue.splice(i, 1);
   if (!item) return;
   if (typeof item === 'object') return item.trailer ? runTrailer(item.trailer) : runRevision(item);
@@ -742,6 +773,12 @@ async function next() {
   try {
     if (v && !v.missing) await runCut(v);
   } catch (e) {
+    if (e instanceof WaitForPc && v) {
+      // zurück in die Warteschlange; alle 5 Minuten (oder sobald der PC frei ist) erneut
+      v.cut = { ...v.cut, state: 'queued', waitPc: true, waitSince: v.cut.waitSince || new Date().toISOString(), retryAt: new Date(Date.now() + 5 * 60_000).toISOString(), step: '' };
+      queue.push(v.id); saveNow();
+      return;
+    }
     console.error('Schnitt', v?.file, e);
     if (v) {
       v.cut = { ...v.cut, state: 'error', error: e.message, step: '' }; saveNow();

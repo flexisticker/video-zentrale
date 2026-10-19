@@ -483,7 +483,8 @@ function card(v) {
       h('div', { class: 'meta' }, fmtDate(v.mtime), ' · ', fmtSize(v.size)),
       h('div', { class: 'chips' }, channelBadge(v),
         ['queued', 'running'].includes(v.ai?.state) ? h('span', { class: 'chip run' }, '✨ Claude schreibt …') : null,
-        v.cut?.state === 'queued' ? h('span', { class: 'chip run' }, S.settings?.cut?.window?.enabled && !S.settings?.cut?.windowOpen && !v.cut.now
+        v.cut?.state === 'queued' ? h('span', { class: 'chip run', title: v.cut.waitPc ? 'Wartet, bis du die Grafikkarte des PCs freigibst (Einstellungen → Rechenhelfer oder Desktop-Verknüpfung). „Jetzt schneiden“ im Video schneidet sofort ohne PC-Analyse.' : '' },
+          v.cut.waitPc && !v.cut.now ? '🔒 wartet auf PC-Freigabe' : S.settings?.cut?.window?.enabled && !S.settings?.cut?.windowOpen && !v.cut.now
           ? `🌙 schneidet ab ${S.settings.cut.window.from} Uhr` : '✂ wartet auf Schnitt') : null,
         v.cut?.state === 'running' ? h('span', { class: 'chip run', title: v.cut.step }, `✂ ${v.cut.step || 'schneidet'} ${v.cut.progress ? v.cut.progress + ' %' : ''}`) : null,
         v.cut?.state === 'error' ? h('span', { class: 'chip bad', title: v.cut.error }, '✂ Fehler') : null,
@@ -1124,6 +1125,8 @@ function renderCut(box, v) {
   if ([...INBOXES, 'rohvideos'].includes(v.folder)) {
     const sec = h('div', { class: 'section' }, h('h3', {}, '✂ Automatischer Schnitt'));
     if (!c) add(sec, h('div', { class: 'status' }, 'Noch nicht geschnitten.'));
+    else if (c.state === 'queued' && c.waitPc && !c.now) add(sec, h('div', { class: 'status' }, '🔒 Wartet auf die PC-Analyse – gib die Grafikkarte frei (Einstellungen → Rechenhelfer oder Desktop-Verknüpfung). '
+      + `Spätestens ${fmtDate(new Date(Date.parse(c.waitSince) + (S.settings?.helper?.waitHours || 12) * 3600_000))} wird ohne geschnitten; „Jetzt so schneiden“ schneidet sofort ohne.`));
     else if (c.state === 'queued') add(sec, h('div', { class: 'status' }, 'Wartet – es wird immer nur ein Video gleichzeitig geschnitten.'));
     else if (c.state === 'running') add(sec, h('div', { class: 'status' }, (c.step || 'Läuft') + ' …' + (c.progress ? ' ' + c.progress + ' %' : '')),
       h('div', { class: 'bar-progress' }, h('i', { style: { width: (c.progress || 0) + '%' } })));
@@ -1133,8 +1136,10 @@ function renderCut(box, v) {
         h('div', { class: 'row' }, (c.outputs || []).map((id) => { const o = S.videos.find((x) => x.id === id); return o ? h('a', { class: 'btn small', href: '#video/' + id }, o.title || o.file) : null; })));
     }
     if (c?.warning) add(sec, h('div', { class: 'hint' }, 'Hinweis: ' + c.warning));
-    if (c?.signals) add(sec, h('div', { class: 'hint' }, '📡 Signale beim Schnitt: ' + [c.voiceTrack ? `Stimme aus Spur ${c.voiceTrack}` : 'Mischspur (keine eigene Stimmspur)',
-      c.signals.events ? `${c.signals.events} Geräusch-Marker (Lachen …)` : '', c.signals.twitch ? `${c.signals.twitch} Twitch-Signale` : '', c.signals.scout ? `${c.signals.scout} Momente von Claudes Durchsicht` : ''].filter(Boolean).join(' · ')));
+    if (c?.signals) add(sec, h('div', { class: 'hint' }, '📡 Signale beim Schnitt: ' + [c.voiceTrack === 'pc' ? 'Stimme vom PC getrennt (Demucs)' : c.voiceTrack ? `Stimme aus Spur ${c.voiceTrack}` : 'Mischspur (keine eigene Stimmspur)',
+      c.signals.events ? `${c.signals.events} Geräusch-Marker (Lachen …)` : '', c.signals.twitch ? `${c.signals.twitch} Twitch-Signale` : '', c.signals.scout ? `${c.signals.scout} Momente von Claudes Durchsicht` : '', c.signals.pc ? `${c.signals.pc} Signale vom PC (Geräusche/Spieltexte)` : ''].filter(Boolean).join(' · ')));
+    if (v.analyse?.at) add(sec, h('div', { class: 'hint' }, `🖥 PC-Analyse ${fmtDate(v.analyse.at)}: ${v.analyse.events} Geräusche, ${v.analyse.ocr} Texte${v.analyse.voice ? ', Stimme getrennt' : ''}${v.analyse.took ? ` (${Math.round(v.analyse.took)} s)` : ''}`));
+    else if (v.analyse?.error) add(sec, h('div', { class: 'hint' }, '🖥 PC-Analyse ging nicht: ' + v.analyse.error));
     const tws = S.settings?.twitch?.streams || [];
     if (tws.length || v.twitch) {
       const sel = h('select', { class: 'small', onchange: async (e) => {
@@ -2064,6 +2069,9 @@ async function renderSettings() {
   const hpMode = h('select', {}, [['manual', 'Nur nach Freigabe (Knopf hier oder Desktop-Verknüpfung)'], ['night', 'Nachts automatisch + nach Freigabe'], ['auto', 'Immer, wenn nicht gezockt wird']]
     .map(([k, n]) => h('option', { value: k, selected: (hp?.mode || 'manual') === k }, n)));
   const hpNf = h('input', { type: 'time', value: hp?.nightFrom || '02:00' }), hpNt = h('input', { type: 'time', value: hp?.nightTo || '07:00' });
+  const hpAn = h('input', { type: 'checkbox', checked: hp?.analyse !== false }), hpWait = h('input', { type: 'checkbox', checked: hp?.waitPc !== false });
+  const hpWaitH = h('input', { type: 'number', min: 1, max: 72, value: hp?.waitHours || 12, style: { width: '80px' } });
+  const hpWords = h('textarea', { rows: 2, value: hp?.ocrWords || '', placeholder: 'leer = Standardliste (victory, sieg, eliminated, headshot, #1, you died …)' });
   const helperBox = h('div', { class: 'box' }, h('h3', {}, '🖥 Rechenhelfer (dein PC)'),
     h('p', { class: 'hint' }, 'Ein PC mit NVIDIA-Grafikkarte (z. B. RTX 3070) übernimmt die Spracherkennung mit dem großen Whisper-Modell – genauer, schneller und der Server wird entlastet. Ist der PC aus, rechnet die Zentrale selbst.'),
     hp?.enabled ? hpStatusEl(hp) : null,
@@ -2080,10 +2088,19 @@ async function renderSettings() {
     h('label', {}, 'Wann darf der PC rechnen?'), hpMode,
     h('div', { class: 'row' }, h('span', { class: 'hint' }, 'Nachtfenster von'), hpNf, h('span', { class: 'hint' }, 'bis'), hpNt),
     h('label', {}, 'Whisper-Modell auf dem PC'), hpModel,
+    h('div', { class: 'section' }, h('b', {}, '🧠 PC-Analyse (ab Rechenhelfer 1.5)'),
+      h('p', { class: 'hint' }, 'Der PC trennt deine Stimme vom Spielton (wichtig für Twitch-VODs), erkennt Lachen, Schreie, Jubel, Explosionen und liest Spieltexte wie „VICTORY“ oder „ELIMINATED“. '
+        + 'Beim ersten Mal richtet er Python und die Modelle selbst ein (ca. 5–6 GB, dauert je nach Leitung 15–60 Min.).'
+        + ((hp?.caps || []).includes('analyse') ? ' ✓ Der PC kann das bereits.' : ' Noch nicht eingerichtet – nach dem Update ZIP neu laden und „Einrichten.bat“ ausführen.')),
+      h('label', { class: 'check' }, hpAn, 'PC-Analyse für neue Aufnahmen'),
+      h('label', { class: 'check' }, hpWait, 'Mit dem Schnitt warten, bis die Grafikkarte freigegeben ist'),
+      h('div', { class: 'row' }, h('span', { class: 'hint' }, 'höchstens'), hpWaitH, h('span', { class: 'hint' }, 'Stunden, danach ohne PC-Analyse schneiden')),
+      h('label', {}, 'Spieltexte, die als Highlight zählen (mit Komma)'), hpWords),
     h('label', { class: 'check', style: { marginTop: '8px' } }, hpGame, '🎮 Pausieren, wenn ich zocke (OBS läuft, Spiel aus der Liste läuft oder Grafikkarte ausgelastet)'),
     h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Grafikkarte gilt als belegt ab (%)'), hpLoad), h('div', {}, h('label', {}, 'Spiele (Prozessnamen, mit Komma)'), hpGames)),
     h('div', { class: 'row', style: { marginTop: '10px' } },
       h('button', { class: 'btn', onclick: run(() => api('POST', '/api/helper-config', { enabled: hpOn.checked, model: hpModel.value, mode: hpMode.value, nightFrom: hpNf.value, nightTo: hpNt.value,
+        analyse: hpAn.checked, waitPc: hpWait.checked, waitHours: Number(hpWaitH.value), ocrWords: hpWords.value,
         pauseGaming: hpGame.checked, gpuLoad: Number(hpLoad.value), games: hpGames.value }), 'Gespeichert.') }, 'Speichern'),
       hp?.enabled ? h('a', { class: 'btn primary', href: '/api/helper-download?origin=' + encodeURIComponent(location.origin), download: '' }, '⤓ Rechenhelfer für Windows (ZIP)') : null,
       hp?.enabled ? h('button', { class: 'btn small ghost', onclick: () => confirm('Neuen Schlüssel erzeugen? Der PC muss danach das neue ZIP bekommen.') && run(() => api('POST', '/api/helper-config', { newToken: true }), 'Neuer Schlüssel – ZIP neu herunterladen.')() }, 'Neuen Schlüssel erzeugen') : null),

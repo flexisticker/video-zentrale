@@ -329,6 +329,24 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   Getestet (Mock + Playwright + pwsh): Logo vom YouTube-Profil, Trailer 16:9 (Intro/Outro/Wasserzeichen, −14 LUFS) und 9:16 (Facecam-Layout aus dem Short,
   Untertitel), Dialog 1400/390 px, Freigabe per pwsh/Knopf, Ende bei OBS. **Nicht getestet:** echte Claude-Dramaturgie, Trailer mit vielen Videos (Laufzeit/Speicher bei
   ~40 Eingaben), echtes Windows (Desktop-Verknüpfungen, PowerShell 5.1), Twitch-Profilbild echt.
+- 1.29.0 (19.10.2026): **PC-Analyse** (Rest von Paket C). `server/helper.js` allgemein: `submit(kind, {files, params, timeoutMs, pickupMs})` → `{json, files}`,
+  `next(caps)` (Helfer meldet `caps` in hello; alte Helfer nur whisper), Routen `/api/helper/job/:id/file/:name` (GET), `/upload/:name` (POST roh → `/data/helper-out/<job>/`),
+  `can(kind)`, `canNow(kind)`; Einstellungen `helper.analyse`, `waitPc`, `waitHours` (12), `ocrWords`. `server/analyse.js`: Ton als FLAC 44,1 kHz stereo + Bilder alle 2 s
+  (960 px, ZIP `t000012.jpg` = Sekunde) → Auftrag `analyse` (params demucs nur ohne eigene Stimmspur, events, ocr) → `/data/analyse/<rawId>/result.json` + `voice.wav`,
+  `v.analyse {at, events, ocr, voice, device, took | failed, error}` (2 Fehlschläge → nicht mehr). `signals()`: Geräusche → events (laugh/shout/cheer/bang, zusammengefasst),
+  OCR-Treffer aus Wörterliste (`DEFAULT_WORDS`, ≤3 Zeichen als ganzes Wort; **kein `\#` in u-Regex!**) → extra (−2 s) + Zeilen für den Späher.
+  autocut.runCut: vor den Messungen `WaitForPc` (analyse.needed && !available && shouldWaitPc: Helfer kann analyse, waitPc, nicht `now`, < waitHours) → zurück in die
+  Warteschlange mit `cut.waitPc/waitSince/retryAt` (+5 Min.), `next()` überspringt wartende (außer `now` oder PC frei), Timer 60 s. Danach Analyse, Stimme aus Demucs
+  (`cut.voiceTrack = 'pc'`, Whisper auf `voice.wav`), Ereignisse/Signale/Späher-Zeilen zusammengeführt (`signals.pc`).
+  Rechenhelfer 1.5: `Ensure-Python` (uv von GitHub → `uv venv --python 3.11` + `torch==2.5.1 torchaudio==2.5.1` cu124 + `demucs==4.0.1 transformers easyocr soundfile`,
+  Marker `py-bereit-1.txt`, HF_HOME/TORCH_HOME/UV_* im Helferordner), caps whisper+analyse, `Run-Analyse` (Dateien holen, `analyse.py` per Start-Process mit
+  Fortschritt aus stdout → hello-Status, Abbruch bei OBS/Spiel über `Wait-Proc`, voice.wav hochladen, result.json schicken). `tools/rechenhelfer/analyse.py`: Demucs htdemucs
+  in 10-Min.-Stücken → voice 16 kHz; AST `MIT/ast-finetuned-audioset-10-10-0.4593` (BSD-3) 2-s-Fenster je 1 s auf Stimme (laugh/scream/shout/cheer/cry) und Spielton (bang/cheer);
+  EasyOCR de+en (Konfidenz ≥ 0,45). Test-Schalter `VZ_PYTHON` (Stellvertreter-Skript). UI: Chip „🔒 wartet auf PC-Freigabe“, Hinweis im Rohvideo (spätestens …),
+  PC-Analyse-Zeile, Helfer-Kasten „🧠 PC-Analyse“. `.gitignore` `__pycache__/`.
+  Getestet (Server + pwsh-Helfer 1.5 + fake-python + Mock): Warten ohne Freigabe, Freigabe per `-Release stop` → Analyse → Schnitt mit Stimme vom PC, Lachen/Knall/„VICTORY ROYALE“
+  bei Claude. **Nicht getestet:** echtes Python/PyTorch/Demucs/AST/EasyOCR (nur Syntax geprüft; Modelle aus der Sandbox nicht ladbar), Laufzeit/VRAM auf der RTX 3070,
+  uv/PowerShell 5.1 auf echtem Windows, Größe/Upload von voice.wav bei mehrstündigen VODs.
 - Ideen danach: „Best of der Woche“ automatisch (Zeitplan), Platz-Einblendungen „Platz 3/2/1“.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
   Sendeplätze je Kanal **stellt der Kunde selbst ein** (keine festen Startzeiten), „Einplanen“ auf nächsten freien Platz, Shorts

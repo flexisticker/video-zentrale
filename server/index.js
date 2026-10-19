@@ -209,7 +209,21 @@ async function api(req, res, url) {
     if (p === '/api/helper/hello' && m === 'POST') return send(res, 200, { ok: true, ...helper.hello(await readJson(req)) });
     // Desktop-Verknüpfungen auf dem PC: „Grafikkarte freigeben/sperren“
     if (p === '/api/helper/release' && m === 'POST') { const b = await readJson(req); return send(res, 200, helper.release(b.hours ?? 4, 'PC')); }
-    if (p === '/api/helper/next' && m === 'GET') { const j = await helper.next(); return j ? send(res, 200, j) : send(res, 204, ''); }
+    if (p === '/api/helper/next' && m === 'GET') {
+      const caps = String(url.searchParams.get('caps') || 'whisper').split(',').filter((x) => /^[a-z]{2,20}$/.test(x));
+      const j = await helper.next(caps.length ? caps : ['whisper']); return j ? send(res, 200, j) : send(res, 204, '');
+    }
+    // Dateien eines Auftrags abholen / Ergebnisdateien hochladen (Helfer 1.5)
+    if ((hm = /^\/api\/helper\/job\/([0-9a-f]{16})\/(file|upload)\/([\w.-]{1,60})$/.exec(p))) {
+      const [, id, what, name] = hm;
+      if (what === 'file' && m === 'GET') { const f = helper.filePath(id, name); if (!f) throw new HttpError(404, 'Datei unbekannt.'); return sendFile(req, res, f, 'application/octet-stream'); }
+      if (what === 'upload' && m === 'POST') {
+        const f = helper.uploadPath(id, name);
+        if (!f) throw new HttpError(404, 'Auftrag unbekannt.');
+        await pipeline(req, fs.createWriteStream(f));
+        return send(res, 200, { ok: true, size: fs.statSync(f).size });
+      }
+    }
     if ((hm = /^\/api\/helper\/job\/([0-9a-f]{16})\/(audio|result|error)$/.exec(p))) {
       const [, id, what] = hm;
       if (what === 'audio' && m === 'GET') { const f = helper.audioPath(id); if (!f) throw new HttpError(404, 'Auftrag unbekannt.'); return sendFile(req, res, f, 'audio/wav'); }
@@ -606,7 +620,7 @@ async function api(req, res, url) {
 
   if (p === '/api/settings' && m === 'GET') {
     return send(res, 200, { settings: db().settings, youtube: { ...youtube.status(), analytics: !!db().youtube.analytics }, tiktok: { ...tiktok.status(), statsList: !!db().tiktok.statsList },
-      ai: ai.status(), cut: autocut.status(), fal: thumbs.falStatus(), music: music.status(), twitch: twitch.status(), stats: { enabled: stats.overview().enabled, lastRun: db().stats?.lastRun || '' },
+      ai: ai.status(), cut: autocut.status(), fal: thumbs.falStatus(), music: music.status(), helper: { waitHours: db().helper.waitHours || 12, mode: db().helper.mode || 'manual', released: helper.released() }, twitch: twitch.status(), stats: { enabled: stats.overview().enabled, lastRun: db().stats?.lastRun || '' },
       profiles: profiles.list().map(profiles.publicProfile), version: VERSION });
   }
   if (p === '/api/public-info' && m === 'GET') return send(res, 200, info.cfg());

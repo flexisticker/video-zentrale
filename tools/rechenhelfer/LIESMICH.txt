@@ -21,6 +21,14 @@ Grafikkarte freigeben/sperren (ab Version 1.4):
   (Einstellungen -> Rechenhelfer), dort lässt sich auch "nachts automatisch" einstellen.
   Wer schon eingerichtet hatte: "Einrichten.bat" einmal neu ausführen, dann erscheinen die Verknüpfungen.
 
+PC-Analyse (ab Version 1.5):
+  Stimme vom Spielton trennen (Demucs), Lachen/Schreie/Explosionen erkennen und Spieltexte lesen.
+  Beim ersten Start richtet der Rechenhelfer dafür Python + PyTorch (CUDA) im eigenen Ordner ein
+  (%LOCALAPPDATA%\VideoZentrale-Rechenhelfer, ca. 5–6 GB, 15–60 Min., keine Administratorrechte nötig).
+  Die Modelle (ca. 600 MB) lädt der erste Auftrag. Fortschritt im Fenster und in der Zentrale.
+  Geht die Einrichtung schief, läuft die Spracherkennung trotzdem weiter; neuer Versuch beim nächsten Start.
+  Neu einrichten: Ordner "py" und Datei "py-bereit-1.txt" in %LOCALAPPDATA%\VideoZentrale-Rechenhelfer löschen.
+
 Starten von Hand:   "Starten.bat"
 Autostart entfernen: "Autostart entfernen.bat"
 
