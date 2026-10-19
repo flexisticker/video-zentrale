@@ -253,3 +253,12 @@ Der PC rechnet nur, wenn du ihn freigibst:
 - **Sicherheitsnetz bleibt:** Startest du trotz Freigabe OBS oder ein Spiel, bricht der PC sofort ab (innerhalb von 3 s, gibt es heute schon) und die Freigabe endet.
 - **Einstellung „Modus“:** *Nur nach Freigabe* (dein Wunsch, Standard) · *Automatisch wenn frei* (wie heute) · *Nachts automatisch* (z. B. 2–7 Uhr).
 - Aufwand: S–M, gehört zu Paket C (Power-PC als Rechenzentrum).
+
+### Nachtrag: Quelle ist das Twitch-VOD, nicht OBS (19.10.2026)
+Michael nimmt nicht mit OBS auf, sondern lädt das VOD von Twitch herunter. Folgen:
+- **Chat passt perfekt:** VOD-Zeit 0 = Streambeginn. Live mitgeschriebener Chat (EventSub) lässt sich exakt auf das VOD legen; Zuschauer-Clips und Stream-Marker liefert Twitch direkt mit ihrer Stelle im VOD (`vod_offset`). Kein Uhrzeit-Abgleich über Dateinamen nötig.
+- **Chat alter VODs:** Die offizielle Twitch-API liefert keinen Chat-Verlauf vergangener Streams. Mit einem inoffiziellen Weg (wie das Programm TwitchDownloader) ginge es – funktioniert meist, kann aber jederzeit brechen → optional, Daten ab sofort sammeln ist der sichere Weg.
+- **Automatischer VOD-Import (Idee):** Die Zentrale merkt Streamende, lädt das VOD selbst (yt-dlp, inoffizieller Download-Weg; offiziell gibt es nur den Download-Knopf im Twitch-Dashboard) in den `eingang` und verknüpft es mit Chat, Clips und Markern. Vorteil: nichts mehr von Hand, VODs verfallen nicht unbemerkt.
+- **Nur eine Tonspur:** Im VOD sind Stimme und Spiel gemischt → Mehrspur entfällt. Ersatz: Stimme per **Demucs** abtrennen (Power-PC, nach Freigabe; ohne PC: Tonfall nur aus der Mischspur, ungenauer). Option für später: OBS zusätzlich lokal mitschneiden lassen (bessere Bildqualität als das VOD, getrennte Spuren) – kostet beim Streamen Leistung, nur wenn der PC das schafft.
+- **Facecam ist ins Stream-Bild eingebrannt** → automatische Facecam-Erkennung bleibt wichtig.
+- **Neuer Tipp:** Während des Streams **Stream-Marker setzen** (Twitch-Befehl /marker oder Stream-Deck-Taste), wenn etwas Geiles passiert → die Zentrale nimmt diese Stellen als sichere Highlights.

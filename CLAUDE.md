@@ -280,7 +280,8 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   (Sofort-Fixes inkl. Speicher-Falle `concatGraph`, Hook-Text über Facecam, Mehrspur/Tonfall, 9er-Bildraster, Facecam-Erkennung) +
   Paket B (Twitch-Chat live per EventSub als Highlight-Signal, Zuschauer-Clips, Statistik-Zentrale, Top/Flop-Beispiele an Claude).
   PC: Kunde will die Grafikkarte **von Hand freigeben** (Modus „nur nach Freigabe“, Knopf + Desktop-Verknüpfung, Warteschlange, Abbruch bei OBS/Spiel bleibt).
-  Wartet auf „leg los“ und Antwort: Aufnahme parallel zum Stream? TikTok-Live über OBS?
+  **Quelle = Twitch-VOD** (lädt er von Twitch herunter, keine OBS-Aufnahme) → eine Tonspur (Stimme per Demucs auf dem PC), Chat/Clips/Marker
+  exakt aufs VOD, Idee automatischer VOD-Import (yt-dlp, inoffiziell). Wartet auf „leg los“; offen: TikTok-Live über OBS?
 - **Offen – Paket 4 Zusammenstellung (angeboten, Kunde will es):** „Best of“ aus mehreren Videos (Zeitraum/Auswahl, 16:9 oder 9:16, Claude
   ordnet Highlights, Platz-Einblendungen), später automatisch wöchentlich. Nach 1.18.0 als eigenes Paket bauen.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
