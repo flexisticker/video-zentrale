@@ -262,3 +262,10 @@ Michael nimmt nicht mit OBS auf, sondern lädt das VOD von Twitch herunter. Folg
 - **Nur eine Tonspur:** Im VOD sind Stimme und Spiel gemischt → Mehrspur entfällt. Ersatz: Stimme per **Demucs** abtrennen (Power-PC, nach Freigabe; ohne PC: Tonfall nur aus der Mischspur, ungenauer). Option für später: OBS zusätzlich lokal mitschneiden lassen (bessere Bildqualität als das VOD, getrennte Spuren) – kostet beim Streamen Leistung, nur wenn der PC das schafft.
 - **Facecam ist ins Stream-Bild eingebrannt** → automatische Facecam-Erkennung bleibt wichtig.
 - **Neuer Tipp:** Während des Streams **Stream-Marker setzen** (Twitch-Befehl /marker oder Stream-Deck-Taste), wenn etwas Geiles passiert → die Zentrale nimmt diese Stellen als sichere Highlights.
+
+### Nachtrag: OBS → Twitch, virtuelle Kamera → TikTok Live Studio (19.10.2026)
+- TikTok-Live ist dasselbe Bild wie Twitch → Twitch-VOD reicht als Quelle. TikTok-Live-Chat/-Wiederholungen haben keine offizielle Schnittstelle → nicht anbinden.
+- **Empfehlung (kostenlos, fast keine Mehrlast):** OBS beim Streamen **automatisch mitaufnehmen** lassen, mit dem **Stream-Encoder** („Stream-Encoder verwenden“) – dann wird nichts doppelt kodiert. Gewinn: getrennte Tonspuren (Stimme/Spiel, kein Demucs nötig), kein VOD-Download, keine stummgeschalteten Musikstellen wie im VOD. Der vorhandene **OBS-Sortierer** schiebt die Aufnahme danach automatisch in den Eingang. Chat-Abgleich dann über Aufnahmebeginn (= Streambeginn, weil automatisch gestartet).
+  - OBS: *Einstellungen → Ausgabe → Erweitert → Aufnahme*: Encoder „(Stream-Encoder verwenden)“, Format MKV, Audiospuren 1–3. *Einstellungen → Allgemein*: „Automatisch aufnehmen beim Streamen“. Spuren wie oben (Mikro 1+2, Spiel/Discord 1+3).
+  - Speicherbedarf: wie VOD, ca. 2,5–4 GB je Stunde bei 6000 kbit/s.
+- Ohne Mitaufnahme bleibt der VOD-Weg (Import + Demucs) – beides wird unterstützt.
