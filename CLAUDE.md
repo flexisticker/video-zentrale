@@ -355,6 +355,10 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   Rechenhelfer 1.7: `transformers==4.46.3` fest (uv-Auflösung für Windows geprüft: huggingface-hub 0.36, tokenizers 0.20), Marker `py-bereit-2.txt` (neue Einrichtung
   läuft automatisch, venv/torch bleiben), Selbsttest `is_torch_available()` + Import ASTForAudioClassification, Ergebnis aus Zeile `SELBSTTEST-OK …`.
   **Nicht auf torch 2.6 gehen:** dort `torch.load(weights_only=True)` als Standard → Demucs-Modelle laden evtl. nicht.
+- **Beim Kunden (19.10.2026, 20:29):** Rechenhelfer 1.7 läuft, PC-Analyse eingerichtet: Selbsttest OK (CUDA RTX 3070, torch 2.5.1+cu124, transformers 4.46.3),
+  Marker `py-bereit-2.txt`, Mutex greift. **Noch offen:** erster echter Analyse-Auftrag (Modelle ~600 MB laden, Laufzeit/VRAM Demucs/AST/EasyOCR) – Kunde schickt danach
+  das Protokoll. Schönheitsfehler fürs nächste Helfer-Update: „·“ erscheint im Log als „┬À“ (PowerShell liest Python-stdout als OEM-Codepage) → im Selbsttest „-“ nehmen
+  oder `[Console]::OutputEncoding = UTF8` setzen (auch für PROGRESS-Zeilen mit Umlauten prüfen). Häufige 502/Zeitlimits im Log = Zentrale kurz weg (Updates/NPM), Helfer fängt das ab.
 - Ideen danach: „Best of der Woche“ automatisch (Zeitplan), Platz-Einblendungen „Platz 3/2/1“.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
   Sendeplätze je Kanal **stellt der Kunde selbst ein** (keine festen Startzeiten), „Einplanen“ auf nächsten freien Platz, Shorts
