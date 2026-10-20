@@ -219,7 +219,7 @@ async function renderLong(v, file, keep, hasAudio, out, onP, track, teaser = nul
   const mInput = track ? ['-stream_loop', '-1', '-i', track.file] : [];
   const whole = keep.length === 1 && keep[0][0] === 0;
   // Schnell ohne Neukodieren nur, wenn nichts geschnitten wird oder ausdrücklich gewünscht (setzt an Keyframes an → kann ruckeln)
-  if (!teaser && (whole || cfg().longCopy)) {
+  if (!teaser && !v.mirror && (whole || cfg().longCopy)) {
     const audio = track ? ['-filter_complex', music.mixGraph({ hasVoice: hasAudio, dur: total, track }), '-map', '[aout]', '-c:a', 'aac', '-b:a', '192k', '-t', total.toFixed(2)]
       : hasAudio ? ['-map', '0:a:0', '-af', LOUDNORM, '-c:a', 'aac', '-b:a', '192k'] : [];
     let args;
@@ -237,14 +237,14 @@ async function renderLong(v, file, keep, hasAudio, out, onP, track, teaser = nul
   // Bildgenau und flüssig: gleichmäßige Bildrate, behaltene Abschnitte auswählen, Zeitstempel neu, Grafikkarte wenn möglich
   const fps = await probeFps(file);
   const expr = keep.map(([a, b]) => `between(t,${a.toFixed(3)},${b.toFixed(3)})`).join('+');
-  let g = `[0:v]fps=${fps},select='${expr}',setpts=N/(${fps}*TB)` + (teaser ? ',setsar=1[mv]' : '[v]');
+  let g = `[0:v]${v.mirror ? 'hflip,' : ''}fps=${fps},select='${expr}',setpts=N/(${fps}*TB)` + (teaser ? ',setsar=1[mv]' : '[v]');
   if (hasAudio) g += `;[0:a:0]aselect='${expr}',asetpts=N/SR/TB` + (teaser ? ',aformat=sample_rates=48000:channel_layouts=stereo[ma]' : '[va]');
   const tInput = [];
   if (teaser) {
     // Teaser als eigene Eingabe (gleiche Datei, nur die paar Sekunden) → vor die Langfassung setzen
     const ti = track ? 2 : 1;
     tInput.push('-ss', teaser.at.toFixed(3), '-t', teaser.len.toFixed(3), '-i', file);
-    g += `;[${ti}:v]fps=${fps},setpts=PTS-STARTPTS,setsar=1[tv]`;
+    g += `;[${ti}:v]${v.mirror ? 'hflip,' : ''}fps=${fps},setpts=PTS-STARTPTS,setsar=1[tv]`;
     if (hasAudio) g += `;[${ti}:a:0]asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo,afade=t=out:st=${Math.max(0, teaser.len - 0.15).toFixed(2)}:d=0.15[ta]`;
     g += `;[tv]${hasAudio ? '[ta]' : ''}[mv]${hasAudio ? '[ma]' : ''}concat=n=2:v=1:a=${hasAudio ? 1 : 0}[cv0]` + (hasAudio ? '[va]' : '');
     const hookAss = teaser.text && v.width ? buildHookAss(teaser.text, { until: Math.min(teaser.len, 4), width: v.width, height: v.height }) : '';
@@ -315,10 +315,12 @@ async function renderShort(v, file, s, hasAudio, out, onP, words, track, pro = f
   const fmt = pro ? (c.linkedin?.format === '16:9' && vertical ? '4:5' : c.linkedin?.format || '4:5') : '';
   const [W, H] = fmt === '1:1' ? [1080, 1080] : fmt === '4:5' ? [1080, 1350] : fmt === '16:9' ? [1920, 1080] : [1080, 1920];
   const even = (x) => Math.max(2, Math.round((x || 0) / 2) * 2);
-  const L = s.layout || defaultLayout();
+  // gespiegelte Aufnahme (Knopf „Spiegeln“): Bild vor Layout/Texten spiegeln, Facecam-Ausschnitt mitspiegeln
+  const mirror = !!v.mirror;
+  const L = mirror ? layout.mirrorLayout(s.layout || defaultLayout()) : (s.layout || defaultLayout());
   // Zoom-Punch verschiebt das ganze Bild – im Facecam-Layout würde die Facecam aus ihrem Ausschnitt rutschen → dort ohne Zoom
   const noZoom = !pro && !vertical && L.mode === 'cam';
-  const cg = fx.concatGraph(parts, { file, hasAudio, W0: v.width && !noZoom ? even(v.width) : 0, H0: v.height && !noZoom ? even(v.height) : 0 });
+  const cg = fx.concatGraph(parts, { file, hasAudio, mirror, W0: v.width && !noZoom ? even(v.width) : 0, H0: v.height && !noZoom ? even(v.height) : 0 });
   let graph = cg.graph + ';';
   const nIn = parts.length;   // Eingaben 0 … nIn-1 = Abschnitte, danach Musik, Emojis/Sticker, Sounds
   // Bildaufbau: Facecam oben / Ausschnitt um die Action / Blur (layout.js); Reaktionen = Facecam kurz groß
@@ -464,7 +466,7 @@ async function renderSummary(v, file, reel, hasAudio, out, onP, track, teaserTex
   reel.forEach((r, i) => {
     const d = Math.max(0.1, r.end - r.start);
     inputs.push('-ss', Math.max(0, r.start).toFixed(3), '-t', d.toFixed(3), '-i', file);
-    g += `[${i}:v:0]setpts=PTS-STARTPTS[v${i}];`;
+    g += `[${i}:v:0]${v.mirror ? 'hflip,' : ''}setpts=PTS-STARTPTS[v${i}];`;
     if (hasAudio) g += `[${i}:a:0]asetpts=PTS-STARTPTS,aresample=48000,apad,atrim=0:${d.toFixed(3)},afade=t=in:d=0.15,afade=t=out:st=${Math.max(0, d - 0.15).toFixed(3)}:d=0.15[a${i}];`;
   });
   g += reel.map((_, i) => `[v${i}]` + (hasAudio ? `[a${i}]` : '')).join('') + `concat=n=${reel.length}:v=1:a=${hasAudio ? 1 : 0}[cv${teaserText ? '0' : ''}]` + (hasAudio ? '[ca]' : '');
@@ -499,6 +501,7 @@ function publish(tmp, name, fields, raw) {
   const st = fs.statSync(path.join(lib.dirOf('geschnitten'), target));
   const nv = lib.newVideo('geschnitten', target);
   Object.assign(nv, { size: st.size, mtime: st.mtimeMs }, fields);
+  if (fields.source?.rawId && db().videos[fields.source.rawId]?.mirror) nv.mirror = true;
   // von Hand/über den Ordner gewählter Kanal gilt auch für die geschnittenen Videos
   if (raw?.channel) { nv.channel = raw.channel; nv.channelFrom = raw.channelFrom || 'roh'; }
   return nv;
@@ -765,7 +768,7 @@ async function next() {
   if (i < 0) { clearTimeout(windowTimer); if (queue.length) windowTimer = setTimeout(next, 60_000); return; }
   const [item] = queue.splice(i, 1);
   if (!item) return;
-  if (typeof item === 'object') return item.trailer ? runTrailer(item.trailer) : runRevision(item);
+  if (typeof item === 'object') return item.trailer ? runTrailer(item.trailer) : item.rerender ? runRerender(item.rerender) : item.flip ? runFlip(item.flip) : runRevision(item);
   const id = item;
   priority.delete(id);
   running = id;
@@ -787,6 +790,172 @@ async function next() {
     }
   } finally {
     for (const f of fs.existsSync(TMP) ? fs.readdirSync(TMP) : []) if (f.startsWith(id + '-')) fs.rmSync(path.join(TMP, f), { force: true });
+    running = null;
+    afterRun?.();
+    next();
+  }
+}
+
+// ---------- Neu rendern ohne Claude (Spiegeln, Text-Stil, Facecam-Korrektur) ----------
+// Gleicher Schnitt, gleiche Effekte, gleiche Musik – nur neu gerechnet; die Datei wird an Ort und Stelle ersetzt
+// (Titel, Texte, Titelbild bleiben). Bei Videos ohne Schnitt-Plan (eigene fertige Videos) wird die Datei selbst gespiegelt.
+export function rerenderable(v) {
+  if (!v || v.missing) return 'Videodatei nicht gefunden.';
+  if (v.source?.kind === 'trailer') return 'Trailer bitte neu erstellen – gespiegelte Rohvideos werden dabei richtig übernommen.';
+  if (['queued', 'running'].includes(v.rerender?.state) || ['queued', 'running'].includes(v.revise?.state)) return 'Wird gerade schon bearbeitet.';
+  if (['uploading', 'queued', 'processing'].includes(v.yt?.state) || ['uploading', 'queued', 'processing'].includes(v.tt?.state)) return 'Wird gerade hochgeladen.';
+  if (['short', 'long', 'summary'].includes(v.source?.kind)) {
+    const raw = db().videos[v.source.rawId];
+    if (!raw || raw.missing) return 'Das Rohvideo ist nicht mehr da – ohne Rohvideo kann nicht neu gerechnet werden.';
+  }
+  return '';
+}
+const isRaw = (v) => !v.source && ['eingang', 'eingang-profi', 'rohvideos'].includes(String(v.folder || '').split('/')[0]);
+export const childrenOf = (raw) => Object.values(db().videos).filter((x) => x.source?.rawId === raw.id && !x.missing && ['short', 'long', 'summary'].includes(x.source.kind)
+  && x.folder !== 'papierkorb' && !String(x.folder || '').startsWith('papierkorb'));
+export function enqueueRerender(v, reason) {
+  const why = rerenderable(v);
+  if (why) throw new Error(why);
+  v.rerender = { state: 'queued', reason, at: new Date().toISOString(), step: '', progress: 0 };
+  queue.push({ rerender: v.id });
+  save();
+  next();
+}
+// Spiegeln an/aus. Rohvideo: gilt für alle künftigen Schnitte (+ auf Wunsch die schon geschnittenen neu rechnen).
+// Geschnittenes Video: Rohvideo umschalten und dieses (auf Wunsch alle Geschwister) neu rechnen. Sonst Datei spiegeln.
+export function toggleMirror(v, { children = false } = {}) {
+  const queued = [];
+  if (isRaw(v)) {
+    v.mirror = !v.mirror;
+    save();
+    if (children) for (const c of childrenOf(v)) if (!!c.mirror !== v.mirror && !rerenderable(c)) { enqueueRerender(c, v.mirror ? 'Spiegeln' : 'Spiegeln aufheben'); queued.push(c.id); }
+    return { mirror: v.mirror, queued };
+  }
+  const why = rerenderable(v);
+  if (why) throw new Error(why);
+  const want = !v.mirror;
+  if (['short', 'long', 'summary'].includes(v.source?.kind)) {
+    const raw = db().videos[v.source.rawId];
+    raw.mirror = want;
+    enqueueRerender(v, want ? 'Spiegeln' : 'Spiegeln aufheben'); queued.push(v.id);
+    if (children) for (const c of childrenOf(raw)) if (c.id !== v.id && !!c.mirror !== want && !rerenderable(c)) { enqueueRerender(c, want ? 'Spiegeln' : 'Spiegeln aufheben'); queued.push(c.id); }
+    return { mirror: want, queued };
+  }
+  v.rerender = { state: 'queued', reason: want ? 'Spiegeln' : 'Spiegeln aufheben', at: new Date().toISOString(), step: '', progress: 0 };
+  queue.push({ flip: v.id });
+  save(); next();
+  return { mirror: want, queued: [v.id] };
+}
+
+// Musik des alten Renderings wiederfinden (gleicher Titel), sonst passend neu wählen
+async function sameTrack(out, profile, kind, seconds) {
+  const m = out.music;
+  if (!m) return null;
+  const lib1 = music.tracksFor(profile?.id).find((t) => t.name === m.name);
+  const file = lib1?.file || (m.kind === 'ai' ? path.join(music.musicDir(), 'ki', m.name) : null);
+  if (file && fs.existsSync(file)) return { file, kind: m.kind, name: m.name, mood: m.mood || '', lufs: await music.measure(file) };
+  try { return await music.trackFor({ profile, kind, seconds, idea: { mood: m.mood } }); } catch { return null; }
+}
+
+// Standbilder für Claude/Titelbilder stammen aus der alten Datei → weg, werden bei Bedarf neu gezogen
+function dropFrames(v) {
+  const dir = path.join(DATA_DIR, 'ki');
+  try { for (const f of fs.readdirSync(dir)) if (f.startsWith(v.id + '-') && f.endsWith('.jpg')) fs.rmSync(path.join(dir, f), { force: true }); } catch { /* egal */ }
+}
+
+function replaceFile(v, tmp) {
+  const target = lib.fileOf(v);
+  lib.moveFile(tmp, target);
+  const st = fs.statSync(target);
+  v.size = st.size; v.mtime = st.mtimeMs;
+  dropFrames(v);
+}
+
+async function runRerender(id) {
+  const out = db().videos[id];
+  running = 'rr-' + id;
+  const step = (s, progress = 0) => { out.rerender = { ...out.rerender, state: 'running', step: s, progress: Math.round(progress) }; save(); };
+  try {
+    if (!out) return;
+    const raw = db().videos[out.source.rawId];
+    const file = lib.fileOf(raw);
+    const src = out.source;
+    const profile = profiles.effective(out);
+    const pro = profiles.isPro(profile);
+    fs.mkdirSync(TMP, { recursive: true });
+    const tmp = path.join(TMP, `${raw.id}-rr-${out.id}${path.extname(out.file) || '.mp4'}`);
+    const words = whisper.loadWords(raw);
+    if (src.kind === 'short') {
+      step('Lautstärke messen');
+      const win = { from: Math.max(0, src.start - 10), span: src.end - src.start + 20 };
+      const { fine, hasAudio } = await loudness(file, raw.duration, win);
+      const s = { start: src.start, end: src.end, hook: src.hook || null, fx: src.fx || [], fxLevel: out.edit?.fxLevel, layout: src.layout || null, style: out.edit?.style || src.style };
+      s.parts = fx.buildParts({ start: s.start, end: s.end, hook: s.hook, words, fine: hasAudio ? fine : null, tempo: src.tempo || 'aus' });
+      step('Effekte vorbereiten');
+      await prepareFx(s, profile, (m) => { out.rerender.warning = m; });
+      const seconds = fx.totalLen(s.parts);
+      const track = await sameTrack(out, profile, 'short', seconds);
+      const onP = (p) => step('Neu rechnen', p);
+      step('Neu rechnen');
+      try { await renderShort(raw, file, s, hasAudio, tmp, onP, words, track, pro); }
+      catch (e) { if (!track) throw e; await renderShort(raw, file, s, hasAudio, tmp, onP, words, null, pro); }
+    } else {
+      const { fine, hasAudio } = await loudness(file, raw.duration);
+      void fine;
+      const keep = (src.kind === 'summary' ? src.parts : src.keep) || [];
+      if (!keep.length) throw new Error('Kein Schnitt-Plan gespeichert.');
+      const teaser = src.teaser || null;
+      const seconds = keep.reduce((x, [a, b]) => x + b - a, 0) + (teaser ? teaser.len : 0);
+      const track = await sameTrack(out, profile, 'long', seconds);
+      const onP = (p) => step('Neu rechnen', p);
+      step('Neu rechnen');
+      const render = async (t) => {
+        if (src.kind === 'summary') {
+          const reel = [...(teaser ? [{ start: teaser.at, end: teaser.at + teaser.len }] : []), ...keep.map(([a, b]) => ({ start: a, end: b }))];
+          await renderSummary(raw, file, reel, hasAudio, tmp, onP, t, teaser?.text || '', teaser?.len || 0);
+        } else await renderLong(raw, file, keep, hasAudio, tmp, onP, t, teaser);
+      };
+      try { await render(track); } catch (e) { if (!track) throw e; await render(null); }
+    }
+    step('Datei ersetzen');
+    replaceFile(out, tmp);
+    out.mirror = !!raw.mirror;
+    out.rerender = { ...out.rerender, state: 'done', step: '', progress: 100, doneAt: new Date().toISOString() };
+    saveNow();
+  } catch (e) {
+    console.error('Neu rechnen', out?.file, e);
+    if (out) { out.rerender = { ...out.rerender, state: 'error', error: e.message, step: '' }; saveNow(); }
+  } finally {
+    for (const f of fs.existsSync(TMP) ? fs.readdirSync(TMP) : []) if (f.includes(`-rr-${id}`)) fs.rmSync(path.join(TMP, f), { force: true });
+    running = null;
+    afterRun?.();
+    next();
+  }
+}
+
+// Eigenes fertiges Video ohne Schnitt-Plan: Bild spiegeln, Ton unverändert
+async function runFlip(id) {
+  const v = db().videos[id];
+  running = 'flip-' + id;
+  try {
+    if (!v) return;
+    const file = lib.fileOf(v);
+    fs.mkdirSync(TMP, { recursive: true });
+    const tmp = path.join(TMP, `${v.id}-flip${path.extname(v.file) || '.mp4'}`);
+    v.rerender = { ...v.rerender, state: 'running', step: 'Spiegeln', progress: 0 }; save();
+    const total = v.duration || 60;
+    const r = await gpu.encodeWithFallback((venc) => ffmpeg(['-i', file, '-map', '0:v:0', '-map', '0:a?', '-vf', 'hflip', ...venc, '-c:a', 'copy',
+      '-movflags', '+faststart', '-progress', 'pipe:1', '-y', tmp], progressFrom(total, (p) => { v.rerender.progress = Math.round(p); save(); })), { hq: true });
+    if (r.code !== 0) throw new Error('Spiegeln: ' + lastError(r));
+    replaceFile(v, tmp);
+    v.mirror = !v.mirror;
+    v.rerender = { ...v.rerender, state: 'done', step: '', progress: 100, doneAt: new Date().toISOString() };
+    saveNow();
+  } catch (e) {
+    console.error('Spiegeln', v?.file, e);
+    if (v) { v.rerender = { ...v.rerender, state: 'error', error: e.message, step: '' }; saveNow(); }
+  } finally {
+    for (const f of fs.existsSync(TMP) ? fs.readdirSync(TMP) : []) if (f.startsWith(`${id}-flip`)) fs.rmSync(path.join(TMP, f), { force: true });
     running = null;
     afterRun?.();
     next();

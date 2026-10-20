@@ -79,6 +79,12 @@ export function graph(input, output, { srcW, srcH, layout, reactions = [], W = 1
   return { graph: parts.join(';'), seam, mode: L.mode };
 }
 
+// Bildaufbau zu einer gespiegelten Quelle: Facecam und Fokus wandern auf die andere Seite
+export function mirrorLayout(L) {
+  if (!L) return L;
+  return { ...L, cam: L.cam ? { ...L.cam, x: clamp(1 - L.cam.x - L.cam.w, 0, 1) } : L.cam, focus: Number.isFinite(L.focus) ? 1 - L.focus : L.focus };
+}
+
 export function describe(L, reactions = 0) {
   const m = { cam: 'Facecam oben + Spiel', crop: 'Ausschnitt um die Action', blur: 'ganzes Bild + Blur-Hintergrund' }[L?.mode] || '';
   return m ? `Bild: ${m}${reactions ? `, ${reactions}× Reaktion groß` : ''}` : '';

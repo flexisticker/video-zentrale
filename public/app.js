@@ -659,7 +659,7 @@ function openDetail(id) {
   }
   const ensureSaved = async () => { if (!saveBtn.disabled) await saveFields(true); };
 
-  const player = h('video', { src: `/api/videos/${v.id}/file`, controls: true, preload: 'metadata', playsinline: true });
+  const player = h('video', { src: `/api/videos/${v.id}/file?v=${Math.round(v.mtime || 0)}`, controls: true, preload: 'metadata', playsinline: true });
   const cover = h('div', { class: 'cover' });
   const setCover = () => { cover.style.backgroundImage = v.hasImage ? `url("${imgUrl(v)}")` : 'none'; };
   setCover();
@@ -689,6 +689,7 @@ function openDetail(id) {
   const genBox = h('div', { class: 'section gen-thumbs' });
 
   const reviseBox = h('div');
+  const mirrorBox = h('div', { class: 'mirrorbox' });
   const left = h('div', {}, player,
     h('div', { class: 'coverbox' }, cover, h('div', { class: 'acts' },
       h('b', {}, 'Titelbild'),
@@ -698,6 +699,7 @@ function openDetail(id) {
       h('span', { class: 'hint' }, 'YouTube: 1280 × 720, max. 2 MB (wird automatisch angepasst).'), imgInput)),
     h('div', { class: 'meta', style: { marginTop: '10px' } },
       v.file, ' · ', fmtSize(v.size), v.width ? ` · ${v.width} × ${v.height}` : '', v.duration ? ' · ' + fmtDur(v.duration) : ''),
+    mirrorBox,
     genBox, reviseBox,
     h('div', { style: { marginTop: '10px' } }, moveBox), cutBox, transcriptBox);
 
@@ -741,7 +743,7 @@ function openDetail(id) {
     right.querySelector('.tt-part').style.display = pro ? 'none' : '';
     cat.parentElement.style.display = pro ? 'none' : '';
   };
-  detail = { id, cutBox, transcriptBox, v, ytBox, ttBox, moveBox, folderEl, ensureSaved, chanInfo, chan, aiBox, genBox, reviseBox, f, applyMode, setField, setCover, setCoverFromFrame, isDirty: () => !saveBtn.disabled, markClean: () => { saveBtn.disabled = true; }, cleanup: () => document.removeEventListener('keydown', onKey) };
+  detail = { id, cutBox, transcriptBox, v, ytBox, ttBox, moveBox, folderEl, ensureSaved, chanInfo, chan, aiBox, genBox, reviseBox, mirrorBox, player, f, applyMode, setField, setCover, setCoverFromFrame, isDirty: () => !saveBtn.disabled, markClean: () => { saveBtn.disabled = true; }, cleanup: () => document.removeEventListener('keydown', onKey) };
   updateDetail();
 }
 
@@ -1183,6 +1185,12 @@ function updateDetail(force) {
   if (v.hasTranscript !== detail.hasTranscript) { detail.hasTranscript = v.hasTranscript; renderTranscript(detail.transcriptBox, v); }
   const revSig = JSON.stringify([v.revise, v.edit, v.revisionOf, v.revisionKept, v.canRevise, v.folder]);
   if (force || revSig !== detail.revSig) { detail.revSig = revSig; renderRevise(detail.reviseBox, v); }
+  const mirSig = JSON.stringify([v.rerender, v.mirror, v.canMirror, v.mirrorSiblings, v.mtime]);
+  if (force || mirSig !== detail.mirSig) {
+    // neu gerechnet → Video neu laden (gleiche Adresse, neue Datei)
+    if (detail.mirSig && v.rerender?.state === 'done' && JSON.parse(detail.mirSig)[0]?.state !== 'done') detail.player.src = `/api/videos/${v.id}/file?v=${Math.round(v.mtime || Date.now())}`;
+    detail.mirSig = mirSig; renderMirror(detail.mirrorBox, v);
+  }
   const aiChanged = force === true || JSON.stringify([v.ai || null, v.thumbVariantsAt || 0, v.revise || null, v.viral || null, v.qc || null, v.perf || null]) !== detail.aiSeen;
   if (aiChanged) {
     detail.aiSeen = JSON.stringify([v.ai || null, v.thumbVariantsAt || 0, v.revise || null, v.viral || null, v.qc || null, v.perf || null]);
@@ -1334,6 +1342,44 @@ const REVISE_CHIPS = ['Hook stärker – mit dem Höhepunkt einsteigen', 'Kürze
   'Ohne Musik', 'Andere Stelle aus dem Video nehmen', 'Weniger Schnitte, ruhiger', 'Mehr Effekte (Emojis, Sounds)', 'Weniger Effekte', 'Ohne Effekte'];
 const REVISE_CHIPS_LONG = ['Intro raus (Lobby, Ladebildschirm, Menü, Warten)', 'Langweilige Stellen raus', 'Nur die besten Stellen – deutlich kürzer',
   'Teaser mit dem Höhepunkt am Anfang', 'Weniger Pausen (schneller)', 'Outro/Ende kürzen', 'Ohne Musik', 'Mit Musik'];
+// 🪞 Spiegeln: Bild waagerecht spiegeln (z. B. gespiegelte Facecam/Schrift). Erzeugte Texte bleiben lesbar.
+function renderMirror(box, v) {
+  const st = v.rerender?.state;
+  const kids = [];
+  if (st === 'queued' || st === 'running') {
+    kids.push(h('div', { class: 'status' }, '🪞 ' + (v.rerender.reason || 'Neu rechnen') + ': ' + (st === 'queued' ? 'wartet …' : (v.rerender.step || 'läuft') + ' …') + (v.rerender.progress ? ` ${v.rerender.progress} %` : '')),
+      h('div', { class: 'bar-progress' }, h('i', { style: { width: (v.rerender.progress || 0) + '%' } })));
+    box.replaceChildren(...kids);
+    return;
+  }
+  if (st === 'error') kids.push(h('p', { class: 'err' }, '✗ ' + v.rerender.error));
+  if (st === 'done' && v.rerender.doneAt && Date.now() - Date.parse(v.rerender.doneAt) < 10 * 60e3) kids.push(h('p', { class: 'ok-text' }, '✓ ' + (v.rerender.reason || 'Neu gerechnet') + ' – fertig.'));
+  const isRawV = !v.source && ['eingang', 'eingang-profi', 'rohvideos'].includes(String(v.folder || '').split('/')[0]);
+  const sib = v.mirrorSiblings || 0;
+  const children = sib > 0 ? h('input', { type: 'checkbox', checked: isRawV }) : null;
+  const run = async () => {
+    try {
+      const r = await api('POST', `/api/videos/${v.id}/mirror`, { children: !!children?.checked });
+      Object.assign(v, r);
+      const n = r.mirrorResult?.queued?.length || 0;
+      toast(isRawV ? (r.mirror ? 'Rohvideo wird beim Schneiden gespiegelt.' : 'Spiegeln aufgehoben.') + (n ? ` ${n} Video(s) werden neu gerechnet.` : '')
+        : (n > 1 ? `${n} Videos werden neu gerechnet.` : 'Wird neu gerechnet …'));
+      await refresh(); updateDetail(true); pollActivity(); startPolling();
+    } catch (x) { toast(x.message, true); }
+  };
+  if (v.canMirror !== true && !isRawV) kids.push(h('span', { class: 'hint' }, '🪞 ' + v.canMirror));
+  else {
+    kids.push(h('div', { class: 'row', style: { alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
+      h('button', { class: 'btn small' + (v.mirror ? ' primary' : ''), onclick: run }, v.mirror ? '🪞 Gespiegelt – zurückspiegeln' : '🪞 Video spiegeln'),
+      children ? h('label', { class: 'hint', style: { display: 'flex', alignItems: 'center', gap: '4px' } }, children,
+        isRawV ? `auch die ${sib} schon geschnittenen Videos neu rechnen` : `auch die ${sib} anderen Videos dieser Aufnahme`) : null),
+      h('p', { class: 'hint' }, isRawV ? 'Gilt für alle Schnitte und Überarbeitungen aus dieser Aufnahme. Untertitel, Hook-Texte und Effekte bleiben lesbar.'
+        : v.source ? 'Rechnet das Video mit gleichem Schnitt neu – nur das Bild wird gespiegelt, Untertitel und Texte bleiben lesbar. Dauert etwa so lange wie der Schnitt.'
+          : 'Spiegelt das Bild der Datei (Ton bleibt).'));
+  }
+  box.replaceChildren(...kids);
+}
+
 function renderRevise(box, v) {
   const act = (fn, msg) => async () => { try { if ((await fn()) !== false && msg) toast(msg); } catch (x) { toast(x.message, true); } };
   const kids = [];

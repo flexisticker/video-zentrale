@@ -120,6 +120,8 @@ function publicVideo(v) {
     transcriptText: undefined, hasTranscript: !!v.transcriptText,
     imageVersion: v.image ? (v.imageAt || v.mtime) : v.thumbAt, hasImage: !!lib.imagePath(v),
     canRevise: ['short', 'long', 'summary'].includes(v.source?.kind) ? autocut.revisable(v) || true : undefined,
+    canMirror: autocut.rerenderable(v) || true,
+    mirrorSiblings: v.source?.rawId && db().videos[v.source.rawId] ? autocut.childrenOf(db().videos[v.source.rawId]).length - 1 : !v.source ? autocut.childrenOf(v).length : 0,
     topic: org.topicOf(v) };
 }
 
@@ -316,6 +318,8 @@ async function api(req, res, url) {
       } else if (v.cut?.state === 'queued') queue.cut++;
       if (v.revise?.state === 'running') server.push({ id: v.id, kind: 'cut', name: name(v), step: '🔁 Überarbeiten: ' + (v.revise.step || 'läuft'), progress: v.revise.progress || 0, waiting: /Rechenhelfer/.test(v.revise.step || '') });
       else if (v.revise?.state === 'queued') queue.cut++;
+      if (v.rerender?.state === 'running') server.push({ id: v.id, kind: 'cut', name: name(v), step: '🪞 ' + (v.rerender.reason || 'Neu rechnen') + ': ' + (v.rerender.step || 'läuft'), progress: v.rerender.progress || 0 });
+      else if (v.rerender?.state === 'queued') queue.cut++;
       if (v.ai?.state === 'running') server.push({ id: v.id, kind: 'ai', name: name(v), step: 'Claude schreibt Vorschläge' });
       else if (v.ai?.state === 'queued') queue.ai++;
       for (const [k, label] of [['yt', 'YouTube'], ['tt', 'TikTok']]) {
@@ -473,6 +477,13 @@ async function api(req, res, url) {
       lib.moveVideo(v, 'papierkorb');
       v.trash = { from, at: new Date().toISOString() }; saveNow();
       return send(res, 200, publicVideo(v));
+    }
+    // Spiegeln (Bild waagerecht; erzeugte Texte bleiben lesbar). children = übrige Videos derselben Aufnahme mitziehen
+    if (sub === '/mirror' && m === 'POST') {
+      const b = await readJson(req);
+      let r;
+      try { r = autocut.toggleMirror(v, { children: !!b.children }); } catch (e) { throw new HttpError(409, e.message); }
+      return send(res, 200, { ...publicVideo(v), mirrorResult: r });
     }
     // Überarbeiten: Short nach Wunsch aus dem Rohvideo neu schneiden (neue Fassung „v2“ daneben)
     if (sub === '/revise' && m === 'POST') {

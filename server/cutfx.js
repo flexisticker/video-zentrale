@@ -146,7 +146,9 @@ export function hookTextUntil(parts, hook) {
 // ffmpeg-Filter: Abschnitte schneiden und zusammensetzen → { graph ([cv] + [ca]), inputs (ffmpeg-Argumente) }.
 // Jeder Abschnitt ist eine eigene Eingabe (-ss/-t auf die Datei): hingen alle Teile an einer Eingabe und stand die
 // Hook-Vorschau vorne, musste ffmpeg alle übrigen Teile bis zum Ende der Vorschau als Rohbilder puffern (mehrere GB).
-export function concatGraph(parts, { file, hasAudio, W0, H0 }) {
+// mirror = Quelle waagerecht spiegeln (gespiegelte Aufnahme) – passiert vor allen Texten/Effekten, die bleiben lesbar
+export function concatGraph(parts, { file, hasAudio, W0, H0, mirror = false }) {
+  const hf = mirror ? 'hflip,' : '';
   let g = '';
   const inputs = [];
   parts.forEach((p, i) => {
@@ -159,12 +161,12 @@ export function concatGraph(parts, { file, hasAudio, W0, H0 }) {
     inputs.push('-ss', Math.max(0, p.a).toFixed(3), '-t', len.toFixed(3), '-i', file);
     if (p.freeze) {
       // Standbild: ein Bild halten, entsättigt (wirkt wie „Pause“)
-      g += `[${i}:v:0]trim=end=0.05,setpts=PTS-STARTPTS,fps=30${z},eq=saturation=0.35,`
+      g += `[${i}:v:0]${hf}trim=end=0.05,setpts=PTS-STARTPTS,fps=30${z},eq=saturation=0.35,`
         + `tpad=stop_mode=clone:stop_duration=${p.freeze},trim=duration=${p.freeze},setsar=1[v${i}];`;
       if (hasAudio) g += `aevalsrc=0|0:s=48000:d=${p.freeze}[a${i}];`;
       return;
     }
-    g += `[${i}:v:0]setpts=PTS-STARTPTS,fps=30${z}${rev}${speed},fps=30,setsar=1[v${i}];`;
+    g += `[${i}:v:0]${hf}setpts=PTS-STARTPTS,fps=30${z}${rev}${speed},fps=30,setsar=1[v${i}];`;
     if (hasAudio) {
       const d = partLen(p).toFixed(3);
       const ar = p.rev ? ',areverse,atempo=2,atempo=1.5,volume=0.5' : p.speed ? `,atempo=${Math.max(0.5, p.speed)}` : '';

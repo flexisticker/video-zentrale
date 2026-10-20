@@ -97,7 +97,7 @@ function candidates(profileId, days) {
       topic: v.topic || raw?.ai?.game || v.ai?.game || '', rawId: useRaw ? raw.id : null,
       file: useRaw ? lib.fileOf(raw) : lib.fileOf(v), start: useRaw ? v.source.start : 0, end: useRaw ? v.source.end : (v.duration || 30),
       vertical: useRaw ? raw.height > raw.width : true, fromShort: !useRaw, w: useRaw ? raw.width : v.width, h: useRaw ? raw.height : v.height,
-      layout: v.source.layout || v.edit?.layout || null, text: v.transcriptText || '' });
+      mirror: useRaw && !!raw.mirror, layout: v.source.layout || v.edit?.layout || null, text: v.transcriptText || '' });
     if (out.length >= 60) break;
   }
   return out;
@@ -178,11 +178,12 @@ const assClean = (t) => String(t).replace(/[{}\\]/g, '').trim();
 // Bild eines Moments auf das Zielformat bringen (eigene Label-Namen je Moment)
 function frameFilter(seg, i, W, H) {
   const c = seg.cand;
-  const pre = `[${i}:v:0]setpts=PTS-STARTPTS,fps=30,setsar=1`;
+  const pre = `[${i}:v:0]${c.mirror ? 'hflip,' : ''}setpts=PTS-STARTPTS,fps=30,setsar=1`;
   const even = (x) => Math.max(2, Math.round(x / 2) * 2);
   if (W < H) {   // Hochformat-Ziel
     if (c.vertical || !c.w) return `${pre},scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}[s${i}];`;
-    const L = c.layout?.mode ? c.layout : { mode: 'crop', focus: 0.5 };
+    const L0 = c.layout?.mode ? c.layout : { mode: 'crop', focus: 0.5 };
+    const L = c.mirror ? layout.mirrorLayout(L0) : L0;
     const g = layout.graph(`x${i}`, `s${i}`, { srcW: even(c.w), srcH: even(c.h), layout: L, W, H }).graph
       .replace(/\[(m0|ma|mb|top|bot|bg|fg|r0|ra|rb|rt|rbt|big|norm)\]/g, `[t${i}$1]`);
     return `${pre}[x${i}];${g};`;
