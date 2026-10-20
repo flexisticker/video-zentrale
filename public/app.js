@@ -158,7 +158,7 @@ async function boot() {
     if (r === 'ok') toast('TikTok verbunden' + (q.get('kanal') ? ' für „' + q.get('kanal') + '“.' : '.')); else toast('TikTok: ' + r, true);
   }
   readHash();
-  await Promise.all([refresh(), loadSettings(), loadVersion()]);
+  await Promise.all([refresh(), loadSettings(), loadVersion(), loadCaptionStyles()]);
   render();
   maybeShowChangelog();
   startPolling();
@@ -1343,6 +1343,28 @@ const REVISE_CHIPS = ['Hook stärker – mit dem Höhepunkt einsteigen', 'Kürze
   'Ohne Musik', 'Andere Stelle aus dem Video nehmen', 'Weniger Schnitte, ruhiger', 'Mehr Effekte (Emojis, Sounds)', 'Weniger Effekte', 'Ohne Effekte'];
 const REVISE_CHIPS_LONG = ['Intro raus (Lobby, Ladebildschirm, Menü, Warten)', 'Langweilige Stellen raus', 'Nur die besten Stellen – deutlich kürzer',
   'Teaser mit dem Höhepunkt am Anfang', 'Weniger Pausen (schneller)', 'Outro/Ende kürzen', 'Ohne Musik', 'Mit Musik'];
+// Text-Vorlagen (vom Server einmal geladen)
+const CAP = { styles: [], looks: [] };
+async function loadCaptionStyles() { try { Object.assign(CAP, await api('GET', '/api/caption-styles')); } catch { /* egal */ } }
+// Galerie: alle Untertitel-Stile als bewegte Vorschau; onPick(styleId, hookLook)
+function styleGallery(onPick, current = {}) {
+  const close = () => modal.remove();
+  let look = current.hookLook && current.hookLook !== 'auto' ? current.hookLook : 'kasten';
+  const grid = h('div', { class: 'stylegrid' });
+  const fill = () => grid.replaceChildren(...CAP.styles.map((x) => h('button', { class: 'stylecard' + (current.style === x.id ? ' sel' : ''), onclick: () => { onPick(x.id, look); close(); } },
+    h('div', { class: 'stylethumb', style: { backgroundImage: `url("/api/caption-preview/${x.id}?look=${look}&poster=1")` } },
+      h('video', { src: `/api/caption-preview/${x.id}?look=${look}`, autoplay: true, muted: true, loop: true, playsinline: true, preload: 'auto', onplaying: (e) => e.target.classList.add('on') })),
+    h('b', {}, x.name), h('span', { class: 'hint' }, x.desc))));
+  const looks = h('div', { class: 'chips' }, h('span', { class: 'hint' }, 'Hook-Look:'), CAP.looks.map((x) => h('button', { class: 'chip-btn' + (x.id === look ? ' on' : ''), onclick: (e) => {
+    look = x.id; for (const b of looks.querySelectorAll('.chip-btn')) b.classList.toggle('on', b === e.currentTarget); fill();
+  } }, x.name)));
+  fill();
+  const modal = h('div', { class: 'modal sheetmodal', onclick: (e) => { if (e.target === modal) close(); } },
+    h('div', { class: 'sheet wide' }, h('button', { class: 'close', onclick: close, title: 'Schließen' }, '×'), h('h2', {}, '🔤 Text-Vorlagen'),
+      h('p', { class: 'hint' }, 'Antippen zum Auswählen. Die Vorschau zeigt Untertitel und Hook-Text (Schlüsselwörter wie „3“ und „Gegner“ werden hervorgehoben).'), looks, grid));
+  document.body.append(modal);
+}
+
 // Titelbild als erstes Bild ins Video (beim Hochladen, Original bleibt)
 function coverFrameSel(v) {
   const chan = profilesList().find((p) => p.id === (v.channel || v.suggestion?.id));
@@ -1381,6 +1403,17 @@ function renderMirror(box, v) {
       await refresh(); updateDetail(true); pollActivity(); startPolling();
     } catch (x) { toast(x.message, true); }
   };
+  // Text-Stil eines Shorts: andere Vorlage wählen → gleicher Schnitt, neu gerechnet
+  if (v.source?.kind === 'short' && v.edit?.style && v.canMirror === true) {
+    const cur = CAP.styles.find((x) => x.id === v.edit.style);
+    const look = CAP.looks.find((x) => x.id === v.edit.hookLook);
+    kids.push(h('div', { class: 'row', style: { alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '6px' } },
+      h('span', { class: 'hint' }, `🔤 Text: ${cur?.name || v.edit.style}${look ? ' · Hook: ' + look.name : ''}`),
+      h('button', { class: 'btn small', onclick: () => styleGallery(async (style, hookLook) => {
+        try { Object.assign(v, await api('POST', `/api/videos/${v.id}/text-style`, { style, hookLook })); toast('Wird mit neuem Text-Stil neu gerechnet …'); await refresh(); updateDetail(true); pollActivity(); startPolling(); }
+        catch (x) { toast(x.message, true); }
+      }, v.edit) }, '🔤 Text-Stil ändern')));
+  }
   if (v.canMirror !== true && !isRawV) kids.push(h('span', { class: 'hint' }, '🪞 ' + v.canMirror));
   else {
     kids.push(h('div', { class: 'row', style: { alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
@@ -1786,12 +1819,16 @@ async function renderSettings() {
     const fxSel = h('select', {}, Object.entries({ aus: 'aus', dezent: 'dezent (wenige Emojis/Sounds)', normal: 'normal (+ Freeze, Zeitlupe, Zoom, Wackeln)', viel: 'viel (+ KI-Sticker)' })
       .map(([k, n]) => h('option', { value: k, selected: (p.fxLevel || 'normal') === k }, n)));
     const fxImg = h('input', { type: 'checkbox', checked: !!p.fxImages });
+    const capSel = h('select', {}, h('option', { value: 'auto', selected: (p.captionStyle || 'auto') === 'auto' }, 'Claude wählt je Clip passend'),
+      (CAP.styles || []).map((x) => h('option', { value: x.id, selected: p.captionStyle === x.id }, `${x.name} – ${x.desc}`)));
+    const lookSel = h('select', {}, h('option', { value: 'auto', selected: (p.hookLook || 'auto') === 'auto' }, 'Claude wählt je Clip'),
+      (CAP.looks || []).map((x) => h('option', { value: x.id, selected: p.hookLook === x.id }, x.name)));
     const coverSel = h('select', {}, Object.entries({ aus: 'aus', bild: 'als erstes Bild (unsichtbar beim Abspielen)', kurz: '0,4 Sekunden stehend' })
       .map(([k, n]) => h('option', { value: k, selected: (p.coverFrame || 'aus') === k }, n)));
     const save = run(() => api('PUT', '/api/profiles/' + p.id, { name: name.value, color: color.value, isDefault: def.checked || undefined,
       keywords: kw.value, aiStyle: style.value, category: cat.value, tags: tags.value, footer: footer.value,
       musicStyle: mStyle.value, musicMood: mMood.value, clipHints: clipHints.value, shorts: chShorts.value === '' ? null : Number(chShorts.value),
-      hookStyle: hookSel.value, tempo: tempoSel.value, hookHint: hookHint.value, fxLevel: fxSel.value, fxImages: fxImg.checked, coverFrame: coverSel.value,
+      hookStyle: hookSel.value, tempo: tempoSel.value, hookHint: hookHint.value, fxLevel: fxSel.value, fxImages: fxImg.checked, coverFrame: coverSel.value, captionStyle: capSel.value, hookLook: lookSel.value,
       ...(isPro(p) ? { music: proMusic.checked } : {}) }), 'Kanal gespeichert.');
 
     // YouTube
@@ -1852,6 +1889,9 @@ async function renderSettings() {
       h('label', {}, 'Hinweis zum Hook für Claude'), hookHint,
       h('div', { class: 'two' }, h('div', {}, h('label', {}, '🎉 Effekte in Clips (Emojis, Sounds, Freeze …)'), fxSel),
         h('div', {}, h('label', { class: 'check', style: { marginTop: '22px' } }, fxImg, 'KI-Sticker aus meinen Fotos (Stufe „viel“, ca. 5 Cent)'))),
+      isPro(p) ? null : h('div', { class: 'two' }, h('div', {}, h('label', {}, '🔤 Untertitel-Stil'), capSel),
+        h('div', {}, h('label', {}, '💬 Look des Hook-Texts'), lookSel,
+          h('button', { class: 'btn small', style: { marginTop: '6px' }, onclick: () => styleGallery((id, look) => { capSel.value = id; if (look) lookSel.value = look; toast('Übernommen – bitte Kanal speichern.'); }) }, '👀 Vorlagen ansehen'))),
       h('div', { class: 'two' }, h('div', {}, h('label', {}, '🖼 Titelbild vorne ins Video (beim Hochladen)'), coverSel),
         h('div', { class: 'hint', style: { marginTop: '22px' } }, 'Vorschauen (Shorts, TikTok, WhatsApp) zeigen dann dein Titelbild. Je Video änderbar.')),
       h('div', { class: 'two' }, h('div', {}, h('label', {}, '🎵 Musikstil für KI-Musik'), mStyle), h('div', {}, h('label', {}, 'Stimmung (Langfassung)'), mMood)),

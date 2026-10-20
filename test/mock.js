@@ -233,6 +233,7 @@ const server = http.createServer(async (req, res) => {
         tempo: 'schnell', music: !/ohne musik/i.test(wish), changes: 'Ich steige jetzt mit dem Knall ein und habe den Leerlauf am Ende gekürzt.',
         viral: 8, viralWhy: 'Stärkerer Einstieg.', viralTip: 'Titel als Frage formulieren.',
         layout: { mode: 'cam', camX: 70, camY: 4, camW: 28, camH: 28, focus: 35 },
+        text: { style: /karaoke/i.test(wish) ? 'karaoke' : 'box', hookLook: 'umriss', emph: [{ word: 'Alter', emoji: '🔥' }] },
         fx: [{ at: a + 6, kind: 'cam', emoji: '', sound: '', soundIdea: '', text: '', pos: 'mitte', sticker: '' }] };
       log.push({ reviseExtra: { layoutRules: /BILDAUFBAU/.test(t0), prevLayout: /Bisheriger Bildaufbau/.test(t0), tone: /\((laut|LACHEN|schnell)/.test(t0) } });
       return json(res, 200, { id: 'msg_r', type: 'message', role: 'assistant', model: j.model, stop_reason: 'end_turn',
@@ -255,6 +256,7 @@ const server = http.createServer(async (req, res) => {
         viral: i ? 6 : 9, viralWhy: i ? 'Solider Sieg-Moment, aber bekannter Ablauf.' : 'Lauter Ausraster mit Pointe – hoher Teilwert.', viralTip: 'Mit dem Ausruf direkt einsteigen.',
         hook: { mode: i ? 'cold' : 'preview', at: a + 1 + Math.round((b2 - a - 3) * 0.7), len: 2, text: i ? 'Das gibt es nicht!' : 'Wie konnte das passieren?' },
         layout: i ? { mode: 'blur', camX: 0, camY: 0, camW: 0, camH: 0, focus: 50 } : { mode: 'cam', camX: 70, camY: 4, camW: 28, camH: 28, focus: 40 },
+        text: i ? { style: 'neon', hookLook: 'neon', emph: [{ word: 'Sieg', emoji: '🏆' }] } : { style: 'hormozi', hookLook: 'banner', emph: [{ word: 'Alter', emoji: '😱' }, { word: 'nein', emoji: '' }, { word: 'rüber', emoji: '' }] },
         fx: i ? [
           { at: a + 5, kind: 'punch', emoji: '', sound: '', soundIdea: '', text: '', pos: 'mitte', sticker: '' },
           { at: a + 9, kind: 'flash', emoji: '', sound: 'boom', soundIdea: '', text: '', pos: 'mitte', sticker: '' },

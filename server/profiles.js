@@ -1,5 +1,6 @@
 // Kanäle (z. B. MichaModus = Gaming, 3dbymicha = gewerblich): je eigene YouTube-/TikTok-Verbindung und Vorgaben.
 // Vorschlag, wohin ein Video gehört: Angabe aus der .json › Stichwörter in Titel/Datei/Tags › Standardkanal.
+import { STYLES, HOOK_LOOKS } from './captions.js';
 import crypto from 'node:crypto';
 import { db, saveNow, emptyConnections } from './store.js';
 
@@ -57,7 +58,7 @@ export function publicProfile(p) {
     clipHints: p.clipHints || '', shorts: Number.isFinite(p.shorts) ? p.shorts : null,
     hookStyle: p.hookStyle || 'auto', tempo: p.tempo || 'normal', hookHint: p.hookHint || '',
     fxLevel: p.fxLevel || 'normal', fxImages: !!p.fxImages,
-    coverFrame: p.coverFrame || 'aus',
+    coverFrame: p.coverFrame || 'aus', captionStyle: p.captionStyle || 'auto', hookLook: p.hookLook || 'auto',
     logo: p.logo || null,
     category: p.category || '20', tags: p.tags || '', footer: p.footer || '',
     youtube: { connected: !!p.youtube?.refreshToken, channel: p.youtube?.channel || null },
@@ -79,6 +80,8 @@ export function update(id, b) {
   if (['aus', 'dezent', 'normal', 'viel'].includes(b.fxLevel)) p.fxLevel = b.fxLevel;
   if (typeof b.fxImages === 'boolean') p.fxImages = b.fxImages;
   if (['aus', 'bild', 'kurz'].includes(b.coverFrame)) p.coverFrame = b.coverFrame;
+  if (b.captionStyle === 'auto' || STYLES[b.captionStyle]) p.captionStyle = b.captionStyle;
+  if (b.hookLook === 'auto' || HOOK_LOOKS[b.hookLook]) p.hookLook = b.hookLook;
   if ('shorts' in b) p.shorts = b.shorts === null || b.shorts === '' ? undefined : Math.max(0, Math.min(10, Math.round(Number(b.shorts)) || 0));
   if (typeof b.music === 'boolean') p.music = b.music;
   if ('musicMood' in b && ['', 'episch', 'lustig', 'spannend', 'chillig', 'energisch', 'fröhlich', 'traurig'].includes(b.musicMood)) p.musicMood = b.musicMood;

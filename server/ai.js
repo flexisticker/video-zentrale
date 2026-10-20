@@ -14,6 +14,7 @@ import * as sfx from './sfx.js';
 import * as credits from './credits.js';
 import * as bounds from './bounds.js';
 import * as vision from './vision.js';
+import { STYLES, STYLE_IDS, HOOK_LOOKS } from './captions.js';
 
 const MODEL = 'claude-opus-5-5';
 const FRAMES = [0.08, 0.25, 0.42, 0.58, 0.75, 0.92];
@@ -357,6 +358,29 @@ const FX_RULES = (level, stickers) => {
   ].join('\n');
 };
 
+// Text-Vorlagen je Clip (captions.js): Untertitel-Stil, Look des Hook-Texts, Schlüsselwörter (farbig, größer, ggf. mit Emoji)
+const TEXT_SCHEMA = { type: 'object', additionalProperties: false, required: ['style', 'hookLook', 'emph'], properties: {
+  style: { type: 'string', enum: STYLE_IDS, description: 'Untertitel-Stil' },
+  hookLook: { type: 'string', enum: Object.keys(HOOK_LOOKS), description: 'Look des Hook-Texts' },
+  emph: { type: 'array', description: '2–6 Schlüsselwörter, genau so geschrieben wie gesprochen (einzelne Wörter)', items: { type: 'object', additionalProperties: false,
+    required: ['word', 'emoji'], properties: { word: { type: 'string' }, emoji: { type: 'string', description: 'passendes Emoji aus der Effekt-Liste oder leer (höchstens 2 je Clip mit Emoji)' } } } },
+} };
+const TEXT_RULES = (profile) => {
+  const fixed = STYLES[profile?.captionStyle] ? profile.captionStyle : '';
+  const look = HOOK_LOOKS[profile?.hookLook] ? profile.hookLook : '';
+  return [
+    'TEXT (text) – Untertitel wie bei StreamLadder/Opus Clip:',
+    fixed ? `Stil ist fest eingestellt: gib style "${fixed}".` : 'Wähle den Untertitel-Stil passend zur Stimmung des Clips: ' + STYLE_IDS.map((k) => `${k} (${STYLES[k].desc})`).join('; ') + '.',
+    look ? `Hook-Look fest: "${look}".` : 'Hook-Look: kasten (neutral), banner (laut, frech), umriss (groß, episch), neon (Nacht/Chill/Party).',
+    'emph: die 2–6 Wörter, die beim Zuhören am meisten knallen (Zahlen, Namen, Ausrufe, Pointe) – werden farbig und größer. Emoji nur, wenn es den Moment wirklich unterstreicht.',
+  ].join('\n');
+};
+export function parseText(t) {
+  if (!t || typeof t !== 'object') return null;
+  return { style: STYLES[t.style] ? t.style : '', hookLook: HOOK_LOOKS[t.hookLook] ? t.hookLook : '',
+    emph: (Array.isArray(t.emph) ? t.emph : []).slice(0, 8).map((x) => ({ word: String(x?.word || '').slice(0, 40), emoji: String(x?.emoji || '').slice(0, 8) })).filter((x) => x.word) };
+}
+
 // Hook: der Moment, der in den ersten 1–2 Sekunden fesselt (für Shorts – siehe cutfx.js)
 const HOOK_SCHEMA = { type: 'object', additionalProperties: false, required: ['mode', 'at', 'len', 'text'], properties: {
   mode: { type: 'string', enum: ['preview', 'cold', 'none'], description: 'preview = Höhepunkt 1–2,5 s vorweg zeigen, dann zurückspulen und den Clip von vorn; cold = Clip direkt kurz vor dem Höhepunkt beginnen (Anlauf weg); none = Anfang ist schon stark' },
@@ -451,6 +475,7 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '', op
     wish ? `WICHTIG – Wunsch des Creators für diesen Schnitt: „${wish}“. Richte die Auswahl danach aus (auch wenn dadurch weniger Shorts entstehen).` : '',
     HOOK_RULES(pro, profile),
     FX_RULES(fxLevelOf(profile), fxStickers(profile)),
+    pro ? '' : TEXT_RULES(profile),
     !pro && !vertical ? LAYOUT_RULES + '\nEffekt "cam" = Facecam 1,6 s groß bei der stärksten Gesichts-Reaktion (nur mit mode "cam", höchstens 2 je Clip).' : '',
     `Video: „${v.file}“, Länge ${whisper.fmtTime(v.duration)}. ${v.note ? 'Notiz: ' + v.note : ''}`,
     sents.length ? 'Gesprochenes ist je Kandidat als nummerierte Sätze angegeben (automatisch erkannt, kann Fehler enthalten). In Klammern gemessene Signale (laut +x dB = lauter als die normale Stimme, LACHEN/SCHREIT = Geräusch erkannt).' : 'Kein gesprochener Text verfügbar.',
@@ -469,7 +494,7 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '', op
   }
   const schemaH = {
     type: 'object', additionalProperties: false, required: ['shorts'],
-    properties: { shorts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['candidate', 'fromSentence', 'toSentence', 'start', 'end', 'title', 'reason', 'mood', 'music', 'viral', 'viralWhy', 'viralTip', 'hook', 'fx', 'layout'],
+    properties: { shorts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['candidate', 'fromSentence', 'toSentence', 'start', 'end', 'title', 'reason', 'mood', 'music', 'viral', 'viralWhy', 'viralTip', 'hook', 'fx', 'layout', 'text'],
       properties: {
         candidate: { type: 'integer', description: 'Nummer des Kandidaten' },
         fromSentence: { type: 'integer', description: 'Nummer des ersten Satzes (S…), 0 wenn an der Stelle nicht gesprochen wird' },
@@ -486,6 +511,7 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '', op
         hook: HOOK_SCHEMA,
         fx: FX_SCHEMA,
         layout: LAYOUT_SCHEMA,
+        text: TEXT_SCHEMA,
       } } } },
   };
   const out = await cutCall(content, schemaH);
@@ -506,7 +532,7 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '', op
       mood: String(s.mood || ''), music: String(s.music || '').slice(0, 200),
       viral: Math.max(1, Math.min(10, Math.round(Number(s.viral) || 0))) || undefined, viralWhy: String(s.viralWhy || '').slice(0, 300), viralTip: String(s.viralTip || '').slice(0, 300),
       hook: s.hook && typeof s.hook === 'object' ? { mode: s.hook.mode, at: Number(s.hook.at), len: Number(s.hook.len), text: String(s.hook.text || '').slice(0, 60) } : null,
-      fx: Array.isArray(s.fx) ? s.fx.slice(0, 15) : [], layoutRaw: s.layout && typeof s.layout === 'object' ? s.layout : null, signals: k.why || [] });
+      fx: Array.isArray(s.fx) ? s.fx.slice(0, 15) : [], layoutRaw: s.layout && typeof s.layout === 'object' ? s.layout : null, signals: k.why || [], text: parseText(s.text) });
   }
   return picked;
 }
@@ -740,6 +766,7 @@ export async function reviseShort(raw, out, wish, segs, profile, { minLen = 15, 
     'Tempo: aus = nichts herausschneiden, ruhig = nur lange Pausen, normal = Pausen + „ähm“, schnell = Jump Cuts + kurze Zooms.',
     HOOK_RULES(pro, profile),
     FX_RULES(fxLevelOf(profile, wish), fxStickers(profile)),
+    pro ? '' : TEXT_RULES(profile) + (out.edit?.style ? `\nBisheriger Stil: ${out.edit.style}${out.edit.hookLook ? ', Hook-Look ' + out.edit.hookLook : ''}.` : ''),
     out.edit?.fxHow ? `Bisherige Effekte: ${out.edit.fxHow}.` : '',
     out.edit?.layout ? `Bisheriger Bildaufbau: ${out.edit.layout.mode}${out.edit.layout.cam ? ` (Facecam bei ${Math.round(out.edit.layout.cam.x * 100)} %/${Math.round(out.edit.layout.cam.y * 100)} %, ${Math.round(out.edit.layout.cam.w * 100)} × ${Math.round(out.edit.layout.cam.h * 100)} %)` : ''}, focus ${Math.round((out.edit.layout.focus ?? 0.5) * 100)} %.` : '',
     out.qc?.issues?.length ? `Prüfung des bisherigen Clips: ${out.qc.issues.join('; ')}.` : '',
@@ -759,9 +786,10 @@ export async function reviseShort(raw, out, wish, segs, profile, { minLen = 15, 
     fs.rmSync(sheet, { force: true });
   }
   const schema = { type: 'object', additionalProperties: false,
-    required: ['fromSentence', 'toSentence', 'start', 'end', 'title', 'hook', 'tempo', 'music', 'changes', 'viral', 'viralWhy', 'viralTip', 'fx', 'layout'], properties: {
+    required: ['fromSentence', 'toSentence', 'start', 'end', 'title', 'hook', 'tempo', 'music', 'changes', 'viral', 'viralWhy', 'viralTip', 'fx', 'layout', 'text'], properties: {
       fx: FX_SCHEMA,
       layout: LAYOUT_SCHEMA,
+      text: TEXT_SCHEMA,
       fromSentence: { type: 'integer', description: 'erster Satz (S…) des neuen Clips, 0 ohne Sprache' },
       toSentence: { type: 'integer', description: 'letzter Satz (S…) des neuen Clips, 0 ohne Sprache' },
       start: { type: 'number', description: 'neuer Start (Sekunde ab Videoanfang)' },
@@ -787,7 +815,7 @@ export async function reviseShort(raw, out, wish, segs, profile, { minLen = 15, 
     hook: o.hook ? { mode: o.hook.mode, at: Number(o.hook.at), len: Number(o.hook.len), text: String(o.hook.text || '').slice(0, 60) } : null,
     tempo: fx.TEMPO[o.tempo] !== undefined ? o.tempo : 'normal', music: !!o.music, changes: String(o.changes || '').slice(0, 500),
     viral: Math.max(1, Math.min(10, Math.round(Number(o.viral) || 0))) || undefined, viralWhy: String(o.viralWhy || '').slice(0, 300), viralTip: String(o.viralTip || '').slice(0, 300),
-    fx: Array.isArray(o.fx) ? o.fx.slice(0, 15) : [], fxLevel: fxLevelOf(profile, wish), layoutRaw: o.layout && typeof o.layout === 'object' ? o.layout : null };
+    fx: Array.isArray(o.fx) ? o.fx.slice(0, 15) : [], fxLevel: fxLevelOf(profile, wish), layoutRaw: o.layout && typeof o.layout === 'object' ? o.layout : null, text: parseText(o.text) };
 }
 
 // Effekt-Stufe des Kanals; „mehr/weniger Effekte“ im Überarbeitungswunsch verschiebt sie um eine Stufe

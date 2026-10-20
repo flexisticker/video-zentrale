@@ -11,7 +11,7 @@ import * as ai from './ai.js';
 import * as gpu from './gpu.js';
 import * as music from './music.js';
 import * as profiles from './profiles.js';
-import { buildAss, buildCalmAss, buildHookAss, buildFxAss } from './captions.js';
+import { buildStyledAss, buildCalmAss, buildHookAss, buildFxAss, STYLES, HOOK_LOOKS } from './captions.js';
 import * as fx from './cutfx.js';
 import * as bounds from './bounds.js';
 import * as sfx from './sfx.js';
@@ -266,6 +266,29 @@ async function renderLong(v, file, keep, hasAudio, out, onP, track, teaser = nul
   if (r.code !== 0) throw new Error('Langfassung: ' + lastError(r));
 }
 
+// Text-Vorlage eines Shorts: feste Kanal-Vorgabe › Claudes Wahl › Standard. LinkedIn bleibt ruhig.
+function textLook(profile, t, pro) {
+  if (pro) return { style: '', hookLook: '', emph: [] };
+  return {
+    style: STYLES[profile?.captionStyle] ? profile.captionStyle : (STYLES[t?.style] ? t.style : 'klassik'),
+    hookLook: HOOK_LOOKS[profile?.hookLook] ? profile.hookLook : (HOOK_LOOKS[t?.hookLook] ? t.hookLook : 'kasten'),
+    emph: (t?.emph || []).map((x) => x.word),
+    emphEmoji: (t?.emph || []).filter((x) => x.emoji),
+  };
+}
+// Emojis an Schlüsselwörtern → als Effekt (höchstens 2, nicht dicht an anderen Effekten)
+function emphFx(s, words) {
+  const norm = (t) => String(t).toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  let n = 0;
+  for (const e of s.emphEmoji || []) {
+    if (n >= 2 || !fx.emojiFile(e.emoji)) continue;
+    const w = (words || []).find((x) => x.s >= s.start && x.e <= s.end && norm(x.t) === norm(e.word));
+    if (!w || (s.fx || []).some((f) => Math.abs(Number(f.at) - w.s) < 1.2)) continue;
+    (s.fx = s.fx || []).push({ at: w.s, kind: 'emoji', emoji: e.emoji, sound: 'pop', soundIdea: '', text: '', pos: 'rechts-unten', sticker: '' });
+    n++;
+  }
+}
+
 // Effekte eines Shorts vorbereiten: Freeze/Zeitlupe/Zoom in die Abschnitte, Sounds und Sticker besorgen
 async function prepareFx(s, profile, warn) {
   const level = s.fxLevel || ai.fxLevelOf(profile);
@@ -338,13 +361,13 @@ async function renderShort(v, file, s, hasAudio, out, onP, words, track, pro = f
   if ((pro ? c.linkedin?.captions !== false : c.captions?.enabled) && clipWords.length) {
     const ass = path.join(TMP, `${v.id}-s${Math.round(s.start)}.ass`);
     fs.writeFileSync(ass, pro ? buildCalmAss(clipWords, { width: W, height: H })
-      : buildAss(clipWords, { color: c.captions.color, posY: useCam ? 0.74 : 0.7 }));
+      : buildStyledAss(clipWords, { style: s.style || 'klassik', emph: s.emph || [], color: c.captions.color, posY: useCam ? 0.74 : 0.7 }));
     tmpFiles.push(ass);
     graph += `;[${last}]ass=${ass}:fontsdir=${FONTS}[cap]`; last = 'cap';
   }
   // Hook-Text nie über das Gesicht: bei Facecam-Layout an die Naht darunter
   const hookAss = s.hook?.text && c.hookText !== false ? buildHookAss(s.hook.text, { until: fx.hookTextUntil(parts, s.hook), width: W, height: H, pro, color: c.captions?.color,
-    top: seam ? seam + 24 : null }) : '';
+    top: seam ? seam + 24 : null, look: s.hookLook || 'kasten', style: s.style || '' }) : '';
   if (hookAss) {
     const f = path.join(TMP, `${v.id}-h${Math.round(s.start)}.ass`);
     fs.writeFileSync(f, hookAss); tmpFiles.push(f);
@@ -361,7 +384,7 @@ async function renderShort(v, file, s, hasAudio, out, onP, words, track, pro = f
     graph += `;[${last}]crop=w=iw-56:h=ih-56:x='28+${wob('sin')}':y='28+${wob('cos')}',scale=${W}:${H},setsar=1[shk]`; last = 'shk';
   }
   const texts = events.filter((e) => e.text && ['freeze', 'replay', 'text'].includes(e.kind)).map((e) => ({ t: e.t, dur: Math.min(1.5, e.dur || 1.1), text: e.text }));
-  const fxAss = buildFxAss(texts, { width: W, height: H, color: c.captions?.color });
+  const fxAss = buildFxAss(texts, { width: W, height: H, color: c.captions?.color, style: s.style || '' });
   if (fxAss) {
     const f = path.join(TMP, `${v.id}-fx${Math.round(s.start)}.ass`);
     fs.writeFileSync(f, fxAss); tmpFiles.push(f);
@@ -688,6 +711,8 @@ async function runCut(v) {
     const s = shorts[i];
     s.hook = bounds.snapHook(fx.cleanHook(s.hook, s.start, s.end, hookStyle, pro), { words, fine: hasAudio ? fine : null });
     s.parts = fx.buildParts({ start: s.start, end: s.end, hook: s.hook, words, fine: hasAudio ? fine : null, tempo });
+    Object.assign(s, textLook(profile, s.text, pro));
+    emphFx(s, words);
     const fxHow = await prepareFx(s, profile, (m) => { v.cut.warning = m; });
     step(`Short ${i + 1} von ${shorts.length}: Bildaufbau`);
     s.layout = pro ? null : await resolveLayout(v, file, s);
@@ -704,8 +729,8 @@ async function runCut(v) {
     const layoutHow = s.layout && v.width > v.height ? layout.describe(s.layout, s.events.filter((e) => e.kind === 'cam').length) : '';
     const how = [fx.describe(s.hook, tempo, s.parts, s.start, s.end), fxHow, layoutHow].filter(Boolean).join(' · ');
     const nv = publish(tmp, `${base} – ${pro ? 'LinkedIn-Clip' : 'Short'} ${i + 1}.mp4`, {
-      source: { rawId: v.id, rawFile: v.file, kind: 'short', start: s.start, end: s.end, hook: s.hook || null, tempo, fx: s.fx || [], layout: s.layout || null },
-      edit: { hook: s.hook || null, tempo, parts: s.parts.length, how, fxHow, fxLevel: s.fxLevel, layout: s.layout || null, signals: s.signals || [] },
+      source: { rawId: v.id, rawFile: v.file, kind: 'short', start: s.start, end: s.end, hook: s.hook || null, tempo, fx: s.fx || [], layout: s.layout || null, emph: s.emph || [] },
+      edit: { hook: s.hook || null, tempo, parts: s.parts.length, how, fxHow, fxLevel: s.fxLevel, layout: s.layout || null, signals: s.signals || [], style: s.style, hookLook: s.hookLook },
       title: s.title ? s.title.slice(0, 100) : `${base} – Short ${i + 1}`,
       viral: Number.isFinite(s.viral) ? { score: s.viral, why: s.viralWhy || '', tip: s.viralTip || '', by: 'Schnitt' } : undefined,
       note: sourceNote(s.start, s.end) + (s.reason ? ' Warum: ' + s.reason : '') + (how ? ' ' + how + '.' : '')
@@ -889,7 +914,8 @@ async function runRerender(id) {
       step('Lautstärke messen');
       const win = { from: Math.max(0, src.start - 10), span: src.end - src.start + 20 };
       const { fine, hasAudio } = await loudness(file, raw.duration, win);
-      const s = { start: src.start, end: src.end, hook: src.hook || null, fx: src.fx || [], fxLevel: out.edit?.fxLevel, layout: src.layout || null, style: out.edit?.style || src.style };
+      const s = { start: src.start, end: src.end, hook: src.hook || null, fx: src.fx || [], fxLevel: out.edit?.fxLevel, layout: out.edit?.layout || src.layout || null,
+        style: pro ? '' : out.edit?.style || 'klassik', hookLook: pro ? '' : out.edit?.hookLook || 'kasten', emph: src.emph || [] };
       s.parts = fx.buildParts({ start: s.start, end: s.end, hook: s.hook, words, fine: hasAudio ? fine : null, tempo: src.tempo || 'aus' });
       step('Effekte vorbereiten');
       await prepareFx(s, profile, (m) => { out.rerender.warning = m; });
@@ -1130,6 +1156,8 @@ async function runRevision({ revise: outId, wish }) {
     const s = { start: r.start, end: r.end, hook: bounds.snapHook(fx.cleanHook(r.hook, r.start, r.end, style, pro), { words, fine: hasAudio ? fine : null }) };
     s.parts = fx.buildParts({ start: s.start, end: s.end, hook: s.hook, words, fine: hasAudio ? fine : null, tempo: r.tempo });
     s.fx = r.fx; s.fxLevel = r.fxLevel;
+    Object.assign(s, textLook(profile, r.text, pro));
+    emphFx(s, words);
     step('Effekte vorbereiten');
     const fxHow = await prepareFx(s, profile, (m) => { out.revise.warning = m; });
     s.layoutRaw = r.layoutRaw;
@@ -1151,8 +1179,8 @@ async function runRevision({ revise: outId, wish }) {
     const layoutHow = s.layout && raw.width > raw.height ? layout.describe(s.layout, s.events.filter((e) => e.kind === 'cam').length) : '';
     const how = [fx.describe(s.hook, r.tempo, s.parts, s.start, s.end), fxHow, layoutHow].filter(Boolean).join(' · ');
     const nv = publish(tmp, name, {
-      source: { ...out.source, start: s.start, end: s.end, hook: s.hook || null, tempo: r.tempo, fx: s.fx || [], layout: s.layout || null },
-      edit: { hook: s.hook || null, tempo: r.tempo, parts: s.parts.length, how, fxHow, fxLevel: s.fxLevel, layout: s.layout || null },
+      source: { ...out.source, start: s.start, end: s.end, hook: s.hook || null, tempo: r.tempo, fx: s.fx || [], layout: s.layout || null, emph: s.emph || [] },
+      edit: { hook: s.hook || null, tempo: r.tempo, parts: s.parts.length, how, fxHow, fxLevel: s.fxLevel, layout: s.layout || null, style: s.style, hookLook: s.hookLook },
       title: r.title || out.title, description: out.description, tags: out.tags, category: out.category,
       viral: r.viral ? { score: r.viral, why: r.viralWhy, tip: r.viralTip, by: 'Überarbeitung' } : out.viral,
       revisionOf: out.id, revisionRoot: rootId, revisionWish: wish, revisionChanges: r.changes,

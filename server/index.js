@@ -17,6 +17,7 @@ import * as autocut from './autocut.js';
 import * as whisper from './whisper.js';
 import * as thumbs from './thumbs.js';
 import * as cover from './cover.js';
+import * as captions from './captions.js';
 import * as music from './music.js';
 import * as ver from './version.js';
 import * as backup from './backup.js';
@@ -125,6 +126,37 @@ function publicVideo(v) {
     coverMode: cover.modeOf(v),
     mirrorSiblings: v.source?.rawId && db().videos[v.source.rawId] ? autocut.childrenOf(db().videos[v.source.rawId]).length - 1 : !v.source ? autocut.childrenOf(v).length : 0,
     topic: org.topicOf(v) };
+}
+
+// Vorschau einer Text-Vorlage: 3 s Beispiel-Short (360 × 640) mit Hook-Text und Untertiteln
+const PREVIEW_VER = 1;
+const previewRuns = new Map();
+async function captionPreview(style, look) {
+  if (!captions.STYLES[style] || !captions.HOOK_LOOKS[look]) throw new HttpError(404, 'Unbekannte Vorlage.');
+  const dir = path.join(process.env.DATA_DIR || '/data', 'vorschau');
+  const file = path.join(dir, `${style}-${look}-v${PREVIEW_VER}.mp4`);
+  if (fs.existsSync(file)) return file;
+  if (!previewRuns.has(file)) previewRuns.set(file, (async () => {
+    fs.mkdirSync(dir, { recursive: true });
+    const said = 'Ich hab 3 Gegner auf einmal erledigt und dann ist alles explodiert'.split(' ');
+    const words = said.map((t, i) => ({ s: 0.5 + i * 0.3, e: 0.5 + i * 0.3 + 0.26, t }));
+    const ass = file.replace(/\.mp4$/, '.ass'), hook = file.replace(/\.mp4$/, '-h.ass');
+    fs.writeFileSync(ass, captions.buildStyledAss(words, { style, emph: ['gegner', 'explodiert'] }));
+    fs.writeFileSync(hook, captions.buildHookAss('Wie konnte das passieren?', { look, style, until: 1.6 }));
+    const FONTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fonts');
+    const r = await new Promise((resolve) => {
+      const pr = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'gradients=s=1080x1920:c0=0x1d3557:c1=0x6a2c70:speed=0.02:d=4,format=yuv420p',
+        '-vf', `ass=${hook}:fontsdir=${FONTS},ass=${ass}:fontsdir=${FONTS},scale=360:640,fps=24`, '-t', '4', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', file + '.tmp.mp4'], { stdio: 'ignore' });
+      pr.on('error', () => resolve(-1)); pr.on('close', resolve);
+    });
+    fs.rmSync(ass, { force: true }); fs.rmSync(hook, { force: true });
+    if (r !== 0) throw new HttpError(500, 'Vorschau ging nicht.');
+    // Standbild für die Karte (Hook + Untertitel mit Schlüsselwort sichtbar)
+    await new Promise((resolve) => { const pr = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-ss', '1.25', '-i', file + '.tmp.mp4', '-frames:v', '1', '-q:v', '4', file.replace(/\.mp4$/, '.jpg')], { stdio: 'ignore' }); pr.on('error', resolve); pr.on('close', resolve); });
+    fs.renameSync(file + '.tmp.mp4', file);
+  })().finally(() => previewRuns.delete(file)));
+  await previewRuns.get(file);
+  return file;
 }
 
 // endgültig löschen inkl. Standbilder, Varianten und Transkript
@@ -298,6 +330,19 @@ async function api(req, res, url) {
   if (p === '/api/videos' && m === 'GET') {
     return send(res, 200, { videos: Object.values(db().videos).map(publicVideo), busy: jobs.busy() });
   }
+  // Text-Vorlagen: Liste und kleine Vorschau-Videos (einmal erzeugt, dann aus dem Zwischenspeicher)
+  if (p === '/api/caption-styles' && m === 'GET') {
+    return send(res, 200, { styles: captions.STYLE_IDS.map((id) => ({ id, name: captions.STYLES[id].name, desc: captions.STYLES[id].desc })),
+      looks: Object.entries(captions.HOOK_LOOKS).map(([id, name]) => ({ id, name })) });
+  }
+  { const pm = /^\/api\/caption-preview\/([a-z]+)$/.exec(p);
+    if (pm && m === 'GET') {
+      let file = await captionPreview(pm[1], url.searchParams.get('look') || 'kasten');
+      const poster = url.searchParams.get('poster') === '1';
+      if (poster) file = file.replace(/\.mp4$/, '.jpg');
+      res.writeHead(200, { 'Content-Type': poster ? 'image/jpeg' : 'video/mp4', 'Cache-Control': 'private, max-age=86400', 'Content-Length': fs.statSync(file).size });
+      return fs.createReadStream(file).pipe(res);
+    } }
   if (p === '/api/scan' && m === 'POST') {
     await scanAll();
     return send(res, 200, { ok: true });
@@ -462,6 +507,17 @@ async function api(req, res, url) {
       }
       v.editedAt = new Date().toISOString();
       saveNow();
+      return send(res, 200, publicVideo(v));
+    }
+    // Text-Stil eines Shorts ändern → mit gleichem Schnitt neu rechnen
+    if (sub === '/text-style' && m === 'POST') {
+      const b = await readJson(req);
+      if (v.source?.kind !== 'short') throw new HttpError(409, 'Text-Stil gibt es bei Shorts aus dem automatischen Schnitt.');
+      if (!captions.STYLES[b.style] || (b.hookLook && !captions.HOOK_LOOKS[b.hookLook])) throw new HttpError(400, 'Unbekannter Stil.');
+      const why = autocut.rerenderable(v);
+      if (why) throw new HttpError(409, why);
+      v.edit = { ...(v.edit || {}), style: b.style, hookLook: b.hookLook || v.edit?.hookLook || 'kasten' };
+      autocut.enqueueRerender(v, 'Text-Stil ' + captions.STYLES[b.style].name);
       return send(res, 200, publicVideo(v));
     }
     // Titelbild als erstes Bild beim Hochladen: '' = Kanal-Vorgabe, aus, bild, kurz

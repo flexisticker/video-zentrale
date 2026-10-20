@@ -366,3 +366,15 @@ a.statrow:hover { outline: 1px solid var(--line, rgba(255,255,255,.15)); }
 .logo-row { align-items: flex-start; gap: 14px; margin: 10px 0; }
 .logo-prev { width: 84px; height: 84px; object-fit: contain; border-radius: 12px; background: repeating-conic-gradient(#2a2a33 0% 25%, #1c1c24 0% 50%) 50% / 16px 16px; flex: none; }
 .logo-prev.empty { display: grid; place-items: center; font-size: 12px; opacity: .6; }
+
+/* Text-Vorlagen-Galerie */
+.stylegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 10px; }
+.stylecard { background: var(--panel2, #1b1f2a); border: 2px solid var(--line); border-radius: 12px; padding: 6px; color: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 4px; text-align: left; }
+.stylecard:hover, .stylecard.sel { border-color: var(--accent, #7c5cff); }
+.stylethumb { width: 100%; aspect-ratio: 9 / 16; border-radius: 8px; background: #111 center / cover no-repeat; overflow: hidden; }
+.stylethumb video { width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .2s; }
+.stylethumb video.on { opacity: 1; }
+.stylecard .hint { font-size: 11px; }
+.chip-btn.on { border-color: var(--accent, #7c5cff); background: color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent); }
+.mirrorbox { margin-top: 8px; }
+@media (max-width: 600px) { .stylegrid { grid-template-columns: repeat(2, 1fr); } }
