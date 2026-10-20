@@ -24,6 +24,7 @@ import * as twitch from './twitch.js';
 import * as trailer from './trailer.js';
 import * as analyse from './analyse.js';
 import * as helper from './helper.js';
+import * as facecam from './facecam.js';
 
 // Schnitt wartet auf die PC-Analyse (Grafikkarte noch nicht freigegeben) → später erneut versuchen
 class WaitForPc extends Error {}
@@ -318,13 +319,32 @@ function defaultLayout() {
 async function resolveLayout(v, file, s) {
   const fc = cfg().facecam;
   const fixed = fc?.enabled && fc.w > 0.02 ? { x: fc.x, y: fc.y, w: fc.w, h: fc.h } : null;
-  if (!s.layoutRaw || fc?.auto === false) return defaultLayout();
-  const L = layout.normalize(s.layoutRaw, fixed);
-  if (fixed) L.cam = fixed;   // von Hand eingestellte Facecam hat Vorrang
-  else if (L.cam && v.width && v.height) {
-    try { L.cam = await vision.refineBox(file, s.start, s.end, L.cam, { srcW: v.width, srcH: v.height }); } catch { /* Schätzung behalten */ }
+  if (fc?.auto === false) return defaultLayout();
+  const faces = facecam.facesIn(v, s.start, s.end);
+  if (!s.layoutRaw && !faces) return defaultLayout();
+  const L = layout.normalize(s.layoutRaw || {}, fixed);
+  if (fixed) { L.cam = fixed; return L; }   // von Hand eingestellte Facecam hat Vorrang
+  // Gesichter vom PC (Rechenhelfer) + von Hand korrigierte Ausschnitte des Kanals
+  const r = await facecam.resolve(v, file, s.start, s.end, L, { scenes: profiles.effective(v)?.camScenes || [] });
+  if (r.how) s.camHow = r.how;
+  if (r.how && r.how !== 'Gesicht bestätigt') return r.L;
+  const R = r.L;
+  if (R.cam && v.width && v.height) {
+    try { R.cam = await vision.refineBox(file, s.start, s.end, R.cam, { srcW: v.width, srcH: v.height }); } catch { /* Schätzung behalten */ }
   }
-  return L;
+  return R;
+}
+// Zeiten im fertigen Short, in denen die zweite Facecam-Lage gilt (Abschnitte aus der Quelle nach switchAt)
+function camSwitchExpr(parts, at) {
+  const on = [];
+  let off = 0;
+  for (const p of parts) {
+    const len = fx.partLen(p);
+    if (p.b <= at) { /* ganz davor */ } else if (p.a >= at || p.hook || p.rev || p.freeze) on.push([off, off + len]);
+    else on.push([off + (at - p.a) / (p.speed || 1), off + len]);
+    off += len;
+  }
+  return on.filter(([a, b]) => b - a > 0.05).map(([a, b]) => `between(t,${a.toFixed(3)},${b.toFixed(3)})`).join('+');
 }
 
 // Short im Hochformat: Bildmitte oder Facecam oben + Spiel unten, animierte Untertitel, Grafikkarte wenn vorhanden.
@@ -352,8 +372,17 @@ async function renderShort(v, file, s, hasAudio, out, onP, words, track, pro = f
   if (pro) graph += `[cv]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1[base]`;
   else if (vertical) graph += '[cv]scale=1080:-2,setsar=1[base]';
   else {
-    const lg = layout.graph('cv', 'base', { srcW: even(v.width), srcH: even(v.height), layout: L, reactions });
-    graph += lg.graph; seam = lg.seam; useCam = lg.mode === 'cam';
+    const swExpr = L.mode === 'cam' && L.cam && L.cam2 && Number.isFinite(L.switchAt) ? camSwitchExpr(parts, L.switchAt) : '';
+    if (swExpr) {
+      // Facecam wechselt im Clip die Position: zwei Bildaufbauten, der zweite ab dem Wechsel drübergelegt
+      const a = layout.graph('cva', 'la', { srcW: even(v.width), srcH: even(v.height), layout: L, reactions, prefix: 'a' });
+      const b = layout.graph('cvb', 'lb', { srcW: even(v.width), srcH: even(v.height), layout: { ...L, cam: L.cam2 }, reactions, prefix: 'b' });
+      graph += `[cv]split[cva][cvb];${a.graph};${b.graph};[la][lb]overlay=0:0:enable='${swExpr}'[base]`;
+      seam = Math.max(a.seam, b.seam); useCam = true;
+    } else {
+      const lg = layout.graph('cv', 'base', { srcW: even(v.width), srcH: even(v.height), layout: L, reactions });
+      graph += lg.graph; seam = lg.seam; useCam = lg.mode === 'cam';
+    }
   }
   const tmpFiles = [];
   let last = 'base';
@@ -726,7 +755,7 @@ async function runCut(v) {
       v.cut.warning = 'Mischen mit Musik ging nicht – Short ohne Musik.';
       await renderShort(v, file, s, hasAudio, tmp, (p) => step(label, (done + p / 100) / jobs * 100), words, null, pro);
     }
-    const layoutHow = s.layout && v.width > v.height ? layout.describe(s.layout, s.events.filter((e) => e.kind === 'cam').length) : '';
+    const layoutHow = s.layout && v.width > v.height ? layout.describe(s.layout, s.events.filter((e) => e.kind === 'cam').length) + (s.camHow ? ` (Facecam: ${s.camHow})` : '') : '';
     const how = [fx.describe(s.hook, tempo, s.parts, s.start, s.end), fxHow, layoutHow].filter(Boolean).join(' · ');
     const nv = publish(tmp, `${base} – ${pro ? 'LinkedIn-Clip' : 'Short'} ${i + 1}.mp4`, {
       source: { rawId: v.id, rawFile: v.file, kind: 'short', start: s.start, end: s.end, hook: s.hook || null, tempo, fx: s.fx || [], layout: s.layout || null, emph: s.emph || [] },
@@ -1176,7 +1205,7 @@ async function runRevision({ revise: outId, wish }) {
     catch (e) { if (!track) throw e; track = null; await renderShort(raw, file, s, hasAudio, tmp, onP, words, null, pro); }
     // Versionsnummer: v2, v3 … bezogen auf die erste Fassung
     const { rootId, n, name } = nextVersionName(out);
-    const layoutHow = s.layout && raw.width > raw.height ? layout.describe(s.layout, s.events.filter((e) => e.kind === 'cam').length) : '';
+    const layoutHow = s.layout && raw.width > raw.height ? layout.describe(s.layout, s.events.filter((e) => e.kind === 'cam').length) + (s.camHow ? ` (Facecam: ${s.camHow})` : '') : '';
     const how = [fx.describe(s.hook, r.tempo, s.parts, s.start, s.end), fxHow, layoutHow].filter(Boolean).join(' · ');
     const nv = publish(tmp, name, {
       source: { ...out.source, start: s.start, end: s.end, hook: s.hook || null, tempo: r.tempo, fx: s.fx || [], layout: s.layout || null, emph: s.emph || [] },

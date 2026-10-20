@@ -12,7 +12,7 @@ param([switch]$Install, [switch]$Uninstall, [string]$Release = '')
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # macht Downloads in Windows PowerShell deutlich schneller
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$Version = '1.7'
+$Version = '1.8'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ConfigFile = Join-Path $Here 'rechenhelfer.json'
 $Home2 = if ($env:VZ_HELPER_HOME) { $env:VZ_HELPER_HOME } else { Join-Path $env:LOCALAPPDATA 'VideoZentrale-Rechenhelfer' }
@@ -217,7 +217,7 @@ function Ensure-Python {
     $r = Invoke-Native $uv @('pip', 'install', '--python', $PyExe, 'demucs==4.0.1', 'transformers==4.46.3', 'easyocr', 'soundfile') 'uv'
     if ($r.code -ne 0) { throw "Analyse-Pakete konnten nicht installiert werden ($($r.text))" }
     # Selbsttest: transformers muss PyTorch nutzen können (sonst läuft die Geräusch-Erkennung nicht)
-    $r = Invoke-Native $PyExe @('-c', "import torch, demucs, easyocr, soundfile, transformers; from transformers.utils import is_torch_available; assert is_torch_available(), 'transformers ohne PyTorch'; from transformers import ASTForAudioClassification; print('SELBSTTEST-OK ' + ('CUDA ' + torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'Prozessor') + ' · torch ' + torch.__version__ + ' · transformers ' + transformers.__version__)") 'Python'
+    $r = Invoke-Native $PyExe @('-c', "import torch, demucs, easyocr, soundfile, transformers; from transformers.utils import is_torch_available; assert is_torch_available(), 'transformers ohne PyTorch'; from transformers import ASTForAudioClassification; print('SELBSTTEST-OK ' + ('CUDA ' + torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'Prozessor') + ' - torch ' + torch.__version__ + ' - transformers ' + transformers.__version__)") 'Python'
     if ($r.code -ne 0 -or $r.text -notmatch 'SELBSTTEST-OK (.+)$') { throw "Selbsttest fehlgeschlagen: $($r.text)" }
     $test = $Matches[1]
     Set-Content -Path $PyMarker -Value "eingerichtet $(Get-Date) – $test" -Encoding UTF8
@@ -276,10 +276,11 @@ try {
   $hi = Invoke-RestMethod -Uri "$Base/api/helper/hello" -Method Post -Headers $Headers -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes('{"status":"startet"}')) -TimeoutSec 30
   if ($hi.model) { Say-Hello "lädt Modell $($hi.model)"; [void](Get-Model $hi.model) }
 } catch { Log "Modell vorab laden ging nicht: $($_.Exception.Message)" }
-if ($WantAnalyse -and (Ensure-Python)) { $Caps = @('whisper', 'analyse') }
+if ($WantAnalyse -and (Ensure-Python)) { $Caps = @('whisper', 'analyse', 'faces') }
 Say-Hello 'bereit'
 Log "Verbunden mit $Base – warte auf Aufträge (Fenster offen lassen bzw. minimieren)."
 $Analyse = Join-Path $Here 'analyse.py'
+$FaceModel = Join-Path $Here 'face_detection_yunet_2023mar.onnx'   # Gesichtserkennung (OpenCV YuNet, MIT)
 
 # Läuft ein Prozess, prüft alle 3 s, ob gezockt wird (OBS/Spieleliste) → abbrechen und Grafikkarte freigeben
 function Wait-Proc($proc, $onTick) {
@@ -304,7 +305,8 @@ function Run-Analyse($job) {
     if (@($job.files) -contains 'frames') { Invoke-WebRequest -Uri "$Base/api/helper/job/$($job.id)/file/frames" -Headers $Headers -OutFile $frames -UseBasicParsing }
     $p = $job.params
     $argsA = @("`"$Analyse`"", '--audio', "`"$audio`"", '--out', "`"$out`"", '--home', "`"$Home2`"",
-      '--demucs', [int][bool]$p.demucs, '--events', [int][bool]$p.events, '--ocr', [int]([bool]$p.ocr -and (Test-Path $frames)))
+      '--demucs', [int][bool]$p.demucs, '--events', [int][bool]$p.events, '--ocr', [int]([bool]$p.ocr -and (Test-Path $frames)),
+      '--faces', [int]([bool]$p.faces -and (Test-Path $frames) -and (Test-Path $FaceModel)), '--facemodel', "`"$FaceModel`"")
     if (Test-Path $frames) { $argsA += @('--frames', "`"$frames`"") }
     $logOut = Join-Path $dir 'analyse.log'; $logErr = Join-Path $dir 'analyse-fehler.log'
     $sp = @{ FilePath = $PyExe; ArgumentList = $argsA; PassThru = $true; RedirectStandardOutput = $logOut; RedirectStandardError = $logErr }
@@ -313,14 +315,14 @@ function Run-Analyse($job) {
     $null = $proc.Handle
     $sw = [Diagnostics.Stopwatch]::StartNew()
     $tick = {
-      $last = Get-Content $logOut -Tail 5 -ErrorAction SilentlyContinue | Where-Object { $_ -like 'PROGRESS *' } | Select-Object -Last 1
+      $last = Get-Content $logOut -Tail 5 -Encoding UTF8 -ErrorAction SilentlyContinue | Where-Object { $_ -like 'PROGRESS *' } | Select-Object -Last 1
       if ($last -and $last -ne $script:LastProg) { $script:LastProg = $last; $parts = $last -split ' ', 3; Say-Hello ("PC-Analyse {0} % – {1}" -f $parts[1], $parts[2]) }
     }
     $stopped = Wait-Proc $proc $tick
     if ($stopped) { throw "abgebrochen – $stopped (Grafikkarte freigegeben)" }
     $res = Join-Path $out 'result.json'
     if ($proc.ExitCode -ne 0 -or -not (Test-Path $res)) {
-      $why = (Get-Content $logOut, $logErr -ErrorAction SilentlyContinue | Where-Object { $_ -match 'FEHLER|Error|error' } | Select-Object -Last 2) -join ' '
+      $why = (Get-Content $logOut, $logErr -Encoding UTF8 -ErrorAction SilentlyContinue | Where-Object { $_ -match 'FEHLER|Error|error' } | Select-Object -Last 2) -join ' '
       throw "Analyse beendet mit Code $($proc.ExitCode) $why"
     }
     $voice = Join-Path $out 'voice.wav'
@@ -347,7 +349,7 @@ while ($true) {
     }
     if ($Status -like 'pausiert*') { Log 'Weiter – Grafikkarte wieder frei.' }
     if ($WantAnalyse -and $Caps -notcontains 'analyse' -and ((Get-Date) - $LastPyTry).TotalMinutes -ge 30) {
-      if (Ensure-Python) { $Caps = @('whisper', 'analyse') }
+      if (Ensure-Python) { $Caps = @('whisper', 'analyse', 'faces') }
     }
     Say-Hello 'bereit'
     $job = Invoke-RestMethod -Uri "$Base/api/helper/next?caps=$($Caps -join ',')" -Headers $Headers -TimeoutSec 40

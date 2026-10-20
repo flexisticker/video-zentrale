@@ -37,7 +37,8 @@ export const asImage = (file) => ({ type: 'image', source: { type: 'base64', med
 // ---------- Facecam-Rahmen verfeinern ----------
 // Mittelbild über ~16 Bilder (Graustufen, 480 px breit): Ränder einer eingeblendeten Facecam stehen still und bleiben
 // scharf, das bewegte Spiel verschwimmt. Je Kante wird im Umkreis von Claudes Schätzung die stärkste gerade Kante gesucht.
-export async function refineBox(file, start, end, box, { width = 480, srcW, srcH } = {}) {
+// radius = Suchbereich je Kante (Anteil der Boxgröße); inner = Bereich, der sicher drin liegen muss (z. B. das Gesicht)
+export async function refineBox(file, start, end, box, { width = 480, srcW, srcH, radius = 0.2, inner = null } = {}) {
   if (!box || !srcW || !srcH) return box;
   const W = width, H = Math.round(width * srcH / srcW / 2) * 2;
   const n = 16, span = Math.max(2, end - start);
@@ -53,10 +54,10 @@ export async function refineBox(file, start, end, box, { width = 480, srcW, srcH
   const vEdge = (x, y0, y1) => { let s = 0; for (let y = y0; y <= y1; y++) s += Math.abs(at(x + 1, y) - at(x - 1, y)); return s / Math.max(1, y1 - y0 + 1); };
   const hEdge = (y, x0, x1) => { let s = 0; for (let x = x0; x <= x1; x++) s += Math.abs(at(x, y + 1) - at(x, y - 1)); return s / Math.max(1, x1 - x0 + 1); };
   const px = { x: box.x * W, y: box.y * H, w: box.w * W, h: box.h * H };
-  const search = (center, lo, hi, fn, size) => {
-    const r = Math.round(Math.max(8, size * 0.2));
+  const search = (center, lo, hi, fn, size, min = -Infinity, max = Infinity) => {
+    const r = Math.round(Math.max(8, size * radius));
     let best = null, bestV = 0; const vals = [];
-    for (let p = Math.round(center - r); p <= Math.round(center + r); p++) {
+    for (let p = Math.round(Math.max(min, center - r)); p <= Math.round(Math.min(max, center + r)); p++) {
       if (p < 1 || p > (fn === vEdge ? W - 2 : H - 2)) continue;
       const v = fn(p, Math.round(lo), Math.round(hi)); vals.push(v);
       if (v > bestV) { bestV = v; best = p; }
@@ -65,10 +66,11 @@ export async function refineBox(file, start, end, box, { width = 480, srcW, srcH
     return best != null && bestV > 12 && bestV > med * 2.2 ? best : null;   // nur eindeutige Kanten
   };
   const y0 = px.y + px.h * 0.15, y1 = px.y + px.h * 0.85, x0 = px.x + px.w * 0.15, x1 = px.x + px.w * 0.85;
-  const left = px.x > 3 ? search(px.x, y0, y1, vEdge, px.w) : null;
-  const right = px.x + px.w < W - 3 ? search(px.x + px.w, y0, y1, vEdge, px.w) : null;
-  const top = px.y > 3 ? search(px.y, x0, x1, hEdge, px.h) : null;
-  const bottom = px.y + px.h < H - 3 ? search(px.y + px.h, x0, x1, hEdge, px.h) : null;
+  const ib = inner ? { x0: inner.x * W - 3, x1: (inner.x + inner.w) * W + 3, y0: inner.y * H - 3, y1: (inner.y + inner.h) * H + 3 } : null;
+  const left = px.x > 3 ? search(px.x, y0, y1, vEdge, px.w, -Infinity, ib ? ib.x0 : Infinity) : null;
+  const right = px.x + px.w < W - 3 ? search(px.x + px.w, y0, y1, vEdge, px.w, ib ? ib.x1 : -Infinity) : null;
+  const top = px.y > 3 ? search(px.y, x0, x1, hEdge, px.h, -Infinity, ib ? ib.y0 : Infinity) : null;
+  const bottom = px.y + px.h < H - 3 ? search(px.y + px.h, x0, x1, hEdge, px.h, ib ? ib.y1 : -Infinity) : null;
   const L = left ?? px.x, R = right ?? px.x + px.w, T = top ?? px.y, B = bottom ?? px.y + px.h;
   if (R - L < W * 0.05 || B - T < H * 0.05) return box;
   const found = [left, right, top, bottom].filter((x) => x != null).length;

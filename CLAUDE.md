@@ -359,6 +359,37 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   Marker `py-bereit-2.txt`, Mutex greift. **Noch offen:** erster echter Analyse-Auftrag (Modelle ~600 MB laden, Laufzeit/VRAM Demucs/AST/EasyOCR) – Kunde schickt danach
   das Protokoll. Schönheitsfehler fürs nächste Helfer-Update: „·“ erscheint im Log als „┬À“ (PowerShell liest Python-stdout als OEM-Codepage) → im Selbsttest „-“ nehmen
   oder `[Console]::OutputEncoding = UTF8` setzen (auch für PROGRESS-Zeilen mit Umlauten prüfen). Häufige 502/Zeitlimits im Log = Zentrale kurz weg (Updates/NPM), Helfer fängt das ab.
+- 1.30.0 (20.10.2026): **Spiegeln, Titelbild vorne, Text-Vorlagen, Facecam aus Gesichtern.**
+  - **Spiegeln** (`autocut.toggleMirror`, Route `POST /api/videos/:id/mirror {children}`): Flag `raw.mirror` → `hflip` an der Quelle in `concatGraph`
+    (Option `mirror`), `renderLong` (Kopier-Weg aus), `renderSummary`, Trailer (`cand.mirror`); `layout.mirrorLayout` spiegelt cam/cam2/focus (Layouts bleiben
+    in Quell-Koordinaten gespeichert). Ausgaben: **Neu rechnen ohne Claude** = `enqueueRerender(out, reason)` → Warteschlange `{rerender}` → `runRerender`
+    (gleiche start/end/hook/fx/emph/Layout aus `source`/`edit`, Musik per Name wiedergefunden `sameTrack`, Datei an Ort und Stelle ersetzt `replaceFile`,
+    Standbilder /data/ki/<id>-* weg). Eigene Videos ohne `source`: `runFlip` (hflip, Ton copy). Trailer: Hinweis „neu erstellen“. `v.rerender {state, step, reason}`
+    in der Aktivitätsleiste. **Regel: Änderungen am Aussehen eines fertigen Shorts (Stil, Bildaufbau, Spiegeln) über `enqueueRerender`, nicht über Überarbeiten.**
+  - **Titelbild vorne** (`server/cover.js`): `modeOf(v)` = `v.coverFrame` › `profile.coverFrame` (aus|bild|kurz); `jobs.js` baut vor dem Upload eine Kopie
+    (Titelbild auf Videogröße mit Blur-Füllung, 1 Bild bzw. 0,4 s, Ton per adelay verschoben), lädt sie hoch, löscht sie; `v.yt/tt.cover`, `coverError`;
+    TikTok Direct Post `video_cover_timestamp_ms: 0`. Route `POST /api/videos/:id/cover-frame {mode}`.
+  - **Text-Vorlagen** (`captions.js`): `STYLES` (12, mode hi|reveal|karaoke|single, anim pop|bounce|shake, box = farbiger Kasten nur hinter dem aktiven Wort
+    – libass BorderStyle 3 mit `\3c`/`\3a` je Wort, glow, glitch), `buildStyledAss(words, {style, emph, color, posY})`, `buildAss` = klassik; `HOOK_LOOKS`
+    (kasten|banner|umriss|neon) in `buildHookAss({look, style})`, Akzentfarbe = erste kräftige Farbe der Vorlage. Schriften (`fonts/`, OFL bzw. Apache):
+    Archivo Black, Bangers, Bebas Neue, Luckiest Guy, Permanent Marker, Poppins Black, Rubik Mono One (Bungee verworfen – rendert viel zu klein).
+    Claude: `TEXT_SCHEMA` {style, hookLook, emph[{word, emoji}]} in chooseHighlights/reviseShort (`TEXT_RULES`, Kanal fest oder „auto“), `parseText`.
+    autocut `textLook()` (Kanal › Claude › klassik; LinkedIn ruhig), `emphFx()` (≤ 2 Emojis an Schlüsselwörtern als fx). `edit.style/hookLook`, `source.emph`.
+    Profil `captionStyle`/`hookLook` ('auto'|ID). Routen `GET /api/caption-styles`, `GET /api/caption-preview/:style?look=&poster=1` (3 s mp4 + jpg,
+    `/data/vorschau`, `PREVIEW_VER`), `POST /api/videos/:id/text-style`. UI `styleGallery()` (Bild bis das Video läuft – Test-Chromium kann kein H.264).
+  - **Facecam** (`server/facecam.js`): Rechenhelfer 1.8 `analyse.py --faces --facemodel` (OpenCV `FaceDetectorYN`, Modell `tools/rechenhelfer/face_detection_yunet_2023mar.onnx`
+    230 KB, MIT, geht mit OpenCV 4.10 und 5.0) → `result.faces[{t,x,y,w,h,s}]`, `facesChecked`. `resolve()`: Gruppen nach Lage (`clusters`), Gesicht > 22 % Breite =
+    Kamerabild → crop; Claudes Box mit Gesicht drin = bestätigt (+ refineBox wie bisher), sonst `seedFromFace` + `vision.refineBox(radius 0.6, inner = Gesicht)`;
+    zweite Lage zeitlich getrennt → `cam2` + `switchAt` (Mitte zwischen letzter alter/erster neuer Sichtung) → renderShort legt zweiten Bildaufbau per
+    `overlay enable` (`camSwitchExpr`, Hook-Vorschau-Teile nach Quellzeit) drüber; kein Gesicht im Clip und Box nicht dort, wo sonst Gesichter sind → blur.
+    `layout.graph(…, {prefix})` für zwei Aufbauten. Gemerkte Szenen `profile.camScenes` (≤ 8, `profiles.addScene`, `snapScene` IoU > 0,35).
+    Editor `camEditor()` (Standbild `GET /api/videos/:id/layout-frame?t=`, Rahmen ziehen/Ecken, Fokuslinie, „merken“) → `POST /api/videos/:id/layout`
+    → `edit.layout {manual}` + neu rechnen. Rechenhelfer meldet caps `faces`; Log-Encoding UTF-8 (`Get-Content -Encoding UTF8`), Selbsttest ohne „·“.
+  - Getestet (Mock-Claude + fake-whisper + Playwright; Gesichter mit echtem YuNet auf nachgestelltem 3-Min-Stream mit wanderndem Kamerafenster):
+    Spiegeln Short + 4 Geschwister + eigenes Video, Titelbild vorne (Bildzahl +1 bzw. +12, Ton versetzt) inkl. Mock-YouTube-Upload, alle 12 Stile/4 Looks gerendert,
+    Claude-Wahl + Emoji am Schlüsselwort, Stil nachträglich, Facecam aus Gesicht (±2 px an der Kante), Wechsel bei 95 s nahtlos, Editor + gemerkte Szene, 390 px,
+    Schnitt ohne Analyse und Überarbeitung unverändert. **Nicht getestet:** echte Gesichter/Licht/Facecam-Rahmen beim Kunden, TikTok-Cover-Feld echt,
+    Titelbild-Frame bei echten YouTube-Shorts (ob YouTube das erste Bild als Vorschau nimmt), Stile in echten Browsern (H.264-Vorschau), analyse.py mit echtem PyTorch.
 - Ideen danach: „Best of der Woche“ automatisch (Zeitplan), Platz-Einblendungen „Platz 3/2/1“.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
   Sendeplätze je Kanal **stellt der Kunde selbst ein** (keine festen Startzeiten), „Einplanen“ auf nächsten freien Platz, Shorts

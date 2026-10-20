@@ -1,5 +1,12 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.30.0', date: '20.10.2026', items: [
+    '🪞 Video spiegeln (Knopf im Video): Das Bild wird gespiegelt, Untertitel, Hook-Texte und Effekte bleiben lesbar. Bei Shorts/Lang-/Kurzfassungen wird mit gleichem Schnitt neu gerechnet (ohne Claude), auf Wunsch auch alle anderen Videos derselben Aufnahme. Am Rohvideo gilt es für alle künftigen Schnitte.',
+    '🖼 Titelbild als erstes Bild ins Video: Beim Hochladen wird eine Kopie mit deinem Titelbild vorne gebaut (als einzelnes Bild oder 0,4 s) – Vorschauen bei Shorts, TikTok und WhatsApp zeigen dann dein Titelbild. Je Kanal voreinstellbar, je Video änderbar. Bei TikTok „Direkt veröffentlichen“ wird es auch als Cover gewählt.',
+    '🔤 Text-Vorlagen wie bei StreamLadder/Opus Clip: 12 Untertitel-Stile (Hormozi, Karaoke, Pop, Box, Neon, Comic, Einzelwort, Schreibmaschine, Glitch, Wackeln, Marker, Klassisch) und 4 Looks für den Hook-Text, mit neuen Schriften. Claude wählt je Clip passend zur Stimmung und hebt Schlüsselwörter hervor (farbig, größer, ggf. mit Emoji) – oder du legst den Stil je Kanal fest. Galerie mit Vorschau, Stil je Short nachträglich änderbar.',
+    '🎥 Facecam automatisch: Die PC-Analyse sucht jetzt auch Gesichter (Rechenhelfer 1.8). Daraus findet die Zentrale den Facecam-Rahmen pixelgenau – auch wenn sie im Stream die Position wechselt (der Short springt dann mit). Kein Gesicht im Clip → ganzes Bild statt falschem Ausschnitt.',
+    '🎥 Facecam / Ausschnitt von Hand korrigieren: Rahmen auf einem Standbild ziehen, „merken“ – künftige Clips des Kanals nehmen ihn automatisch, wenn die Facecam dort sitzt.',
+  ] },
   { version: '1.29.2', date: '19.10.2026', items: [
     'Rechenhelfer 1.7: Die Geräusch-Erkennung (Lachen, Jubel, Explosionen) hätte nicht funktioniert – die neueste „transformers“-Version verlangt ein neueres PyTorch und hat sich still abgeschaltet. Jetzt fest auf eine passende Version gesetzt; der Selbsttest prüft das ausdrücklich. Die Nachinstallation passiert beim nächsten Start von selbst (nur wenige MB).',
   ] },

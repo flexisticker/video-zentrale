@@ -63,7 +63,7 @@ export async function run(v, file, { duration, voiceTrack = null, onStep = () =>
     fs.rmSync(framesDir, { recursive: true, force: true });
     onStep('PC-Analyse läuft (Rechenhelfer)');
     const timeoutMs = Math.max(30 * 60_000, (duration || 3600) * 1000 * 1.5);
-    const res = await helper.submit('analyse', { files: { audio: audio, frames: frames }, params: { demucs, events: true, ocr: names.length > 0, framesStep: 2 },
+    const res = await helper.submit('analyse', { files: { audio: audio, frames: frames }, params: { demucs, events: true, ocr: names.length > 0, faces: names.length > 0, framesStep: 2 },
       label: v.id, timeoutMs, pickupMs: 5 * 60_000 });
     const out = dirOf(v);
     fs.mkdirSync(out, { recursive: true });
@@ -74,12 +74,16 @@ export async function run(v, file, { duration, voiceTrack = null, onStep = () =>
         .map((e) => ({ t: Number(e.t), kind: String(e.kind || ''), label: String(e.label || '').slice(0, 40), score: Number(e.score) || 0, stem: String(e.stem || '') })),
       ocr: (Array.isArray(j.ocr) ? j.ocr : []).filter((x) => Number.isFinite(x.t)).slice(0, 50000).map((x) => ({ t: Number(x.t), text: String(x.text || '').slice(0, 80) })),
       took: Number(j.took) || null, device: String(j.device || ''),
+      // Gesichter (Rechenhelfer ab 1.8): Lage 0–1 je Bild (alle 2 s) → Facecam finden (facecam.js)
+      faces: (Array.isArray(j.faces) ? j.faces : []).filter((f) => [f.t, f.x, f.y, f.w, f.h].every(Number.isFinite)).slice(0, 40000)
+        .map((f) => ({ t: Number(f.t), x: Number(f.x), y: Number(f.y), w: Number(f.w), h: Number(f.h), s: Number(f.s) || 0 })),
+      facesChecked: !!j.facesChecked,
     };
     fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify(result));
     if (res.files?.['voice.wav'] && fs.existsSync(res.files['voice.wav'])) {
       fs.copyFileSync(res.files['voice.wav'], voicePath(v));
     }
-    v.analyse = { at: result.at, events: result.events.length, ocr: result.ocr.length, voice: hasVoice(v), device: result.device, took: result.took };
+    v.analyse = { at: result.at, events: result.events.length, ocr: result.ocr.length, faces: result.facesChecked ? result.faces.length : null, voice: hasVoice(v), device: result.device, took: result.took };
     save();
     return result;
   } catch (e) {

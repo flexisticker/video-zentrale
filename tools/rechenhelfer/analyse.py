@@ -2,6 +2,7 @@
 #   1. Demucs (htdemucs): Stimme vom Spielton trennen -> voice.wav (16 kHz mono)
 #   2. Geräusche (AST, AudioSet): Lachen, Schreien, Jubel, Explosion, Schüsse je Sekunde
 #   3. EasyOCR: Text in den Bildern (alle 2 s) – z. B. „VICTORY“, „ELIMINATED“
+#   4. Gesichter (OpenCV YuNet, MIT-Lizenz) in denselben Bildern – damit die Zentrale die Facecam findet
 # Fortschritt als Zeilen „PROGRESS <0-100> <Text>“ auf stdout, Ergebnis in <out>/result.json.
 import argparse
 import json
@@ -35,6 +36,8 @@ def main():
     ap.add_argument('--demucs', type=int, default=1)
     ap.add_argument('--events', type=int, default=1)
     ap.add_argument('--ocr', type=int, default=1)
+    ap.add_argument('--faces', type=int, default=0)
+    ap.add_argument('--facemodel')
     ap.add_argument('--step', type=float, default=2.0)
     ap.add_argument('--home', default='.')
     a = ap.parse_args()
@@ -46,7 +49,7 @@ def main():
     import torchaudio
 
     dev = 'cuda' if torch.cuda.is_available() else 'cpu'
-    result = {'events': [], 'ocr': [], 'device': torch.cuda.get_device_name(0) if dev == 'cuda' else 'Prozessor'}
+    result = {'events': [], 'ocr': [], 'faces': [], 'device': torch.cuda.get_device_name(0) if dev == 'cuda' else 'Prozessor'}
     os.makedirs(a.out, exist_ok=True)
     stems = {}
 
@@ -128,6 +131,32 @@ def main():
         del model
         if dev == 'cuda':
             torch.cuda.empty_cache()
+
+    if a.faces and a.frames and os.path.exists(a.frames) and a.facemodel and os.path.exists(a.facemodel):
+        progress(78, 'Gesichter finden')
+        import cv2
+        z = zipfile.ZipFile(a.frames)
+        names = sorted(n for n in z.namelist() if n.endswith('.jpg'))
+        det = None
+        for i, nm in enumerate(names):
+            try:
+                t = float(os.path.basename(nm)[1:7])
+            except ValueError:
+                t = i * a.step
+            img = cv2.imdecode(np.frombuffer(z.read(nm), np.uint8), cv2.IMREAD_COLOR)
+            if img is None:
+                continue
+            h, w = img.shape[:2]
+            if det is None:
+                det = cv2.FaceDetectorYN.create(a.facemodel, '', (w, h), 0.7, 0.3, 50)
+            else:
+                det.setInputSize((w, h))
+            _, faces = det.detect(img)
+            if faces is not None:
+                for f in faces[:4]:
+                    result['faces'].append({'t': t, 'x': round(float(f[0]) / w, 4), 'y': round(float(f[1]) / h, 4),
+                                            'w': round(float(f[2]) / w, 4), 'h': round(float(f[3]) / h, 4), 's': round(float(f[14]), 3)})
+        result['facesChecked'] = True
 
     if a.ocr and a.frames and os.path.exists(a.frames):
         progress(81, 'Spieltexte lesen')

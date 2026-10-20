@@ -18,6 +18,7 @@ import * as whisper from './whisper.js';
 import * as thumbs from './thumbs.js';
 import * as cover from './cover.js';
 import * as captions from './captions.js';
+import * as layout from './layout.js';
 import * as music from './music.js';
 import * as ver from './version.js';
 import * as backup from './backup.js';
@@ -124,6 +125,7 @@ function publicVideo(v) {
     canRevise: ['short', 'long', 'summary'].includes(v.source?.kind) ? autocut.revisable(v) || true : undefined,
     canMirror: autocut.rerenderable(v) || true,
     coverMode: cover.modeOf(v),
+    rawInfo: v.source?.rawId && db().videos[v.source.rawId] ? (({ width, height, mirror }) => ({ width, height, mirror: !!mirror }))(db().videos[v.source.rawId]) : undefined,
     mirrorSiblings: v.source?.rawId && db().videos[v.source.rawId] ? autocut.childrenOf(db().videos[v.source.rawId]).length - 1 : !v.source ? autocut.childrenOf(v).length : 0,
     topic: org.topicOf(v) };
 }
@@ -507,6 +509,37 @@ async function api(req, res, url) {
       }
       v.editedAt = new Date().toISOString();
       saveNow();
+      return send(res, 200, publicVideo(v));
+    }
+    // Facecam-Ausschnitt von Hand: Standbild aus dem Rohvideo (ungespiegelt) und Speichern + neu rechnen
+    if (sub === '/layout-frame' && m === 'GET') {
+      if (v.source?.kind !== 'short') throw new HttpError(409, 'Nur bei Shorts aus dem automatischen Schnitt.');
+      const raw = db().videos[v.source.rawId];
+      if (!raw || raw.missing) throw new HttpError(404, 'Rohvideo nicht gefunden.');
+      const t = Math.max(0, Math.min(raw.duration || 1e9, Number(url.searchParams.get('t')) || (v.source.start + v.source.end) / 2));
+      const out = path.join(process.env.DATA_DIR || '/data', 'tmp', `${v.id}-lf.jpg`);
+      fs.mkdirSync(path.dirname(out), { recursive: true });
+      const code = await new Promise((resolve) => { const pr = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-ss', t.toFixed(2), '-i', lib.fileOf(raw), '-frames:v', '1', '-vf', 'scale=960:-2', '-q:v', '4', out], { stdio: 'ignore' }); pr.on('error', () => resolve(-1)); pr.on('close', resolve); });
+      if (code !== 0) throw new HttpError(500, 'Standbild ging nicht.');
+      const buf = fs.readFileSync(out); fs.rmSync(out, { force: true });
+      res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store', 'Content-Length': buf.length });
+      return res.end(buf);
+    }
+    if (sub === '/layout' && m === 'POST') {
+      const b = await readJson(req);
+      if (v.source?.kind !== 'short') throw new HttpError(409, 'Nur bei Shorts aus dem automatischen Schnitt.');
+      if (!layout.MODES.includes(b.mode)) throw new HttpError(400, 'Unbekannter Bildaufbau.');
+      const ok = (x) => Number.isFinite(x) && x >= 0 && x <= 1;
+      const c = b.cam;
+      const cam = c && [c.x, c.y, c.w, c.h].every(ok) && c.w > 0.03 && c.h > 0.03 && c.x + c.w <= 1.001 && c.y + c.h <= 1.001
+        ? { x: c.x, y: c.y, w: Math.min(c.w, 1 - c.x), h: Math.min(c.h, 1 - c.y) } : null;
+      if (b.mode === 'cam' && !cam) throw new HttpError(400, 'Bitte den Facecam-Rahmen setzen.');
+      const why = autocut.rerenderable(v);
+      if (why) throw new HttpError(409, why);
+      const L = { mode: b.mode, cam, focus: ok(b.focus) ? b.focus : 0.5, manual: true };
+      v.edit = { ...(v.edit || {}), layout: L };
+      if (b.remember && cam) profiles.addScene(profiles.effective(v)?.id, cam);
+      autocut.enqueueRerender(v, 'Bildaufbau');
       return send(res, 200, publicVideo(v));
     }
     // Text-Stil eines Shorts ändern → mit gleichem Schnitt neu rechnen

@@ -58,6 +58,7 @@ export function publicProfile(p) {
     clipHints: p.clipHints || '', shorts: Number.isFinite(p.shorts) ? p.shorts : null,
     hookStyle: p.hookStyle || 'auto', tempo: p.tempo || 'normal', hookHint: p.hookHint || '',
     fxLevel: p.fxLevel || 'normal', fxImages: !!p.fxImages,
+    camScenes: (p.camScenes || []).length,
     coverFrame: p.coverFrame || 'aus', captionStyle: p.captionStyle || 'auto', hookLook: p.hookLook || 'auto',
     logo: p.logo || null,
     category: p.category || '20', tags: p.tags || '', footer: p.footer || '',
@@ -82,6 +83,7 @@ export function update(id, b) {
   if (['aus', 'bild', 'kurz'].includes(b.coverFrame)) p.coverFrame = b.coverFrame;
   if (b.captionStyle === 'auto' || STYLES[b.captionStyle]) p.captionStyle = b.captionStyle;
   if (b.hookLook === 'auto' || HOOK_LOOKS[b.hookLook]) p.hookLook = b.hookLook;
+  if (b.clearScenes === true) p.camScenes = [];
   if ('shorts' in b) p.shorts = b.shorts === null || b.shorts === '' ? undefined : Math.max(0, Math.min(10, Math.round(Number(b.shorts)) || 0));
   if (typeof b.music === 'boolean') p.music = b.music;
   if ('musicMood' in b && ['', 'episch', 'lustig', 'spannend', 'chillig', 'energisch', 'fröhlich', 'traurig'].includes(b.musicMood)) p.musicMood = b.musicMood;
@@ -108,5 +110,15 @@ export function remove(id) {
   db().profiles = list().filter((q) => q !== p);
   if (p.isDefault) db().profiles[0].isDefault = true;
   for (const v of Object.values(db().videos)) if (v.channel === id) { v.channel = ''; v.channelFrom = ''; }
+  saveNow();
+}
+
+// Von Hand korrigierte Facecam-Ausschnitte merken (je Kanal höchstens 8; ähnliche werden ersetzt)
+export function addScene(id, box) {
+  const p = get(id);
+  if (!p || !box) return;
+  const ov = (a, b) => { const x0 = Math.max(a.x, b.x), y0 = Math.max(a.y, b.y), x1 = Math.min(a.x + a.w, b.x + b.w), y1 = Math.min(a.y + a.h, b.y + b.h);
+    const i = Math.max(0, x1 - x0) * Math.max(0, y1 - y0); return i / (a.w * a.h + b.w * b.h - i || 1); };
+  p.camScenes = [{ x: box.x, y: box.y, w: box.w, h: box.h, at: new Date().toISOString() }, ...(p.camScenes || []).filter((s) => ov(s, box) < 0.6)].slice(0, 8);
   saveNow();
 }

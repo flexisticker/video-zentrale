@@ -1365,6 +1365,69 @@ function styleGallery(onPick, current = {}) {
   document.body.append(modal);
 }
 
+// 🎥 Facecam-Rahmen und Bildaufbau eines Shorts von Hand setzen (Standbild aus dem Rohvideo, Rahmen ziehen)
+function camEditor(v) {
+  const mirror = !!v.rawInfo?.mirror;
+  const flip = (c) => (c && mirror ? { ...c, x: 1 - c.x - c.w } : c);   // Rohvideo ↔ so wie im fertigen Video
+  const L0 = v.edit?.layout || v.source.layout || { mode: 'crop', focus: 0.5 };
+  const st = { mode: L0.mode || 'crop', cam: flip(L0.cam) || { x: 0.68, y: 0.05, w: 0.28, h: 0.3 }, focus: mirror ? 1 - (L0.focus ?? 0.5) : (L0.focus ?? 0.5) };
+  const close = () => modal.remove();
+  const ar = v.rawInfo.width / v.rawInfo.height;
+  const img = h('img', { alt: '', draggable: false, style: { transform: mirror ? 'scaleX(-1)' : '' } });
+  const load = (t) => { img.src = `/api/videos/${v.id}/layout-frame?t=${t.toFixed(1)}&_=${Date.now()}`; };
+  const box = h('div', { class: 'cambox' }, ...['nw', 'ne', 'sw', 'se'].map((k) => h('i', { class: 'h ' + k, 'data-k': k })));
+  const focusLine = h('div', { class: 'focusline' });
+  const stage = h('div', { class: 'camstage', style: { aspectRatio: String(ar) } }, img, focusLine, box);
+  const paint = () => {
+    const c = st.cam;
+    Object.assign(box.style, { left: c.x * 100 + '%', top: c.y * 100 + '%', width: c.w * 100 + '%', height: c.h * 100 + '%', display: st.mode === 'cam' ? '' : 'none' });
+    focusLine.style.left = st.focus * 100 + '%';
+    focusLine.style.display = st.mode === 'blur' ? 'none' : '';
+  };
+  // Ziehen (Rahmen verschieben) und an den Ecken aufziehen
+  let drag = null;
+  const rel = (e) => { const r = stage.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }; };
+  const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+  box.addEventListener('pointerdown', (e) => { e.preventDefault(); box.setPointerCapture(e.pointerId); drag = { k: e.target.dataset.k || 'move', p: rel(e), c: { ...st.cam } }; });
+  box.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const p = rel(e), dx = p.x - drag.p.x, dy = p.y - drag.p.y, c0 = drag.c, min = 0.04;
+    let { x, y, w, h: hh } = c0;
+    if (drag.k === 'move') { x = clamp(c0.x + dx, 0, 1 - c0.w); y = clamp(c0.y + dy, 0, 1 - c0.h); }
+    else {
+      if (drag.k.includes('w')) { x = clamp(c0.x + dx, 0, c0.x + c0.w - min); w = c0.x + c0.w - x; }
+      if (drag.k.includes('e')) w = clamp(c0.w + dx, min, 1 - c0.x);
+      if (drag.k.includes('n')) { y = clamp(c0.y + dy, 0, c0.y + c0.h - min); hh = c0.y + c0.h - y; }
+      if (drag.k.includes('s')) hh = clamp(c0.h + dy, min, 1 - c0.y);
+    }
+    st.cam = { x, y, w, h: hh }; paint();
+  });
+  box.addEventListener('pointerup', () => { drag = null; });
+  stage.addEventListener('pointerdown', (e) => { if (e.target === img || e.target === stage || e.target === focusLine) { if (st.mode !== 'blur') { st.focus = clamp(rel(e).x, 0, 1); paint(); } } });
+  const modeSel = h('div', { class: 'chips' }, Object.entries({ cam: '🎥 Facecam oben + Spiel', crop: '✂ Ausschnitt', blur: '🌫 ganzes Bild + Blur' }).map(([k, n]) =>
+    h('button', { class: 'chip-btn' + (st.mode === k ? ' on' : ''), onclick: (e) => { st.mode = k; for (const b of modeSel.querySelectorAll('.chip-btn')) b.classList.toggle('on', b === e.currentTarget); paint(); } }, n)));
+  const t0 = v.source.start, t1 = v.source.end;
+  const time = h('input', { type: 'range', min: t0, max: t1, step: 0.5, value: (t0 + t1) / 2, onchange: () => load(Number(time.value)) });
+  const remember = h('input', { type: 'checkbox', checked: true });
+  const save = h('button', { class: 'btn primary', onclick: async () => {
+    try {
+      const cam = st.mode === 'cam' ? flip(st.cam) : null;
+      Object.assign(v, await api('POST', `/api/videos/${v.id}/layout`, { mode: st.mode, cam, focus: mirror ? 1 - st.focus : st.focus, remember: remember.checked && st.mode === 'cam' }));
+      toast('Wird mit neuem Bildaufbau neu gerechnet …'); close(); await refresh(); updateDetail(true); pollActivity(); startPolling();
+    } catch (x) { toast(x.message, true); }
+  } }, '✓ Übernehmen & neu rechnen');
+  const modal = h('div', { class: 'modal sheetmodal', onclick: (e) => { if (e.target === modal) close(); } },
+    h('div', { class: 'sheet wide' }, h('button', { class: 'close', onclick: close, title: 'Schließen' }, '×'), h('h2', {}, '🎥 Facecam & Bildaufbau'),
+      h('p', { class: 'hint' }, 'Rahmen genau um das Kamerabild ziehen (an den Ecken größer/kleiner). Klick ins Bild setzt die Mitte des Spiel-Ausschnitts (gestrichelte Linie).'),
+      L0.cam2 ? h('p', { class: 'hint' }, '⚠ In diesem Clip wechselt die Facecam die Position (automatisch erkannt). Von Hand gilt ein Rahmen für den ganzen Clip.') : null,
+      modeSel, stage,
+      h('div', { class: 'row', style: { alignItems: 'center', gap: '8px', marginTop: '8px', flexWrap: 'wrap' } }, h('span', { class: 'hint' }, 'Stelle im Clip:'), time),
+      h('label', { class: 'check', style: { marginTop: '6px' } }, remember, 'Diesen Facecam-Rahmen für den Kanal merken (künftige Clips nehmen ihn automatisch, wenn die Facecam dort sitzt)'),
+      h('div', { class: 'row', style: { marginTop: '10px' } }, save, h('button', { class: 'btn ghost', onclick: close }, 'Abbrechen'))));
+  document.body.append(modal);
+  load(Number(time.value)); paint();
+}
+
 // Titelbild als erstes Bild ins Video (beim Hochladen, Original bleibt)
 function coverFrameSel(v) {
   const chan = profilesList().find((p) => p.id === (v.channel || v.suggestion?.id));
@@ -1413,6 +1476,14 @@ function renderMirror(box, v) {
         try { Object.assign(v, await api('POST', `/api/videos/${v.id}/text-style`, { style, hookLook })); toast('Wird mit neuem Text-Stil neu gerechnet …'); await refresh(); updateDetail(true); pollActivity(); startPolling(); }
         catch (x) { toast(x.message, true); }
       }, v.edit) }, '🔤 Text-Stil ändern')));
+  }
+  // Bildaufbau/Facecam von Hand (nur Shorts aus Querformat)
+  if (v.source?.kind === 'short' && v.rawInfo && v.rawInfo.width > v.rawInfo.height && v.canMirror === true) {
+    const L = v.edit?.layout || v.source.layout;
+    const names = { cam: 'Facecam oben + Spiel', crop: 'Ausschnitt', blur: 'ganzes Bild + Blur' };
+    kids.push(h('div', { class: 'row', style: { alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '6px' } },
+      h('span', { class: 'hint' }, `🎥 Bild: ${names[L?.mode] || 'Ausschnitt'}${L?.manual ? ' (von Hand)' : ''}`),
+      h('button', { class: 'btn small', onclick: () => camEditor(v) }, '🎥 Facecam / Ausschnitt korrigieren')));
   }
   if (v.canMirror !== true && !isRawV) kids.push(h('span', { class: 'hint' }, '🪞 ' + v.canMirror));
   else {
@@ -1892,6 +1963,8 @@ async function renderSettings() {
       isPro(p) ? null : h('div', { class: 'two' }, h('div', {}, h('label', {}, '🔤 Untertitel-Stil'), capSel),
         h('div', {}, h('label', {}, '💬 Look des Hook-Texts'), lookSel,
           h('button', { class: 'btn small', style: { marginTop: '6px' }, onclick: () => styleGallery((id, look) => { capSel.value = id; if (look) lookSel.value = look; toast('Übernommen – bitte Kanal speichern.'); }) }, '👀 Vorlagen ansehen'))),
+      p.camScenes ? h('div', { class: 'hint' }, `🎥 ${p.camScenes} gemerkte Facecam-Rahmen (von Hand korrigiert) `,
+        h('button', { class: 'btn small ghost', onclick: () => confirm('Gemerkte Facecam-Rahmen dieses Kanals vergessen?') && run(() => api('PUT', '/api/profiles/' + p.id, { clearScenes: true }), 'Vergessen.')() }, 'vergessen')) : null,
       h('div', { class: 'two' }, h('div', {}, h('label', {}, '🖼 Titelbild vorne ins Video (beim Hochladen)'), coverSel),
         h('div', { class: 'hint', style: { marginTop: '22px' } }, 'Vorschauen (Shorts, TikTok, WhatsApp) zeigen dann dein Titelbild. Je Video änderbar.')),
       h('div', { class: 'two' }, h('div', {}, h('label', {}, '🎵 Musikstil für KI-Musik'), mStyle), h('div', {}, h('label', {}, 'Stimmung (Langfassung)'), mMood)),

@@ -48,7 +48,13 @@ function camBox(srcW, srcH, cam, ar) {
 
 // → { graph, seam (Pixel: Unterkante Facecam, 0 ohne), mode }
 // reactions: [{ t, dur }] Zeiten im fertigen Short
-export function graph(input, output, { srcW, srcH, layout, reactions = [], W = 1080, H = 1920 }) {
+// prefix: eigene Namen für die inneren Zwischenschritte (wenn zwei Bildaufbauten in einem Filter stecken)
+export function graph(input, output, opts) {
+  const g = graph0(input, output, opts);
+  if (!opts.prefix) return g;
+  return { ...g, graph: g.graph.replace(/\[(m0|ma|mb|top|bot|bg|fg|r0|ra|rb|rt|rbt|big|norm)\]/g, `[${opts.prefix}$1]`) };
+}
+function graph0(input, output, { srcW, srcH, layout, reactions = [], W = 1080, H = 1920 }) {
   const L = layout || { mode: 'crop', focus: 0.5 };
   if (!srcW || !srcH) return { graph: `[${input}]crop=trunc(ih*9/16/2)*2:ih,scale=${W}:${H}:${SC},setsar=1[${output}]`, seam: 0, mode: 'crop' };
   const reacts = L.cam ? reactions.filter((r) => Number.isFinite(r.t)) : [];
@@ -82,10 +88,11 @@ export function graph(input, output, { srcW, srcH, layout, reactions = [], W = 1
 // Bildaufbau zu einer gespiegelten Quelle: Facecam und Fokus wandern auf die andere Seite
 export function mirrorLayout(L) {
   if (!L) return L;
-  return { ...L, cam: L.cam ? { ...L.cam, x: clamp(1 - L.cam.x - L.cam.w, 0, 1) } : L.cam, focus: Number.isFinite(L.focus) ? 1 - L.focus : L.focus };
+  const m = (c) => (c ? { ...c, x: clamp(1 - c.x - c.w, 0, 1) } : c);
+  return { ...L, cam: m(L.cam), cam2: m(L.cam2), focus: Number.isFinite(L.focus) ? 1 - L.focus : L.focus };
 }
 
 export function describe(L, reactions = 0) {
   const m = { cam: 'Facecam oben + Spiel', crop: 'Ausschnitt um die Action', blur: 'ganzes Bild + Blur-Hintergrund' }[L?.mode] || '';
-  return m ? `Bild: ${m}${reactions ? `, ${reactions}× Reaktion groß` : ''}` : '';
+  return m ? `Bild: ${m}${L.cam2 ? ', Facecam wechselt die Position' : ''}${reactions ? `, ${reactions}× Reaktion groß` : ''}` : '';
 }

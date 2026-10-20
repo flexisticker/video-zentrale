@@ -27,7 +27,9 @@ PC-Analyse (ab Version 1.5):
   (%LOCALAPPDATA%\VideoZentrale-Rechenhelfer, ca. 5–6 GB, 15–60 Min., keine Administratorrechte nötig).
   Die Modelle (ca. 600 MB) lädt der erste Auftrag. Fortschritt im Fenster und in der Zentrale.
   Geht die Einrichtung schief, läuft die Spracherkennung trotzdem weiter; neuer Versuch beim nächsten Start.
-  Neu einrichten: Ordner "py" und Datei "py-bereit-1.txt" in %LOCALAPPDATA%\VideoZentrale-Rechenhelfer löschen.
+  Neu einrichten: Ordner "py" und Datei "py-bereit-2.txt" in %LOCALAPPDATA%\VideoZentrale-Rechenhelfer löschen.
+  Ab Version 1.8 sucht die PC-Analyse auch Gesichter (OpenCV YuNet, Datei face_detection_yunet_2023mar.onnx,
+  MIT-Lizenz) – damit findet die Zentrale die Facecam automatisch, auch wenn sie im Stream die Position wechselt.
 
 Starten von Hand:   "Starten.bat"
 Autostart entfernen: "Autostart entfernen.bat"
