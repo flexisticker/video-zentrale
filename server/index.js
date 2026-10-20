@@ -16,6 +16,7 @@ import * as ai from './ai.js';
 import * as autocut from './autocut.js';
 import * as whisper from './whisper.js';
 import * as thumbs from './thumbs.js';
+import * as cover from './cover.js';
 import * as music from './music.js';
 import * as ver from './version.js';
 import * as backup from './backup.js';
@@ -121,6 +122,7 @@ function publicVideo(v) {
     imageVersion: v.image ? (v.imageAt || v.mtime) : v.thumbAt, hasImage: !!lib.imagePath(v),
     canRevise: ['short', 'long', 'summary'].includes(v.source?.kind) ? autocut.revisable(v) || true : undefined,
     canMirror: autocut.rerenderable(v) || true,
+    coverMode: cover.modeOf(v),
     mirrorSiblings: v.source?.rawId && db().videos[v.source.rawId] ? autocut.childrenOf(db().videos[v.source.rawId]).length - 1 : !v.source ? autocut.childrenOf(v).length : 0,
     topic: org.topicOf(v) };
 }
@@ -459,6 +461,15 @@ async function api(req, res, url) {
         if (c !== (v.channel || '')) { v.channel = c; v.channelFrom = c ? 'manual' : ''; }
       }
       v.editedAt = new Date().toISOString();
+      saveNow();
+      return send(res, 200, publicVideo(v));
+    }
+    // Titelbild als erstes Bild beim Hochladen: '' = Kanal-Vorgabe, aus, bild, kurz
+    if (sub === '/cover-frame' && m === 'POST') {
+      const b = await readJson(req);
+      if (b.mode === '' || b.mode == null) delete v.coverFrame;
+      else if (cover.MODES[b.mode]) v.coverFrame = b.mode;
+      else throw new HttpError(400, 'Unbekannte Einstellung.');
       saveNow();
       return send(res, 200, publicVideo(v));
     }

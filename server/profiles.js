@@ -57,6 +57,7 @@ export function publicProfile(p) {
     clipHints: p.clipHints || '', shorts: Number.isFinite(p.shorts) ? p.shorts : null,
     hookStyle: p.hookStyle || 'auto', tempo: p.tempo || 'normal', hookHint: p.hookHint || '',
     fxLevel: p.fxLevel || 'normal', fxImages: !!p.fxImages,
+    coverFrame: p.coverFrame || 'aus',
     logo: p.logo || null,
     category: p.category || '20', tags: p.tags || '', footer: p.footer || '',
     youtube: { connected: !!p.youtube?.refreshToken, channel: p.youtube?.channel || null },
@@ -77,6 +78,7 @@ export function update(id, b) {
   if (['aus', 'ruhig', 'normal', 'schnell'].includes(b.tempo)) p.tempo = b.tempo;
   if (['aus', 'dezent', 'normal', 'viel'].includes(b.fxLevel)) p.fxLevel = b.fxLevel;
   if (typeof b.fxImages === 'boolean') p.fxImages = b.fxImages;
+  if (['aus', 'bild', 'kurz'].includes(b.coverFrame)) p.coverFrame = b.coverFrame;
   if ('shorts' in b) p.shorts = b.shorts === null || b.shorts === '' ? undefined : Math.max(0, Math.min(10, Math.round(Number(b.shorts)) || 0));
   if (typeof b.music === 'boolean') p.music = b.music;
   if ('musicMood' in b && ['', 'episch', 'lustig', 'spannend', 'chillig', 'energisch', 'fröhlich', 'traurig'].includes(b.musicMood)) p.musicMood = b.musicMood;

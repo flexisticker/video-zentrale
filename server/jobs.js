@@ -4,6 +4,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { db, save, saveNow, DATA_DIR } from './store.js';
 import { fileOf, imagePath, moveVideo } from './library.js';
+import * as cover from './cover.js';
 import * as youtube from './youtube.js';
 import * as tiktok from './tiktok.js';
 import * as profiles from './profiles.js';
@@ -71,19 +72,29 @@ async function next() {
   running = true;
   const v = db().videos[job.id];
   const k = job.platform === 'youtube' ? 'yt' : 'tt';
+  let coverTmp = null;
   try {
     if (!v) return;
     const p = profiles.get(v[k].profileId);
     if (!p) throw new Error('Kanal wurde gelöscht.');
     v[k].state = 'uploading';
     save();
-    const file = fileOf(v);
+    let file = fileOf(v);
     let last = 0;
     const progress = (done, total, note = '') => {
       v[k].progress = total ? Math.round((done / total) * 1000) / 10 : 0;
       v[k].note = note;   // z. B. „Verbindung hing – neuer Versuch 2/8“
       if (note || Date.now() - last > 1000 || done === total) { last = Date.now(); save(); }
     };
+    // Titelbild als erstes Bild: Kopie mit Titelbild vorne hochladen (Original bleibt unverändert)
+    const cmode = cover.modeOf(v);
+    v[k].cover = false; v[k].coverError = '';
+    if (cmode !== 'aus' && imagePath(v)) {
+      v[k].note = 'Titelbild vorne einfügen …'; save();
+      try { coverTmp = await cover.build(v, file, imagePath(v), cmode); if (coverTmp) { file = coverTmp; v[k].cover = cmode; } }
+      catch (e) { v[k].coverError = e.message + ' – Video ohne Titelbild vorne hochgeladen.'; }
+      v[k].note = ''; save();
+    }
     if (job.platform === 'youtube') {
       let img = imagePath(v);
       if (img) {
@@ -100,7 +111,9 @@ async function next() {
         channelTitle: p.youtube.channel?.title || '', channelId: p.youtube.channel?.id || '',
         history: [...(v.yt.history || []), { id: r.id, profileId: p.id, at: new Date().toISOString() }] };
     } else {
-      const publishId = await tiktok.upload(p, file, progress, v.tt.mode === 'direct' ? v.tt.direct : null);
+      // Direkt veröffentlichen: Titelbild (erstes Bild) ausdrücklich als Cover wählen
+      const direct = v.tt.mode === 'direct' ? { ...v.tt.direct, ...(v.tt.cover ? { coverMs: 0 } : {}) } : null;
+      const publishId = await tiktok.upload(p, file, progress, direct);
       v.tt = { ...v.tt, state: 'processing', progress: 100, publishId, error: '', at: new Date().toISOString() };
       watchTikTok(v.id);
     }
@@ -109,6 +122,7 @@ async function next() {
   } catch (e) {
     if (v) { v[k] = { ...v[k], state: 'error', error: e.message }; saveNow(); }
   } finally {
+    if (coverTmp) fs.rmSync(coverTmp, { force: true });
     running = false;
     next();
   }

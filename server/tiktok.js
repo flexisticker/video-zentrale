@@ -138,6 +138,7 @@ export async function upload(p, filePath, progress, direct = null) {
         title: String(direct.title || '').slice(0, 2200), privacy_level: direct.privacy,
         disable_comment: !direct.allowComment, disable_duet: !direct.allowDuet, disable_stitch: !direct.allowStitch,
         brand_organic_toggle: !!direct.brandOrganic, brand_content_toggle: !!direct.brandContent,
+        ...(Number.isFinite(direct.coverMs) ? { video_cover_timestamp_ms: direct.coverMs } : {}),
       }, source_info }) })
     : await fetch(API + '/v2/post/publish/inbox/video/init/', { method: 'POST',
       headers: { Authorization: 'Bearer ' + await token(p), 'Content-Type': 'application/json; charset=UTF-8' },

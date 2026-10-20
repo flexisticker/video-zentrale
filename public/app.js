@@ -696,7 +696,8 @@ function openDetail(id) {
       h('button', { class: 'btn small', onclick: grabFrame }, '📷 Aktuelles Videobild nehmen'),
       h('button', { class: 'btn small', onclick: () => imgInput.click() }, '⤒ Bild hochladen'),
       v.hasImage ? h('a', { class: 'btn small ghost', href: imgUrl(v) + '&download=1', download: '' }, '⤓ Titelbild herunterladen') : null,
-      h('span', { class: 'hint' }, 'YouTube: 1280 × 720, max. 2 MB (wird automatisch angepasst).'), imgInput)),
+      h('span', { class: 'hint' }, 'YouTube: 1280 × 720, max. 2 MB (wird automatisch angepasst).'), imgInput,
+      coverFrameSel(v))),
     h('div', { class: 'meta', style: { marginTop: '10px' } },
       v.file, ' · ', fmtSize(v.size), v.width ? ` · ${v.width} × ${v.height}` : '', v.duration ? ' · ' + fmtDur(v.duration) : ''),
     mirrorBox,
@@ -1342,6 +1343,19 @@ const REVISE_CHIPS = ['Hook stärker – mit dem Höhepunkt einsteigen', 'Kürze
   'Ohne Musik', 'Andere Stelle aus dem Video nehmen', 'Weniger Schnitte, ruhiger', 'Mehr Effekte (Emojis, Sounds)', 'Weniger Effekte', 'Ohne Effekte'];
 const REVISE_CHIPS_LONG = ['Intro raus (Lobby, Ladebildschirm, Menü, Warten)', 'Langweilige Stellen raus', 'Nur die besten Stellen – deutlich kürzer',
   'Teaser mit dem Höhepunkt am Anfang', 'Weniger Pausen (schneller)', 'Outro/Ende kürzen', 'Ohne Musik', 'Mit Musik'];
+// Titelbild als erstes Bild ins Video (beim Hochladen, Original bleibt)
+function coverFrameSel(v) {
+  const chan = profilesList().find((p) => p.id === (v.channel || v.suggestion?.id));
+  const names = { aus: 'aus', bild: 'als erstes Bild', kurz: '0,4 s stehend' };
+  const sel = h('select', { onchange: async () => {
+    try { Object.assign(v, await api('POST', `/api/videos/${v.id}/cover-frame`, { mode: sel.value })); toast('Gespeichert.'); }
+    catch (x) { toast(x.message, true); }
+  } }, h('option', { value: '', selected: v.coverFrame == null }, `wie Kanal (${names[chan?.coverFrame || 'aus']})`),
+  Object.entries(names).map(([k, n]) => h('option', { value: k, selected: v.coverFrame === k }, n)));
+  return h('label', { class: 'hint', style: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }, title: 'Beim Hochladen wird eine Kopie mit dem Titelbild am Anfang gebaut – Vorschauen (Shorts, TikTok, WhatsApp) zeigen dann dein Titelbild. Das Original bleibt unverändert.' },
+    '🖼 Titelbild vorne ins Video:', sel);
+}
+
 // 🪞 Spiegeln: Bild waagerecht spiegeln (z. B. gespiegelte Facecam/Schrift). Erzeugte Texte bleiben lesbar.
 function renderMirror(box, v) {
   const st = v.rerender?.state;
@@ -1772,10 +1786,12 @@ async function renderSettings() {
     const fxSel = h('select', {}, Object.entries({ aus: 'aus', dezent: 'dezent (wenige Emojis/Sounds)', normal: 'normal (+ Freeze, Zeitlupe, Zoom, Wackeln)', viel: 'viel (+ KI-Sticker)' })
       .map(([k, n]) => h('option', { value: k, selected: (p.fxLevel || 'normal') === k }, n)));
     const fxImg = h('input', { type: 'checkbox', checked: !!p.fxImages });
+    const coverSel = h('select', {}, Object.entries({ aus: 'aus', bild: 'als erstes Bild (unsichtbar beim Abspielen)', kurz: '0,4 Sekunden stehend' })
+      .map(([k, n]) => h('option', { value: k, selected: (p.coverFrame || 'aus') === k }, n)));
     const save = run(() => api('PUT', '/api/profiles/' + p.id, { name: name.value, color: color.value, isDefault: def.checked || undefined,
       keywords: kw.value, aiStyle: style.value, category: cat.value, tags: tags.value, footer: footer.value,
       musicStyle: mStyle.value, musicMood: mMood.value, clipHints: clipHints.value, shorts: chShorts.value === '' ? null : Number(chShorts.value),
-      hookStyle: hookSel.value, tempo: tempoSel.value, hookHint: hookHint.value, fxLevel: fxSel.value, fxImages: fxImg.checked,
+      hookStyle: hookSel.value, tempo: tempoSel.value, hookHint: hookHint.value, fxLevel: fxSel.value, fxImages: fxImg.checked, coverFrame: coverSel.value,
       ...(isPro(p) ? { music: proMusic.checked } : {}) }), 'Kanal gespeichert.');
 
     // YouTube
@@ -1836,6 +1852,8 @@ async function renderSettings() {
       h('label', {}, 'Hinweis zum Hook für Claude'), hookHint,
       h('div', { class: 'two' }, h('div', {}, h('label', {}, '🎉 Effekte in Clips (Emojis, Sounds, Freeze …)'), fxSel),
         h('div', {}, h('label', { class: 'check', style: { marginTop: '22px' } }, fxImg, 'KI-Sticker aus meinen Fotos (Stufe „viel“, ca. 5 Cent)'))),
+      h('div', { class: 'two' }, h('div', {}, h('label', {}, '🖼 Titelbild vorne ins Video (beim Hochladen)'), coverSel),
+        h('div', { class: 'hint', style: { marginTop: '22px' } }, 'Vorschauen (Shorts, TikTok, WhatsApp) zeigen dann dein Titelbild. Je Video änderbar.')),
       h('div', { class: 'two' }, h('div', {}, h('label', {}, '🎵 Musikstil für KI-Musik'), mStyle), h('div', {}, h('label', {}, 'Stimmung (Langfassung)'), mMood)),
       h('p', { class: 'hint' }, `Eigene Titel: ${st.music?.counts?.[p.id] ?? 0} (Ordner musik\\${p.id} + musik)`),
       h('div', { class: 'row', style: { marginTop: '12px' } },
