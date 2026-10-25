@@ -90,11 +90,20 @@ export async function ask(task, content, schema, { effort, maxTokens = 64000 } =
     if (!fallback || localErr) throw new Error(msg);
     try { return await local('Claude: ' + msg); } catch (x) { throw new Error(msg + ' Lokale KI: ' + x.message); }
   };
+  const call = (c) => api().beta.messages.stream({ model: MODEL, max_tokens: maxTokens, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
+    output_config: { effort: effort || cutEffort(), format: { type: 'json_schema', schema } }, messages: [{ role: 'user', content: c }] }).finalMessage();
   let r;
   try {
-    r = await api().beta.messages.stream({ model: MODEL, max_tokens: maxTokens, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
-      output_config: { effort: effort || cutEffort(), format: { type: 'json_schema', schema } }, messages: [{ role: 'user', content }] }).finalMessage();
+    try { r = await call(content); }
+    catch (e) {
+      // Bild nicht lesbar (400 „image …“) → einmal ohne Bilder versuchen statt ganz abzubrechen
+      const noImg = Array.isArray(content) ? content.filter((b) => b.type !== 'image') : content;
+      if (!(e instanceof Anthropic.BadRequestError && /image/i.test(e.message) && noImg.length < content.length)) throw e;
+      console.warn('[ki] Claude lehnt ein Bild ab – neuer Versuch ohne Bilder:', e.message);
+      r = await call(noImg);
+    }
   } catch (e) {
+    if (e instanceof Anthropic.BadRequestError) console.warn(`[ki] Claude 400 bei „${task}“:`, e.message);
     const msg = friendly(e);
     if (isBlockErr(e)) {
       cfg().blocked = { at: new Date().toISOString(), reason: msg }; saveNow();
@@ -148,7 +157,9 @@ async function extractFrames(v) {
     // längste Seite max. 1280 px – reicht Claude und hält die Kosten klein
     const ok = await ffmpeg(['-hide_banner', '-loglevel', 'error', '-y', '-ss', at, '-i', fileOf(v),
       '-vf', "scale='if(gt(iw,ih),min(1280,iw),-2)':'if(gt(iw,ih),-2,min(1280,ih))'", '-frames:v', '1', '-q:v', '4', file]);
-    if (ok && fs.existsSync(file)) out.push({ n: i + 1, file, at: Number(at) });
+    // leere/kaputte Bilder (z. B. kurz vor dem Ende) nicht mitschicken – Claude lehnt die ganze Anfrage sonst mit 400 ab
+    if (ok && fs.existsSync(file) && fs.statSync(file).size > 1000) out.push({ n: i + 1, file, at: Number(at) });
+    else fs.rmSync(file, { force: true });
   }
   if (!out.length) throw new Error('Keine Standbilder lesbar (ffmpeg).');
   return out;
@@ -172,7 +183,7 @@ function schema(ids, labels, pro = false) {
           packaging: s('Tipp zu Titel/Titelbild/Text: was klickstärker wäre'),
           nextTime: s('Tipp für den Creator fürs nächste Mal beim Aufnehmen (z. B. Reaktionen laut aussprechen, Facecam, Ziel vorher ansagen)') } },
       game: s('Erkanntes Spiel bzw. Produkt/Thema, leer wenn unklar.'),
-      channel: { type: 'string', enum: ids, description: 'Kanal-ID, zu dem das Video am besten passt.' },
+      channel: { type: 'string', enum: [...new Set(ids)], description: 'Kanal-ID, zu dem das Video am besten passt.' },
       channelReason: s('Kurze Begründung für den Kanal.'),
       titles: { type: 'array', items: { type: 'string' }, description: 'Genau 3 YouTube-Titel, je höchstens 90 Zeichen, unterschiedlich im Stil.' },
       description: s('YouTube-Beschreibung: starke erste Zeile, 2–4 kurze Absätze, ohne Hashtag-Block, ohne erfundene Links.'),
@@ -297,7 +308,8 @@ export async function suggest(v, extra = '') {
   const pro = profiles.isPro(chosen);
   // LinkedIn wählt Claude nie selbst – nur wenn das Video von Hand bzw. über „eingang-profi“ dorthin gehört
   const ids = pro ? [chosen.id] : profiles.list().filter((p) => !profiles.isPro(p)).map((p) => p.id);
-  const labels = ['', ...new Set(thumbs.photos().map((p) => p.label))];
+  // Enum ohne Doppelte/Leere: ein Foto ohne Ausdruck-Label ("") hätte sonst "" zweimal ergeben → Claude lehnt das Schema ab (400)
+  const labels = [...new Set(['', ...thumbs.photos().map((p) => String(p.label ?? '').trim())])];
   const content = [{ type: 'text', text: (pro ? proPrompt(v, frames, extra, chosen) : prompt(v, frames, extra)) + (labels.length > 1
     ? `\n\nFür Titelbilder gibt es freigestellte Fotos des Creators mit diesen Gesichtsausdrücken: ${labels.filter(Boolean).join(', ')}.`
       + (pro ? ' Gute Titelbilder für LinkedIn: seriös, ruhige freundliche Mimik (z. B. „zeigend“, „nachdenklich“, „cool“), Produkt/Werkstatt im Fokus, 2–4 sachliche Wörter.'

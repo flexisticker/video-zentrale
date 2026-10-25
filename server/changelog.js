@@ -1,5 +1,8 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.32.1', date: '25.10.2026', items: [
+    'KI-Vorschlag: leere bzw. kaputte Standbilder werden nicht mehr mitgeschickt; lehnt Claude ein Bild ab, versucht die Zentrale es einmal ohne Bilder. Die genaue Claude-Meldung steht jetzt im Protokoll des Containers.',
+  ] },
   { version: '1.32.0', date: '25.10.2026', items: [
     'Knöpfe und Texte sagen jetzt „KI“ statt „Claude“ (z. B. „✨ KI-Vorschlag holen“) – egal ob Claude oder die lokale KI rechnet. Im Vorschlag steht, wer ihn erstellt hat.',
     'Je Aufgabe vier Wege (Einstellungen → Lokale KI): „Nur lokal“, „Lokal, sonst Claude“, „Claude, sonst lokal“ und „Nur Claude“. „Claude, sonst lokal“ springt jetzt bei jedem Claude-Fehler auf die lokale KI um, nicht nur bei fehlendem Guthaben.',

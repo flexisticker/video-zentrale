@@ -418,6 +418,8 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   „erstellt von: <engine>“; `ai.status().usable` = irgendeine KI erreichbar. Modi je Aufgabe jetzt 4 (`llm.MODES`/`MODE_NAMES`): lokal, auto (lokal, sonst Claude),
   claude (**Claude, sonst lokal** – bei jedem Claude-Fehler/Ablehnung/abgeschnittener oder unlesbarer Antwort lokal, `viaLocal` in `ai.ask`), nurclaude (nie lokal).
   `goesLocal(task)` für Bildprüfung/Parallelität. Getestet per Skript (Mock-Ollama, Claude unerreichbar).
+- 1.32.1: Kunde: „KI-Vorschlag holen“ → „Claude lehnt die Anfrage ab“ (400, genauer Text noch unbekannt). Standbilder < 1 KB werden verworfen,
+  400 mit „image“ → ein Versuch ohne Bilder, jede 400 wird mit Aufgabe ins Container-Log geschrieben (`[ki] Claude 400 …`). Enum `labels`/`ids` ohne Doppelte.
 - Ideen danach: „Best of der Woche“ automatisch (Zeitplan), Platz-Einblendungen „Platz 3/2/1“.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
   Sendeplätze je Kanal **stellt der Kunde selbst ein** (keine festen Startzeiten), „Einplanen“ auf nächsten freien Platz, Shorts
