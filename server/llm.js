@@ -182,15 +182,17 @@ function record(task, where, k) {
 export const recordClaude = (task, cost, tokens) => record(task, 'claude', { count: 1, cost, tokens });
 
 // → { out, engine, model, vision, cut } – wirft bei Fehler (Aufrufer entscheidet über Claude als Rückfall)
-export async function chat(task, content, schema, price) {
+export async function chat(task, content, schema, price, { onTarget } = {}) {
   const target = pickTarget(content.some((b) => b.type === 'image'));
   if (!target) throw new Error('Keine lokale KI eingerichtet (Einstellungen → Lokale KI).');
   busy[target]++;
+  const tell = (t) => { try { onTarget?.(t === 'pc' ? `Ollama auf dem PC (${cfg().pc.model})` : `Ollama auf dem Server (${cfg().model})`); } catch { /* egal */ } };
+  tell(target);
   try { return await chatOn(target, task, content, schema, price); }
   catch (e) {
     // PC hat den Auftrag nicht abgeholt (rechnet gerade Sprache/Analyse) oder ist weg → Server übernimmt
     if (target === 'pc' && serverReady() && /abgeholt|nicht rechtzeitig|verschwunden|Rechenhelfer/i.test(e.message)) {
-      busy.server++;
+      busy.server++; tell('server');
       try { return await chatOn('server', task, content, schema, price); } finally { busy.server--; }
     }
     throw e;

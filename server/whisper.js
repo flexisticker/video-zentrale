@@ -86,7 +86,8 @@ async function doTranscribe(videoFile, key, onProgress, track = 0) {
     const a = await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', videoFile, '-map', `0:a:${track || 0}`, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav]);
     if (a.code !== 0 || !fs.existsSync(wav)) return []; // keine Tonspur
     // -ml 1 -sow: ein Segment je Wort → Zeitmarken pro Wort
-    const args = ['-m', model, '-f', wav, '-l', 'de', '-ml', '1', '-sow', '-oj', '-of', base, '-pp'];
+    // -mc 0: kein Vortext als Kontext → keine Endlosschleifen („ich halte den Projektor“ × 20); -sns: Nicht-Sprache-Zeichen unterdrücken
+    const args = ['-m', model, '-f', wav, '-l', 'de', '-ml', '1', '-sow', '-mc', '0', '-sns', '-oj', '-of', base, '-pp'];
     let eng = 'Zentrale';
     const prog = (l) => { const m = /progress\s*=\s*(\d+)%/.exec(l); if (m) onProgress(Number(m[1]), eng); };
     // Rechenhelfer-PC online? Dann rechnet der (großes Modell, starke Grafikkarte). Klappt das nicht, rechnet der Server.
@@ -132,10 +133,70 @@ export function eventKind(t) {
 }
 const toWords = (j) => {
   const all = (j.transcription || []).map((x) => ({ s: (x.offsets?.from || 0) / 1000, e: (x.offsets?.to || 0) / 1000, t: String(x.text || '').trim() })).filter((x) => x.t);
-  const words = all.filter((x) => !TAG.test(x.t));
+  const words = dropHallucinations(all.filter((x) => !TAG.test(x.t)));
   words.events = all.filter((x) => TAG.test(x.t)).map((x) => ({ s: x.s, e: x.e, kind: eventKind(x.t), t: x.t.slice(0, 40) }));
   return words;
 };
+
+// Whisper „erfindet“ bei Spielgeräuschen, Musik oder Stille gern Sätze und wiederholt sie (bekannt: „Untertitel im Auftrag des ZDF“,
+// „Vielen Dank fürs Zuschauen“ – oder ein Satz aus dem Spiel, der immer wieder kommt). Hier raus:
+//  1. bekannte Füllsätze aus Trainingsdaten (Untertitel-Abspann)
+//  2. Schleifen: dieselbe Wortgruppe (3–10 Wörter) mehr als zweimal direkt hintereinander → nur einmal behalten
+//  3. derselbe Satz (≥ 3 Wörter) kommt im ganzen Video auffällig oft (≥ 4×, und mehr als 3 % aller Wörter) → alle Vorkommen raus
+const HALLU = [/untertitel(ung)?\s+(im auftrag|des|der|von)/, /im auftrag des (zdf|ard|wdr|swr|ndr)/, /vielen dank (fürs|für's|für das) zu(schauen|sehen|hören)/,
+  /bis zum nächsten mal/, /copyright\s+(wdr|zdf|ard|swr|ndr)/, /amara\.org/, /abonnier(t|en) (den kanal|meinen kanal)/, /swr\s*\d{4}/, /^\s*(zdf|ard|wdr|swr)\s*$/];
+const norm = (t) => String(t).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+export function dropHallucinations(words) {
+  if (!Array.isArray(words) || !words.length) return words || [];
+  let w = words.slice();
+  const n0 = w.length;
+  // 1. bekannte Sätze: über Fenster von bis zu 8 Wörtern suchen
+  const kill = new Set();
+  for (let i = 0; i < w.length; i++) {
+    let txt = '';
+    for (let k = i; k < Math.min(w.length, i + 8); k++) {
+      txt += (k > i ? ' ' : '') + w[k].t.toLowerCase();
+      if (HALLU.some((r) => r.exec(txt)?.index === 0)) {   // Treffer muss bei diesem Wort beginnen
+        while (k + 1 < w.length && /^(des|der|von|zdf|ard|wdr|swr|ndr|funk|\d{4})[.,!]?$/i.test(w[k + 1].t)) k++;   // „… des ZDF, 2020“ mitnehmen
+        for (let x = i; x <= k; x++) kill.add(x);
+        break;
+      }
+    }
+  }
+  w = w.filter((_, i) => !kill.has(i));
+  // 2. direkte Wiederholungen
+  for (let len = 10; len >= 3; len--) {   // Einzelwörter („nein nein nein!“) sind echte Reaktionen – bleiben
+    const out = [];
+    for (let i = 0; i < w.length;) {
+      const key = w.slice(i, i + len).map((x) => norm(x.t)).join(' ');
+      let reps = 1;
+      if (key.replace(/\s/g, '') && i + len <= w.length) {
+        while (i + (reps + 1) * len <= w.length && w.slice(i + reps * len, i + (reps + 1) * len).map((x) => norm(x.t)).join(' ') === key) reps++;
+      }
+      if (reps > 2) { out.push(...w.slice(i, i + len)); i += reps * len; }
+      else { out.push(w[i]); i++; }
+    }
+    w = out;
+  }
+  // 3. Wortgruppe (3–8 Wörter), die übers ganze Video verteilt auffällig oft kommt (≥ 4×, zusammen > 3 % des Textes) → alle Vorkommen raus
+  const totalChars = w.reduce((a, x) => a + norm(x.t).length, 0);
+  for (let len = 8; len >= 3; len--) {
+    const pos = new Map();
+    for (let i = 0; i + len <= w.length; i++) {
+      const key = w.slice(i, i + len).map((x) => norm(x.t)).join(' ');
+      if (key.replace(/\s/g, '').length < 12) continue;
+      const list = pos.get(key) || [];
+      if (!list.length || i >= list[list.length - 1] + len) list.push(i);   // nicht überlappend
+      pos.set(key, list);
+    }
+    const kill2 = new Set();
+    for (const [key, list] of pos) if (list.length >= 4 && list.length * key.replace(/\s/g, '').length > 0.03 * totalChars) for (const i of list) for (let x = i; x < i + len; x++) kill2.add(x);
+    if (kill2.size) w = w.filter((_, i) => !kill2.has(i));
+  }
+  if (w.length < n0) w.dropped = n0 - w.length;
+  w.events = words.events;
+  return w;
+}
 
 // Wörter zu Sätzen/Zeilen gruppieren (Anzeige, Text für Claude)
 // Satzgrenzen: Satzzeichen von Whisper oder deutliche Sprechpause. Lange Monologe ohne Punkt (beim Zocken häufig)
@@ -184,7 +245,7 @@ export function saveTranscript(v, words) {
 export function loadWords(v) {
   try {
     const j = JSON.parse(fs.readFileSync(path.join(TDIR, v.id + '.json'), 'utf8'));
-    return Array.isArray(j) ? j : j.words; // 1.3.0 speicherte Sätze als Liste
+    return dropHallucinations(Array.isArray(j) ? j : j.words); // 1.3.0 speicherte Sätze als Liste; ältere Transkripte werden beim Lesen gesäubert
   } catch { return null; }
 }
 // Geräusch-Ereignisse aus dem Transkript ([Lachen] …) – ältere Transkripte haben keine

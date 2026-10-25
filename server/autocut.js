@@ -197,6 +197,16 @@ function concatList(file, ranges) {
 
 const LOUDNORM = 'loudnorm=I=-14:TP=-1.5:LRA=11';
 
+// Hat die fertige Datei ein Bild und eine echte Länge? (Schutz: nie eine leere Ausgabe über ein fertiges Video legen)
+function probeVideoLen(file) {
+  return new Promise((resolve) => {
+    let out = '';
+    const p = spawn('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'format=duration:stream=codec_type', '-of', 'default=nw=1', file], { stdio: ['ignore', 'pipe', 'ignore'] });
+    p.stdout.on('data', (d) => { out += d; });
+    p.on('error', () => resolve(0));
+    p.on('close', () => resolve(/codec_type=video/.test(out) ? Number((/duration=([\d.]+)/.exec(out) || [])[1]) || 0 : 0));
+  });
+}
 // Bildrate der Quelle (für gleichmäßige Ausgabe); OBS nimmt oft mit variabler Rate auf
 function probeFps(file) {
   return new Promise((resolve) => {
@@ -395,7 +405,7 @@ async function renderShort(v, file, s, hasAudio, out, onP, words, track, pro = f
     graph += `;[${last}]ass=${ass}:fontsdir=${FONTS}[cap]`; last = 'cap';
   }
   // Hook-Text nie über das Gesicht: bei Facecam-Layout an die Naht darunter
-  const hookAss = s.hook?.text && c.hookText !== false ? buildHookAss(s.hook.text, { until: fx.hookTextUntil(parts, s.hook), width: W, height: H, pro, color: c.captions?.color,
+  const hookAss = s.hook?.text && c.hookText !== false ? buildHookAss(fx.tidyText(s.hook.text, 60), { until: fx.hookTextUntil(parts, s.hook), width: W, height: H, pro, color: c.captions?.color,
     top: seam ? seam + 24 : null, look: s.hookLook || 'kasten', style: s.style || '' }) : '';
   if (hookAss) {
     const f = path.join(TMP, `${v.id}-h${Math.round(s.start)}.ass`);
@@ -412,7 +422,8 @@ async function renderShort(v, file, s, hasAudio, out, onP, words, track, pro = f
     const wob = (k) => shakes.map((e) => `if(between(t,${e.t.toFixed(2)},${(e.t + 0.45).toFixed(2)}),24*${k}(t*75)*(1-(t-${e.t.toFixed(2)})/0.45),0)`).join('+');
     graph += `;[${last}]crop=w=iw-56:h=ih-56:x='28+${wob('sin')}':y='28+${wob('cos')}',scale=${W}:${H},setsar=1[shk]`; last = 'shk';
   }
-  const texts = events.filter((e) => e.text && ['freeze', 'replay', 'text'].includes(e.kind)).map((e) => ({ t: e.t, dur: Math.min(1.5, e.dur || 1.1), text: e.text }));
+  const texts = fx.uniqueTexts(events.filter((e) => e.text && ['freeze', 'replay', 'text'].includes(e.kind))
+    .map((e) => ({ t: e.t, dur: Math.min(1.5, e.dur || 1.1), text: fx.tidyText(e.text) })), s.hook?.text || '');
   const fxAss = buildFxAss(texts, { width: W, height: H, color: c.captions?.color, style: s.style || '' });
   if (fxAss) {
     const f = path.join(TMP, `${v.id}-fx${Math.round(s.start)}.ass`);
@@ -822,13 +833,13 @@ async function next() {
   if (i < 0) { clearTimeout(windowTimer); if (queue.length) windowTimer = setTimeout(next, 60_000); return; }
   const [item] = queue.splice(i, 1);
   if (!item) return;
-  if (typeof item === 'object') return item.trailer ? runTrailer(item.trailer) : item.rerender ? runRerender(item.rerender) : item.flip ? runFlip(item.flip) : runRevision(item);
+  if (typeof item === 'object') return item.trailer ? runTrailer(item.trailer) : item.rerender ? runRerender(item.rerender) : item.flip ? runFlip(item.flip) : ai.forVideo(item.revise, () => runRevision(item));
   const id = item;
   priority.delete(id);
   running = id;
   const v = db().videos[id];
   try {
-    if (v && !v.missing) await runCut(v);
+    if (v && !v.missing) await ai.forVideo(v.id, () => runCut(v));
   } catch (e) {
     if (e instanceof WaitForPc && v) {
       // zurück in die Warteschlange; alle 5 Minuten (oder sobald der PC frei ist) erneut
@@ -972,6 +983,7 @@ async function runRerender(id) {
       };
       try { await render(track); } catch (e) { if (!track) throw e; await render(null); }
     }
+    if (!fs.existsSync(tmp) || (await probeVideoLen(tmp)) < 1) throw new Error('Neu gerechnete Datei ist leer – das Original bleibt unverändert (passt der Schnitt noch zum Rohvideo?).');
     step('Datei ersetzen');
     replaceFile(out, tmp);
     out.mirror = !!raw.mirror;

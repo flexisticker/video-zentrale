@@ -721,11 +721,12 @@ function openDetail(id) {
     h('div', { class: 'row', style: { marginTop: '12px' } }, saveBtn),
     ytBox, ttBox);
 
+  const workBox = h('div', { class: 'workbox', hidden: true });
   const modal = h('div', { class: 'modal', onclick: (e) => { if (e.target === modal) close(); } },
     h('div', { class: 'sheet' },
       h('button', { class: 'close', onclick: close, title: 'Schließen' }, '×'),
       h('h2', {}, v.title || v.file),
-      folderEl,
+      folderEl, workBox,
       h('div', { class: 'detail' }, left, right)));
   document.body.append(modal);
   const onKey = (e) => { if (e.key === 'Escape' && !document.querySelector('.modal input:focus, .modal textarea:focus')) close(); };
@@ -744,8 +745,8 @@ function openDetail(id) {
     right.querySelector('.tt-part').style.display = pro ? 'none' : '';
     cat.parentElement.style.display = pro ? 'none' : '';
   };
-  detail = { id, cutBox, transcriptBox, v, ytBox, ttBox, moveBox, folderEl, ensureSaved, chanInfo, chan, aiBox, genBox, reviseBox, mirrorBox, player, f, applyMode, setField, setCover, setCoverFromFrame, isDirty: () => !saveBtn.disabled, markClean: () => { saveBtn.disabled = true; }, cleanup: () => document.removeEventListener('keydown', onKey) };
-  updateDetail();
+  detail = { id, workBox, cutBox, transcriptBox, v, ytBox, ttBox, moveBox, folderEl, ensureSaved, chanInfo, chan, aiBox, genBox, reviseBox, mirrorBox, player, f, applyMode, setField, setCover, setCoverFromFrame, isDirty: () => !saveBtn.disabled, markClean: () => { saveBtn.disabled = true; }, cleanup: () => document.removeEventListener('keydown', onKey) };
+  updateDetail(); drawWork(); pollActivity();
 }
 
 // LinkedIn: kein Upload – Video/Titelbild herunterladen, Beitrag kopieren, als gepostet markieren
@@ -1036,7 +1037,7 @@ function renderAi(box, v) {
   const conf = S.settings?.ai?.usable ?? S.settings?.ai?.configured;
   const hint = h('input', { placeholder: 'Hinweis für die KI (optional), z. B. „Thema: 1v3 in Runde 5“' });
   const ask = h('button', { class: 'btn primary', disabled: !conf || ['queued', 'running'].includes(a.state), onclick: async () => {
-    try { await detail.ensureSaved(); Object.assign(v, await api('POST', `/api/videos/${v.id}/ai`, { extra: hint.value })); await refresh(); updateDetail(); startPolling(); }
+    try { await detail.ensureSaved(); Object.assign(v, await api('POST', `/api/videos/${v.id}/ai`, { extra: hint.value })); await refresh(); updateDetail(); startPolling(); setTimeout(pollActivity, 1200); }
     catch (x) { toast(x.message, true); }
   } }, a.titles ? '✨ Neuen Vorschlag holen' : '✨ KI-Vorschlag holen');
   const kids = [h('h3', {}, '✨ KI-Vorschlag')];
@@ -1365,6 +1366,46 @@ function styleGallery(onPick, current = {}) {
   document.body.append(modal);
 }
 
+// ✏️ Eingeblendete Texte eines Shorts: ansehen, ändern, von der KI neu schreiben lassen → mit gleichem Schnitt neu rechnen
+async function textsEditor(v) {
+  let cur;
+  try { cur = await api('GET', `/api/videos/${v.id}/texts`); } catch (x) { return toast(x.message, true); }
+  const close = () => modal.remove();
+  const hookIn = cur.hook != null ? h('input', { value: cur.hook, maxlength: 60, placeholder: 'leer = kein Hook-Text' }) : null;
+  const KIND = { freeze: '⏸ Freeze', replay: '🐢 Zeitlupe', text: '💬 Text' };
+  const rows = cur.items.map((x) => ({ i: x.i, input: h('input', { value: x.text, maxlength: 42 }), label: `${KIND[x.kind] || x.kind} bei ${x.at.toFixed(1).replace('.', ',')} s` }));
+  const wish = h('input', { placeholder: 'Wunsch an die KI (optional), z. B. „frecher“, „auf Englisch“, „mehr Spannung“' });
+  const note = h('p', { class: 'hint' });
+  const genBtn = h('button', { class: 'btn small', onclick: async () => {
+    genBtn.disabled = true; genBtn.textContent = '⏳ KI schreibt …'; note.textContent = '';
+    try {
+      const r = await api('POST', `/api/videos/${v.id}/texts/suggest`, { wish: wish.value.trim() });
+      if (hookIn && r.hook != null) hookIn.value = r.hook;
+      for (const x of r.items || []) { const row = rows.find((y) => y.i === x.i); if (row) row.input.value = x.text; }
+      note.textContent = `Vorschlag eingesetzt${r.engine ? ' (' + r.engine + ')' : ''} – prüfen, ggf. anpassen, dann übernehmen.`;
+    } catch (x) { note.textContent = '✗ ' + x.message; }
+    genBtn.disabled = false; genBtn.textContent = '🔄 Neu erzeugen (KI)';
+  } }, '🔄 Neu erzeugen (KI)');
+  const save = h('button', { class: 'btn primary', disabled: !!cur.why, onclick: async () => {
+    try {
+      Object.assign(v, await api('POST', `/api/videos/${v.id}/texts`, { hook: hookIn ? hookIn.value : undefined, items: rows.map((r) => ({ i: r.i, text: r.input.value })) }));
+      toast('Texte übernommen – wird mit gleichem Schnitt neu gerechnet …'); close(); await refresh(); updateDetail(true); pollActivity(); startPolling();
+    } catch (x) { toast(x.message, true); }
+  } }, '✓ Übernehmen & neu rechnen');
+  const empty = !hookIn && !rows.length;
+  const modal = h('div', { class: 'modal sheetmodal', onclick: (e) => { if (e.target === modal) close(); } },
+    h('div', { class: 'sheet narrow' }, h('button', { class: 'close', onclick: close, title: 'Schließen' }, '×'), h('h2', {}, '✏️ Eingeblendete Texte'),
+      empty ? h('p', { class: 'hint' }, 'Dieser Short hat keine eingeblendeten Texte (kein Hook-Text, keine Freeze-/Zeitlupen-/Text-Effekte). Die Untertitel kommen aus dem Gesprochenen.')
+        : h('div', {},
+          h('p', { class: 'hint' }, 'Gleiche Texte werden nur einmal eingeblendet, Wortwiederholungen („WARTE WARTE“) fasst die Zentrale zusammen. Leeres Feld = Text weglassen.'),
+          hookIn ? [h('label', {}, '⚡ Hook-Text (erstes Bild)'), hookIn] : null,
+          rows.flatMap((r) => [h('label', {}, r.label), r.input]),
+          h('div', { class: 'row', style: { marginTop: '10px' } }, wish, genBtn), note,
+          cur.why ? h('p', { class: 'err' }, cur.why) : null,
+          h('div', { class: 'row', style: { marginTop: '10px' } }, save))));
+  document.body.append(modal);
+}
+
 // 🎥 Facecam-Rahmen und Bildaufbau eines Shorts von Hand setzen (Standbild aus dem Rohvideo, Rahmen ziehen)
 function camEditor(v) {
   const mirror = !!v.rawInfo?.mirror;
@@ -1476,6 +1517,12 @@ function renderMirror(box, v) {
         try { Object.assign(v, await api('POST', `/api/videos/${v.id}/text-style`, { style, hookLook })); toast('Wird mit neuem Text-Stil neu gerechnet …'); await refresh(); updateDetail(true); pollActivity(); startPolling(); }
         catch (x) { toast(x.message, true); }
       }, v.edit) }, '🔤 Text-Stil ändern')));
+  }
+  // Eingeblendete Texte (Hook-Text, Freeze/Zeitlupe/Text) ändern oder neu schreiben lassen
+  if (v.source?.kind === 'short' && v.canMirror === true) {
+    kids.push(h('div', { class: 'row', style: { alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '6px' } },
+      h('span', { class: 'hint' }, '✏️ Eingeblendete Texte'),
+      h('button', { class: 'btn small', onclick: () => textsEditor(v) }, '✏️ Texte ändern / neu erzeugen')));
   }
   // Bildaufbau/Facecam von Hand (nur Shorts aus Querformat)
   if (v.source?.kind === 'short' && v.rawInfo && v.rawInfo.width > v.rawInfo.height && v.canMirror === true) {
@@ -1718,6 +1765,21 @@ async function renderLibrary() {
 let actEl = null, actTimer = null, actData = null;
 const ACT_ICON = { cut: '✂', ai: '🤖', upload: '⤒' };
 const mmss = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+// Im geöffneten Video: was gerade daran gearbeitet wird – welche KI (Claude / Ollama Server / Ollama PC), Schnitt, Upload, Rechenhelfer
+function drawWork() {
+  const box = detail?.workBox;
+  if (!box || !actData) return;
+  const v = detail.v, ids = new Set([v.id]);
+  const a = actData, rows = [];
+  for (const j of a.ki || []) if (ids.has(j.videoId)) rows.push(['🤖', `${j.label}: ${j.engine || 'startet …'}`, j.since]);
+  for (const x of a.server || []) if (ids.has(x.id) && x.kind !== 'ai') rows.push([ACT_ICON[x.kind] || '⚙', x.step + (x.progress ? ` · ${String(x.progress).replace('.', ',')} %` : '') + (x.waiting ? ' (wartet auf den PC)' : ''), 0]);
+  for (const j of a.helper?.jobs || []) if (ids.has(j.id)) rows.push(['🖥', `${a.helper.name || 'PC'}: ${j.step}`, j.since]);
+  const queued = [v.ai?.state === 'queued' && 'KI-Vorschlag', v.cut?.state === 'queued' && 'Schnitt', v.revise?.state === 'queued' && 'Überarbeiten',
+    v.rerender?.state === 'queued' && (v.rerender.reason || 'Neu rechnen')].filter(Boolean);
+  if (queued.length) rows.push(['⏳', 'in der Warteschlange: ' + queued.join(', '), 0]);
+  box.hidden = !rows.length;
+  box.replaceChildren(...rows.map(([i, t, since]) => h('div', { class: 'work-row' }, h('span', { class: 'spin' }, i), h('span', {}, t + (since ? ` · seit ${mmss(a.now - since)}` : '')))));
+}
 function activityBar() {
   actEl = h('div', { class: 'activity', role: 'status', 'aria-live': 'polite' });
   if (actData) drawActivity(); else actEl.hidden = true;
@@ -1727,7 +1789,7 @@ function activityBar() {
 async function pollActivity() {
   clearTimeout(actTimer);
   try { actData = await api('GET', '/api/activity'); drawActivity(); } catch { }
-  const busy = actData && (actData.server.length || actData.helper.jobs.length);
+  const busy = actData && (actData.server.length || actData.helper.jobs.length || actData.ki?.length || (detail && !detail.workBox?.hidden));
   actTimer = setTimeout(pollActivity, busy ? 2500 : 10000);
 }
 function drawActivity() {
@@ -1766,6 +1828,7 @@ function drawActivity() {
     w.level === 'bad' ? h('button', { class: 'chip-btn', onclick: async () => { await api('POST', '/api/credits/dismiss', { provider: w.provider }).catch(() => {}); pollActivity(); } }, 'erledigt') : null));
   actEl.replaceChildren(...warns, srv, hpBox || '');
   actEl.hidden = false;
+  drawWork();
 }
 
 // ---------- Einstellungen ----------

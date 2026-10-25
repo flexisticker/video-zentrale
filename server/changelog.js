@@ -1,5 +1,13 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.33.0', date: '25.10.2026', items: [
+    '✏️ Eingeblendete Texte eines Shorts (Hook-Text, Freeze, Zeitlupe, Text-Effekte) ändern oder von der KI neu schreiben lassen – Knopf „Texte ändern / neu erzeugen“ im Video, danach wird mit gleichem Schnitt neu gerechnet.',
+    'Gleiche eingeblendete Texte kommen nur noch einmal, Wortwiederholungen („WARTE WARTE WARTE“) werden zusammengefasst.',
+    '🗣 Erfundene Sätze in den Untertiteln: Die Spracherkennung (Whisper) hat bei Spielgeräuschen/Musik manchmal Sätze erfunden und endlos wiederholt (z. B. „ich halte den Projektor“). Jetzt ohne Vortext-Schleife, mit Filter für Wiederholungen und typische Fantasie-Sätze („Untertitel im Auftrag des ZDF“ …). Gilt auch für schon erkannte Texte beim nächsten Neu-Rechnen.',
+    '🤖 Im geöffneten Video siehst du oben, woran gerade gearbeitet wird: welche KI (Claude, Ollama auf dem Server oder auf dem PC), Schnitt, Upload, Rechenhelfer, Warteschlange – bleibt beim Scrollen sichtbar.',
+    'Neu rechnen ersetzt das Video nie mehr durch eine leere Datei (Schutz, falls der Schnitt nicht mehr zum Rohvideo passt).',
+    'Rechenhelfer 1.11: gleiche Verbesserung der Spracherkennung auf dem PC (neu herunterladen).',
+  ] },
   { version: '1.32.6', date: '25.10.2026', items: [
     'Rechenhelfer 1.10: Beim Laden des KI-Modells auf dem PC siehst du jetzt den Fortschritt (Prozent, GB, Geschwindigkeit, Restzeit) – im Fenster des Rechenhelfers, oben in der Aktivitätsleiste und unter Einstellungen → Lokale KI. Rechenhelfer dafür neu herunterladen und einmal „Einrichten“ ausführen.',
   ] },

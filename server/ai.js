@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import Anthropic from '@anthropic-ai/sdk';
 import { db, save, saveNow, DATA_DIR } from './store.js';
 import * as profiles from './profiles.js';
@@ -90,9 +91,20 @@ export function canAsk(task) {
   if (m === 'nurclaude') return claudeUsable();
   return claudeUsable() || llm.ready();   // Claude-Aufgaben laufen lokal weiter, wenn Claude nicht geht
 }
-export async function ask(task, content, schema, { effort, maxTokens = 64000 } = {}) {
+// Welche KI arbeitet gerade an welchem Video? forVideo(id, fn) merkt das Video für alle KI-Aufrufe in fn (auch verschachtelt/asynchron),
+// activeJobs() liefert die laufenden Aufträge für die Aktivitätsanzeige (Video-Ansicht + Leiste oben).
+const actx = new AsyncLocalStorage();
+export const forVideo = (id, fn) => actx.run({ videoId: id }, fn);
+const active = new Map(); let jobSeq = 0;
+export const activeJobs = () => [...active.values()].map((j) => ({ ...j }));
+export async function ask(task, content, schema, opts = {}) {
+  const job = { id: ++jobSeq, videoId: actx.getStore()?.videoId || '', task, label: llm.TASKS[task] || task, engine: '', since: Date.now() };
+  active.set(job.id, job);
+  try { return await askInner(task, content, schema, opts, job); } finally { active.delete(job.id); }
+}
+async function askInner(task, content, schema, { effort, maxTokens = 64000 } = {}, job = {}) {
   const mode = llm.modeOf(task);
-  const local = async (why = '') => ({ ...(await llm.chat(task, content, schema, PRICE)), cost: 0, ...(why ? { why } : {}) });
+  const local = async (why = '') => ({ ...(await llm.chat(task, content, schema, PRICE, { onTarget: (e) => { job.engine = e; } })), cost: 0, ...(why ? { why } : {}) });
   const fallback = mode === 'claude' && llm.ready();   // „Claude, sonst lokal“
   let localErr = null;
   // lokal zuerst: Aufgabe steht auf lokal/auto – oder (Claude, sonst lokal) Claude ist gesperrt bzw. ohne Schlüssel
@@ -106,8 +118,8 @@ export async function ask(task, content, schema, { effort, maxTokens = 64000 } =
     if (!fallback || localErr) throw new Error(msg);
     try { return await local('Claude: ' + msg); } catch (x) { throw new Error(msg + ' Lokale KI: ' + x.message); }
   };
-  const call = (c) => api().beta.messages.stream({ model: MODEL, max_tokens: maxTokens, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
-    output_config: { effort: effort || cutEffort(), format: { type: 'json_schema', schema } }, messages: [{ role: 'user', content: c }] }).finalMessage();
+  const call = (c) => (job.engine = 'Claude', api().beta.messages.stream({ model: MODEL, max_tokens: maxTokens, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
+    output_config: { effort: effort || cutEffort(), format: { type: 'json_schema', schema } }, messages: [{ role: 'user', content: c }] }).finalMessage());
   let r;
   try {
     try { r = await call(content); }
@@ -601,6 +613,36 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '', op
 }
 
 // Render-Prüfung (qc.js): Claude sieht den FERTIGEN Clip als Kontaktbogen und prüft ihn wie ein Editor vor dem Posten
+// Eingeblendete Texte eines fertigen Shorts neu schreiben lassen (Hook-Text + Texte bei Freeze/Zeitlupe/Text-Effekt).
+// items: [{i, kind, at (Sekunde im Clip), text}], words: gesprochene Wörter im Clip. → { hook, items: [{i, text}] }
+export async function rewriteTexts({ hook, items, transcript, title, wish, profile, pro }) {
+  const schema = { type: 'object', additionalProperties: false, required: ['hook', 'items'], properties: {
+    hook: { type: 'string', description: 'Hook-Text fürs erste Bild, höchstens 5 Wörter (leer, wenn der Clip keinen Hook-Text hat)' },
+    items: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['i', 'text'], properties: {
+      i: { type: 'integer', enum: items.length ? items.map((x) => x.i) : [0] }, text: { type: 'string', description: 'kurzer Einblende-Text, 1–4 Wörter' } } } },
+  } };
+  const lines = [
+    'Du schreibst die kurzen, großen Einblende-Texte eines Shorts neu (Deutsch, Social-Media-Ton).',
+    pro ? 'LinkedIn-Clip: sachlich, seriös, kein Slang.' : `Kanal: ${profile?.name || ''}. ${profile?.aiStyle || ''}`,
+    'Regeln: Jeder Text ist ANDERS (keine Wiederholung, auch nicht des Hook-Texts), höchstens 4 Wörter (Hook höchstens 5), kein Wort doppelt hintereinander,',
+    'passt genau zu dem, was an der Stelle passiert bzw. gesagt wird, keine erfundenen Fakten, keine Hashtags, Emojis nur sparsam.',
+    'Freeze = Spannung vor der Auflösung („WARTE …“, „OH NEIN“), Zeitlupe = Höhepunkt betonen, Text = Pointe/Reaktion.',
+    wish ? `Wunsch des Creators: ${wish}` : '',
+    '',
+    `Titel: ${title || '–'}`,
+    hook != null ? `Bisheriger Hook-Text: „${hook}“` : 'Dieser Clip hat keinen Hook-Text – gib hook leer.',
+    items.length ? 'Bisherige Einblendungen (i, Art, Sekunde im Clip, Text):\n' + items.map((x) => `${x.i} | ${x.kind} | ${x.at.toFixed(1)} s | „${x.text}“`).join('\n') : 'Keine weiteren Einblendungen – gib items leer.',
+    '',
+    'Gesprochenes im Clip (mit Sekunde):',
+    transcript || '(kein Text erkannt)',
+  ].filter((l) => l !== '');
+  const r = await ask('texte', [{ type: 'text', text: lines.join('\n') }], schema, { effort: 'low', maxTokens: 4000 });
+  const out = r.out || {};
+  return { hook: hook != null ? fx.tidyText(out.hook || '', 60) : null,
+    items: (Array.isArray(out.items) ? out.items : []).filter((x) => items.some((y) => y.i === x.i)).map((x) => ({ i: x.i, text: fx.tidyText(x.text) })),
+    engine: r.engine };
+}
+
 export async function reviewClip(sheetFile, info = {}) {
   const text = [
     'Du bist Qualitätsprüfer für Shorts/TikTok. Hier ist ein Kontaktbogen des FERTIG geschnittenen Clips (12 Bilder in zeitlicher Folge, Sekunde oben links).',
@@ -701,7 +743,7 @@ async function next() {
   try {
     if (v && !v.missing) {
       v.ai = { ...v.ai, state: 'running' }; save();
-      await suggest(v, job.extra);
+      await forVideo(v.id, () => suggest(v, job.extra));
       try { suggested?.(v); } catch (e) { console.error('Nach dem Vorschlag:', e.message); }
     }
   } catch (e) {

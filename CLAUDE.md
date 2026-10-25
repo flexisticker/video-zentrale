@@ -432,6 +432,18 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   ohne hello → nach 90 s „offline“). Rechenhelfer 1.10: `Pull-Model` (HttpWebRequest, NDJSON je Schicht total/completed, alle 5 s Say-Hello + Fenster, Protokoll je 10 %).
   `llm.test()`/`status()` liefern `pc.helperStatus/helperVersion` → Einstellungen zeigen den Ladestand. Mock-Ollama streamt `/api/pull` (`MOCK_PULL_SECS`). Getestet mit pwsh + Mock.
   Rechenhelfer aktualisiert sich nicht selbst → Kunde muss ZIP neu laden.
+- 1.33.0 (25.10.2026): **Texte neu erzeugen, Whisper-Halluzinationen, KI-Anzeige im Video.**
+  - Eingeblendete Texte: Routen `GET/POST /api/videos/:id/texts` (Hook `source.hook.text`, `source.fx[i].text` für freeze/replay/text; leer → `textOff`, dann kein
+    „WARTE …“-Standard), `POST /texts/suggest {wish}` → `ai.rewriteTexts()` (Aufgabe `texte`, effort low, Gesprochenes im Clip mit Sekunden) → nur Vorschlag; Speichern
+    = `enqueueRerender('Texte geändert')`. UI `textsEditor()` (Knopf im Spiegeln-Kasten). Beim Rendern `fx.tidyText` (Wortwiederholungen, Länge) + `fx.uniqueTexts` (kein Text doppelt/gleich Hook).
+  - Kunde: „ich halte den Projektor“ wiederholte sich in Untertiteln = **Whisper-Halluzination** (Spielstimme/Musik/Stille, `-l de` übersetzt auch englische Spielansagen).
+    Whisper jetzt `-mc 0 -sns` (Server + Rechenhelfer 1.11; Flags in whisper.cpp v1.9.5 geprüft), `whisper.dropHallucinations()` in `toWords` **und** `loadWords` (alte Transkripte):
+    bekannte Abspann-Sätze (`HALLU`), Wortgruppen ≥ 3 Wörter > 2× direkt hintereinander, Wortgruppe 3–8 Wörter ≥ 4× im Video und > 3 % des Texts. Einzelwort-Wiederholungen („nein nein nein!“) bleiben.
+  - KI-Anzeige: `ai.forVideo(id, fn)` (AsyncLocalStorage) um Vorschlag/Schnitt/Überarbeiten/Texte, `ai.activeJobs()` (task, label, engine über `llm.chat({onTarget})`)
+    → `/api/activity` `ki[]`; UI `drawWork()` → `.workbox` (sticky oben im Video; **`.modal > .sheet` jetzt `overflow-x: clip` statt hidden**, sonst kein sticky).
+  - `runRerender`: `probeVideoLen` vor dem Ersetzen (leere Ausgabe → Fehler, Original bleibt).
+  - Getestet: Halluzinations-Filter (Skript), Texte neu erzeugen über Mock-Ollama, Hook im neu gerechneten Bild, Dialog 390 px, KI-Anzeige mit Ollama-Angabe.
+  - **Angeboten, nicht gebaut:** Tonspuren je Video beim Import anzeigen + vorhören + Stimmspur wählen (Kunde: Mikro auf eigener OBS-Spur).
 - Ideen danach: „Best of der Woche“ automatisch (Zeitplan), Platz-Einblendungen „Platz 3/2/1“.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
   Sendeplätze je Kanal **stellt der Kunde selbst ein** (keine festen Startzeiten), „Einplanen“ auf nächsten freien Platz, Shorts

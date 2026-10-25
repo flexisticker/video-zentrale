@@ -15,6 +15,7 @@ import * as profiles from './profiles.js';
 import * as ai from './ai.js';
 import * as autocut from './autocut.js';
 import * as whisper from './whisper.js';
+import * as fx from './cutfx.js';
 import * as thumbs from './thumbs.js';
 import * as cover from './cover.js';
 import * as captions from './captions.js';
@@ -380,7 +381,8 @@ async function api(req, res, url) {
     const byId = Object.fromEntries(vids.map((v) => [v.id, v]));
     const helperJobs = hp.open.map((j) => ({ name: name(byId[j.label]), id: j.label || '', state: j.state,
       since: j.takenAt || j.createdAt || 0, step: j.state === 'taken' ? 'Spracherkennung' : 'wartet auf Abholung' }));
-    return send(res, 200, { server, queue, credits: credits.status().warnings, helper: { enabled: hp.enabled, online: hp.online, seen: hp.seen, paused: hp.paused,
+    const kiJobs = ai.activeJobs().map((j) => ({ ...j, name: j.videoId ? name(byId[j.videoId]) : '' }));
+    return send(res, 200, { server, queue, ki: kiJobs, credits: credits.status().warnings, helper: { enabled: hp.enabled, online: hp.online, seen: hp.seen, paused: hp.paused,
       name: hp.name, status: hp.status, jobs: helperJobs }, now: Date.now() });
   }
 
@@ -542,6 +544,46 @@ async function api(req, res, url) {
       if (b.remember && cam) profiles.addScene(profiles.effective(v)?.id, cam);
       autocut.enqueueRerender(v, 'Bildaufbau');
       return send(res, 200, publicVideo(v));
+    }
+    // Eingeblendete Texte eines Shorts (Hook-Text, Freeze/Zeitlupe/Text-Effekte): ansehen, von Hand ändern oder neu schreiben lassen
+    if (sub === '/texts' || sub === '/texts/suggest') {
+      if (v.source?.kind !== 'short') throw new HttpError(409, 'Eingeblendete Texte gibt es bei Shorts aus dem automatischen Schnitt.');
+      const src = v.source;
+      const TXT = ['freeze', 'replay', 'text'];
+      const hasHook = !!src.hook && src.hook.mode !== 'none';
+      const items = (src.fx || []).map((x, i) => ({ i, kind: x.kind, at: Math.max(0, (Number(x.at) || src.start) - src.start), text: x.text || (x.kind === 'freeze' && !x.textOff ? 'WARTE …' : '') }))
+        .filter((x) => TXT.includes(x.kind));
+      const cur = { hook: hasHook ? src.hook.text || '' : null, items };
+      if (m === 'GET' && sub === '/texts') return send(res, 200, { ...cur, why: autocut.rerenderable(v) });
+      if (m === 'POST' && sub === '/texts/suggest') {
+        const b = await readJson(req);
+        const raw = db().videos[src.rawId];
+        const words = (raw && whisper.loadWords(raw)) || [];
+        const ws = words.filter((w) => w.e > src.start && w.s < src.end);
+        const lines = []; let line = [], t0 = null;
+        for (const w of ws) { if (t0 == null) t0 = w.s; line.push(w.t); if (/[.!?…]$/.test(w.t) || line.length >= 12) { lines.push(`${(t0 - src.start).toFixed(1)} s: ${line.join(' ')}`); line = []; t0 = null; } }
+        if (line.length) lines.push(`${(t0 - src.start).toFixed(1)} s: ${line.join(' ')}`);
+        const profile = profiles.effective(v);
+        try {
+          const r = await ai.forVideo(v.id, () => ai.rewriteTexts({ hook: cur.hook, items, transcript: lines.join('\n').slice(0, 6000), title: v.title || v.file,
+            wish: String(b.wish || '').slice(0, 300), profile, pro: profiles.isPro(profile) }));
+          return send(res, 200, r);
+        } catch (e) { throw new HttpError(502, e.message); }
+      }
+      if (m === 'POST' && sub === '/texts') {
+        const b = await readJson(req);
+        const why = autocut.rerenderable(v);
+        if (why) throw new HttpError(409, why);
+        const clean = (t, max) => fx.tidyText(String(t || '').replace(/[\u0000-\u001f{}\\]/g, ' '), max);
+        if (hasHook && typeof b.hook === 'string') src.hook = { ...src.hook, text: clean(b.hook, 60) };
+        for (const x of Array.isArray(b.items) ? b.items : []) {
+          const f = src.fx?.[x.i];
+          if (f && TXT.includes(f.kind) && typeof x.text === 'string') { f.text = clean(x.text, 42); f.textOff = !f.text; }
+        }
+        v.edit = { ...(v.edit || {}), textsAt: new Date().toISOString() };
+        autocut.enqueueRerender(v, 'Texte geändert');
+        return send(res, 200, publicVideo(v));
+      }
     }
     // Text-Stil eines Shorts ändern → mit gleichem Schnitt neu rechnen
     if (sub === '/text-style' && m === 'POST') {

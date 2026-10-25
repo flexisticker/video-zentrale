@@ -278,7 +278,7 @@ export function applyFx(parts0, fx, { level = 'normal', start, end, stickers = f
     if (t === null || t === undefined) continue;
     const ev = { t, kind: x.kind, emoji: x.emoji || '', text: String(x.text || '').slice(0, 40), pos: POSITIONS[x.pos] ? x.pos : 'mitte',
       sound: x.sound || '', soundIdea: String(x.soundIdea || '').slice(0, 200), sticker: String(x.sticker || '').slice(0, 300) };
-    if (x.kind === 'freeze') { ev.dur = anchor.freeze; if (!ev.text) ev.text = 'WARTE …'; if (!ev.sound && L.auto) ev.sound = 'scratch'; }
+    if (x.kind === 'freeze') { ev.dur = anchor.freeze; if (!ev.text && !x.textOff) ev.text = 'WARTE …'; if (!ev.sound && L.auto) ev.sound = 'scratch'; }
     if (x.kind === 'replay') { ev.dur = partLen(anchor); if (!ev.sound && L.auto) ev.sound = 'slowmo'; add({ t, kind: 'flash' }); }
     if (x.kind === 'punch' && !ev.sound && L.auto) ev.sound = 'hit';
     if (x.kind === 'emoji' && !ev.sound && !ev.soundIdea) ev.sound = 'pop';
@@ -307,4 +307,19 @@ export function describeFx(events) {
   const snd = events.filter((e) => e.sound || e.soundIdea).length;
   if (snd) bits.push(`${snd} Sound${snd === 1 ? '' : 's'}`);
   return bits.length ? 'Effekte: ' + bits.join(', ') : '';
+}
+
+// Eingeblendete KI-Texte säubern: Wortwiederholungen („WARTE WARTE WARTE“) zusammenfassen, Länge begrenzen,
+// gleiche Texte nur einmal (lokale Modelle wiederholen sich gern) – Vergleich ohne Groß-/Kleinschreibung und Satzzeichen.
+export function tidyText(t, max = 42) {
+  let x = String(t || '').replace(/\s+/g, ' ').trim();
+  x = x.replace(/\b([\p{L}\p{N}']+)(?:[\s,.!?…-]+\1\b)+/giu, '$1');   // gleiche Wörter direkt hintereinander
+  x = x.replace(/(.{3,}?)(?:\s*\1){1,}/gu, '$1');                     // gleiche Wortgruppe mehrfach
+  if (x.length > max) x = x.slice(0, max).replace(/\s+\S*$/, '') + ' …';
+  return x;
+}
+const textKey = (t) => String(t || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+export function uniqueTexts(items, hookText = '') {
+  const seen = new Set(hookText ? [textKey(hookText)] : []);
+  return items.filter((x) => { const k = textKey(x.text); if (!k || seen.has(k)) return false; seen.add(k); return true; });
 }

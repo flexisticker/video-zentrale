@@ -400,7 +400,14 @@ a.statrow:hover { outline: 1px solid var(--line, rgba(255,255,255,.15)); }
 .detail > *, .sheet > *, .section, .mirrorbox, .mirrorbox > * { min-width: 0; max-width: 100%; }
 .sheet img, .sheet video, .sheet canvas { max-width: 100%; }
 @media (max-width: 600px) {
-  .modal > .sheet { overflow-x: hidden; }
+  .modal > .sheet { overflow-x: clip; }   /* clip statt hidden: sonst klebt nichts mehr (sticky) */
   .sheet .btn { white-space: normal; max-width: 100%; text-align: left; }
   .sheet .meta { overflow-wrap: anywhere; }
 }
+
+/* Video-Ansicht: was gerade daran arbeitet */
+.workbox { position: sticky; top: 0; z-index: 4; margin: 6px 0 10px; padding: 8px 48px 8px 12px; border: 1px solid var(--accent); border-radius: 10px; background: linear-gradient(color-mix(in srgb, var(--accent) 14%, transparent), color-mix(in srgb, var(--accent) 14%, transparent)), var(--panel); box-shadow: 0 6px 18px rgba(0,0,0,.35); display: grid; gap: 4px; font-size: 14px; }
+.workbox[hidden] { display: none; }
+.workbox .work-row { display: flex; gap: 8px; align-items: baseline; min-width: 0; overflow-wrap: anywhere; }
+.workbox .spin { display: inline-block; animation: wb-pulse 1.4s ease-in-out infinite; }
+@keyframes wb-pulse { 50% { opacity: .35; } }

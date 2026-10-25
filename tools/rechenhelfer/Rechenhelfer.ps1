@@ -12,7 +12,7 @@ param([switch]$Install, [switch]$Uninstall, [string]$Release = '')
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # macht Downloads in Windows PowerShell deutlich schneller
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$Version = '1.10'
+$Version = '1.11'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ConfigFile = Join-Path $Here 'rechenhelfer.json'
 $Home2 = if ($env:VZ_HELPER_HOME) { $env:VZ_HELPER_HOME } else { Join-Path $env:LOCALAPPDATA 'VideoZentrale-Rechenhelfer' }
@@ -506,7 +506,7 @@ while ($true) {
       $model = Get-Model $job.model
       Invoke-WebRequest -Uri "$Base/api/helper/job/$($job.id)/audio" -Headers $Headers -OutFile $wav -UseBasicParsing
       $sw = [Diagnostics.Stopwatch]::StartNew()
-      $argsW = @('-m', "`"$model`"", '-f', "`"$wav`"", '-l', $job.lang, '-ml', '1', '-sow', '-oj', '-of', "`"$out`"", '-t', $threads)
+      $argsW = @('-m', "`"$model`"", '-f', "`"$wav`"", '-l', $job.lang, '-ml', '1', '-sow', '-mc', '0', '-sns', '-oj', '-of', "`"$out`"", '-t', $threads)
       $sp = @{ FilePath = $Exe; ArgumentList = $argsW; PassThru = $true }
       if (-not $IsLinux) { $sp.WindowStyle = 'Hidden' }   # unter Windows ohne eigenes Fenster
       $proc = Start-Process @sp
