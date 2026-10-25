@@ -423,6 +423,7 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
 - 1.32.2: Ursache gefunden: 400 invalid_request_error „You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC.“
   (Ausgabenlimit in console.anthropic.com). `isBlockErr` erkennt „usage limit“, `blocked.until` aus dem Text (`limitUntil`), `claudeBlocked()` gilt bis dahin
   (sonst 6 Std.), deutsche Meldung in `friendly`. Getestet mit nachgebautem 400 (ohne/mit Mock-Ollama).
+- 1.32.3: „null“ im Überarbeiten-Kasten bei Shorts (`sec.append(…, target)` mit target = null → native append schreibt „null“; jetzt gefiltert).
 - Ideen danach: „Best of der Woche“ automatisch (Zeitplan), Platz-Einblendungen „Platz 3/2/1“.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
   Sendeplätze je Kanal **stellt der Kunde selbst ein** (keine festen Startzeiten), „Einplanen“ auf nächsten freien Platz, Shorts

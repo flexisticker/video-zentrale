@@ -1535,7 +1535,7 @@ function renderRevise(box, v) {
       const add = (c) => { wish.value = wish.value.trim() ? wish.value.trim().replace(/[.;,]?$/, '; ') + c : c; wish.focus(); };
       const chips = h('div', { class: 'chips' }, (isShort ? REVISE_CHIPS : REVISE_CHIPS_LONG).map((c) => h('button', { class: 'chip-btn', onclick: () => add(c) }, c)));
       const target = isShort ? null : h('input', { type: 'number', min: 1, max: 120, placeholder: 'z. B. 10', style: { width: '90px' } });
-      sec.append(h('p', { class: 'hint' }, (isShort ? 'Die KI schneidet den Clip aus dem Rohvideo neu.' : 'Die KI sieht sich die ganze Aufnahme an und schneidet die Fassung aus dem Rohvideo neu.')
+      sec.append(...[h('p', { class: 'hint' }, (isShort ? 'Die KI schneidet den Clip aus dem Rohvideo neu.' : 'Die KI sieht sich die ganze Aufnahme an und schneidet die Fassung aus dem Rohvideo neu.')
           + ' Die neue Fassung erscheint daneben als „v2“ – du entscheidest, welche bleibt.'),
         chips, wish,
         target ? h('div', { class: 'row', style: { marginTop: '6px', alignItems: 'center' } }, h('span', { class: 'hint' }, 'Ziellänge (Minuten, optional):'), target,
@@ -1544,7 +1544,7 @@ function renderRevise(box, v) {
           if (wish.value.trim().length < 3) throw new Error('Bitte kurz beschreiben, was anders werden soll.');
           Object.assign(v, await api('POST', `/api/videos/${v.id}/revise`, { wish: wish.value.trim() }));
           await refresh(); updateDetail(true); pollActivity(); startPolling();
-        }, 'Überarbeitung gestartet.') }, '🔁 Überarbeiten lassen')));
+        }, 'Überarbeitung gestartet.') }, '🔁 Überarbeiten lassen'))].filter(Boolean));
     }
     kids.push(sec);
   }
