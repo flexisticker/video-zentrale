@@ -1,5 +1,10 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.31.1', date: '25.10.2026', items: [
+    'Neue Vorgabe „Teures lokal, Günstiges Claude“: Clips auswählen, Späher, Überarbeiten und Trailer rechnet Ollama; Titel/Texte, Prüfung, Themen und Coach bleiben bei Claude. Vorlagen per Knopf: auch „Alles lokal“ oder „Alles Claude“.',
+    '⛔ Ist Claude gesperrt (kein Guthaben, Schlüssel ungültig), laufen automatisch alle KI-Aufgaben lokal – die Zentrale fragt Claude dann 6 Stunden lang nicht mehr (Knopf „Guthaben aufgeladen – wieder versuchen“).',
+    '🖥+🗄 Server und PC rechnen gleichzeitig: Aufträge gehen an den freieren Rechner, Vorschläge laufen zu zweit. Holt der PC einen Auftrag nicht ab (rechnet gerade Sprache), übernimmt der Server.',
+  ] },
   { version: '1.31.0', date: '25.10.2026', items: [
     '🏠 Lokale KI (Ollama) statt Claude – spart Kosten: Einstellungen → „Lokale KI“. Die Zentrale nutzt deinen Ollama auf dem Server (z. B. http://192.168.1.10:11434) und – wenn die Grafikkarte freigegeben ist – deinen PC (Rechenhelfer 1.9 richtet Ollama dort selbst ein, Modell mit Bildverständnis).',
     'Je Aufgabe wählbar: Claude, „Lokal, bei Fehler Claude“ oder „Nur lokal“ – Titel/Texte, Render-Prüfung, Themen, Coach, Späher, Clips auswählen, Überarbeiten, Trailer. Übersicht, was Claude gekostet hat und was lokal gespart wurde.',

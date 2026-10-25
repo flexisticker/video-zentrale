@@ -27,17 +27,19 @@ const cfg = () => db().ai;
 export function status() {
   const c = cfg();
   return { configured: !!c.apiKey, auto: c.auto, autoTips: c.autoTips !== false, qc: c.qc !== false, scout: c.scout !== false, cutEffort: cutEffort(), hints: c.hints, keyHint: c.apiKey ? '…' + c.apiKey.slice(-4) : '',
-    spent: c.spent || 0, count: c.count || 0 };
+    spent: c.spent || 0, count: c.count || 0, blocked: claudeBlocked() };
 }
 
 export function configure(b) {
   const c = cfg();
   if (typeof b.apiKey === 'string' && b.apiKey.trim() && b.apiKey.trim() !== c.apiKey) {
     c.apiKey = b.apiKey.trim();
+    delete c.blocked;   // neuer Schlüssel → Claude wieder versuchen
     // am alten Schlüssel gescheiterte Videos dürfen automatisch neu
     for (const v of Object.values(db().videos)) if (v.ai?.state === 'error' && !v.ai.titles) delete v.ai;
   }
   if (b.removeKey === true) c.apiKey = '';
+  if (b.unblock === true) delete c.blocked;
   if (typeof b.auto === 'boolean') c.auto = b.auto;
   if (typeof b.autoTips === 'boolean') c.autoTips = b.autoTips;
   if (typeof b.qc === 'boolean') c.qc = b.qc;
@@ -57,25 +59,41 @@ export const CUT_EFFORTS = ['medium', 'high', 'xhigh', 'max'];
 export const cutEffort = () => (CUT_EFFORTS.includes(cfg().cutEffort) ? cfg().cutEffort : 'max');
 // Ein KI-Auftrag: je nach Einstellung lokal (Ollama, llm.js) oder Claude; „auto“ = lokal, bei Fehler Claude.
 // → { out, engine, model, vision (Bilder gesehen?), cost }
+// Claude gesperrt (kein Guthaben, Schlüssel ungültig/ohne Rechte)? → 6 Stunden lang gar nicht erst fragen, alles lokal
+const BLOCK_MS = 6 * 3600_000;
+const isBlockErr = (e) => e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError
+  || (e instanceof Anthropic.BadRequestError && /credit|balance|billing/i.test(e.message));
+export function claudeBlocked() { const b = cfg().blocked; return b?.at && Date.now() - Date.parse(b.at) < BLOCK_MS ? b : null; }
+export function unblockClaude() { delete cfg().blocked; saveNow(); }
+const claudeUsable = () => !!cfg().apiKey && !claudeBlocked();
 export function canAsk(task) {
   const m = llm.modeOf(task);
-  if (m === 'claude') return !!cfg().apiKey;
   if (m === 'lokal') return llm.ready();
-  return llm.ready() || !!cfg().apiKey;
+  return claudeUsable() || llm.ready();   // Claude-Aufgaben laufen lokal weiter, wenn Claude nicht geht
 }
 export async function ask(task, content, schema, { effort, maxTokens = 64000 } = {}) {
   const mode = llm.modeOf(task);
+  const local = async (why = '') => ({ ...(await llm.chat(task, content, schema, PRICE)), cost: 0, ...(why ? { why } : {}) });
   let localErr = null;
-  if (mode !== 'claude' && llm.ready()) {
-    try { return { ...(await llm.chat(task, content, schema, PRICE)), cost: 0 }; }
-    catch (e) { localErr = e; if (mode === 'lokal' || !cfg().apiKey) throw new Error('Lokale KI: ' + e.message); }
+  // lokal zuerst: Aufgabe steht auf lokal/auto – oder Claude ist gesperrt bzw. ohne Schlüssel
+  if ((mode !== 'claude' || !claudeUsable()) && llm.ready()) {
+    try { return await local(mode === 'claude' ? (cfg().apiKey ? 'Claude gesperrt' : 'kein Claude-Schlüssel') : ''); }
+    catch (e) { localErr = e; if (mode === 'lokal' || !claudeUsable()) throw new Error('Lokale KI: ' + e.message); }
   } else if (mode === 'lokal') throw new Error('Lokale KI nicht erreichbar (Ollama-Adresse fehlt bzw. PC nicht freigegeben).');
-  if (!cfg().apiKey) throw new Error('Kein Claude-API-Schlüssel eingetragen (Einstellungen → Claude).');
+  if (!cfg().apiKey) throw new Error('Kein Claude-API-Schlüssel und keine lokale KI eingerichtet (Einstellungen).');
+  if (claudeBlocked()) throw new Error(`Claude gesperrt (${claudeBlocked().reason}) und keine lokale KI erreichbar – Einstellungen → Lokale KI.`);
   let r;
   try {
     r = await api().beta.messages.stream({ model: MODEL, max_tokens: maxTokens, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
       output_config: { effort: effort || cutEffort(), format: { type: 'json_schema', schema } }, messages: [{ role: 'user', content }] }).finalMessage();
-  } catch (e) { throw new Error(friendly(e)); }
+  } catch (e) {
+    const msg = friendly(e);
+    if (isBlockErr(e)) {
+      cfg().blocked = { at: new Date().toISOString(), reason: msg }; saveNow();
+      if (llm.ready() && !localErr) { try { return await local('Claude gesperrt'); } catch (x) { throw new Error(msg + ' Lokale KI: ' + x.message); } }
+    }
+    throw new Error(msg);
+  }
   const cost = (r.usage?.input_tokens || 0) * PRICE.input + (r.usage?.output_tokens || 0) * PRICE.output;
   const a = cfg(); a.spent = Math.round(((a.spent || 0) + cost) * 10000) / 10000; a.count = (a.count || 0) + 1; save();
   llm.recordClaude(task, cost, (r.usage?.input_tokens || 0) + (r.usage?.output_tokens || 0));
@@ -616,7 +634,9 @@ export async function chooseSummary(v, parts, segs, target, profile, wish = '') 
 
 // ---- Warteschlange (eins nach dem anderen) ----
 const queue = [];
-let running = false;
+let running = 0;
+// lokal mit Server + PC: zwei Vorschläge gleichzeitig (je Rechner einer), sonst einer nach dem anderen
+const parallel = () => (llm.modeOf('texte') !== 'claude' || !claudeUsable() ? Math.max(1, llm.engines()) : 1);
 
 export function enqueue(v, extra = '') {
   if (!canAsk('texte')) throw new Error('Kein Claude-API-Schlüssel und keine lokale KI eingerichtet (Einstellungen).');
@@ -628,10 +648,11 @@ export function enqueue(v, extra = '') {
 }
 
 async function next() {
-  if (running) return;
+  if (running >= parallel()) return;
   const job = queue.shift();
   if (!job) return;
-  running = true;
+  running++;
+  next();   // ggf. gleich den nächsten auf dem anderen Rechner starten
   const v = db().videos[job.id];
   try {
     if (v && !v.missing) {
@@ -641,7 +662,7 @@ async function next() {
     }
   } catch (e) {
     if (v) { v.ai = { ...v.ai, state: 'error', error: e.message }; saveNow(); }
-  } finally { running = false; next(); }
+  } finally { running--; next(); }
 }
 
 // Neue geschnittene Videos automatisch vorschlagen lassen (nur einmal je Video).

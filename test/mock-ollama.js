@@ -49,7 +49,7 @@ http.createServer(async (req, res) => {
     const secs = [...text.matchAll(/Sekunde (\d+(?:\.\d+)?)–(\d+(?:\.\d+)?)/g)].map((m) => [Number(m[1]), Number(m[2])]);
     log.push({ model: j.model, chars: text.length, images: j.messages?.[0]?.images?.length || 0, ctx: j.options?.num_ctx, gekuerzt: /gekürzt/.test(text), sNums: (() => { const n = [...text.matchAll(/^S(\d+) /gm)].map((m) => +m[1]); return n.length ? [n.length, n.slice(0, 3), n.slice(-3)] : null; })(), lachen: /LACHEN/.test(text), keys: Object.keys(j.format?.properties || {}) });
     const out = fill(j.format, { c1: secs[0], c2: secs[1], cands: secs.length });
-    await new Promise((r) => setTimeout(r, 300));
+    await new Promise((r) => setTimeout(r, Number(process.env.MOCK_OLLAMA_DELAY || 300)));
     return send(200, { model: j.model, message: { role: 'assistant', content: JSON.stringify(out) }, done: true, prompt_eval_count: Math.ceil(text.length / 3.5), eval_count: 400 });
   }
   send(404, { error: 'unbekannt' });

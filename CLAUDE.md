@@ -407,6 +407,13 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   Ollama-Ausfall, Kürzen bei 4k-Kontext (119 von 900 Zeilen, Lacher-Zeile drin), PC-Weg über pwsh-Helfer (6 Bilder), Überarbeiten lokal, 390 px. **Nicht getestet:** echtes Ollama/Qwen
   (Qualität der Clip-Auswahl, Dauer auf dem Xeon – vermutlich Minuten je Aufruf), echtes Windows-Ollama-Zip/CUDA auf der RTX 3070, qwen2.5vl:7b mit 16k Kontext in 8 GB.
   **Merke (wieder passiert):** nie `pkill -f` mit einem Muster, das in der eigenen Befehlszeile steht – beendet die eigene Shell. PIDs aus Dateien bzw. `ps` nehmen.
+- 1.31.1 (25.10.2026): Kunde: Claude-API gesperrt (kein Guthaben), „das Teure lokal, Claude nur für Günstiges“, „beide Rechner zusammen“.
+  `llm.PRESETS` (sparen = Standard: texte/pruefung/themen/coach claude, scout/schnitt/ueberarbeiten/trailer auto; lokal; claude), `configure({preset})`, Migration `presetV2`
+  (unveränderte 1.31.0-Vorgaben → neue). ai.js: `claudeBlocked()` (`ai.blocked {at, reason}` bei Authentication/PermissionDenied/BadRequest „credit|balance|billing“, 6 Std.,
+  neuer Schlüssel bzw. `unblock` hebt auf), `ask()` geht bei gesperrtem Claude auch für claude-Aufgaben lokal, `canAsk` = Claude nutzbar ODER lokal bereit.
+  Verteilung `pickTarget()` (freierer Rechner, Gleichstand → PC; `busy {pc, server}`), PC-Auftrag nicht abgeholt/abgebrochen → Server übernimmt; Vorschlag-Warteschlange
+  `parallel()` = Anzahl Rechner, wenn lokal. Mock: `MOCK_CLAUDE_NO_CREDIT=1` (test/mock.js), `MOCK_OLLAMA_DELAY`. Getestet: Guthaben-Fehler → 1× Claude, danach direkt lokal;
+  4 Vorschläge auf Server + PC verteilt.
 - Ideen danach: „Best of der Woche“ automatisch (Zeitplan), Platz-Einblendungen „Platz 3/2/1“.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
   Sendeplätze je Kanal **stellt der Kunde selbst ein** (keine festen Startzeiten), „Einplanen“ auf nächsten freien Platz, Shorts

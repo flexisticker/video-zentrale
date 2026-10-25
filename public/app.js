@@ -2030,6 +2030,8 @@ async function renderSettings() {
   const aHints = h('textarea', { rows: 3, value: a.hints, placeholder: 'z. B. „Ich heiße Micha“, „keine Emojis im Titel“, „immer auf Deutsch“' });
   const claudeBox = h('div', { class: 'box' }, h('h3', {}, '✨ Claude (Vorschläge für Titel & Texte)'),
     a.configured ? h('p', { class: 'ok-text' }, '✓ eingerichtet · bisher ' + a.count + ' Vorschläge, ca. ' + (a.spent || 0).toFixed(2).replace('.', ',') + ' $') : null,
+    a.blocked ? h('div', { class: 'alert-line' }, `⛔ Claude gesperrt seit ${fmtDate(a.blocked.at)}: ${a.blocked.reason} Alle KI-Aufgaben laufen solange lokal (Ollama). Nach 6 Stunden versucht es die Zentrale von selbst wieder.`,
+      h('button', { class: 'btn small', style: { marginLeft: '8px' }, onclick: run(() => api('POST', '/api/ai/config', { unblock: true }), 'Claude wird wieder versucht.') }, 'Guthaben aufgeladen – wieder versuchen')) : null,
     h('ol', { class: 'steps' },
       h('li', {}, 'console.anthropic.com: Konto anlegen, unter Billing Guthaben aufladen (z. B. 5 $; eigene Abrechnung, nicht im Claude-Abo enthalten).'),
       h('li', {}, 'API Keys → „Create Key“ → hier einfügen und speichern.'),
@@ -2090,7 +2092,12 @@ async function renderSettings() {
     h('label', { class: 'check', style: { marginTop: '8px' } }, lPc, '🖥 PC mitnutzen, wenn die Grafikkarte freigegeben ist (Rechenhelfer lädt Ollama + Modell einmalig, ca. 7 GB)'),
     h('label', {}, 'Modell auf dem PC (mit Bildverständnis)'), lPcModel,
     h('div', { class: 'row', style: { marginTop: '8px' } }, h('button', { class: 'btn small', onclick: lTest }, '🔌 Verbindung testen'), lTestOut),
-    h('h4', { style: { marginTop: '14px' } }, 'Wer macht was?'), h('div', { class: 'table-wrap' }, lTable),
+    h('h4', { style: { marginTop: '14px' } }, 'Wer macht was?'),
+    h('div', { class: 'chips', style: { marginBottom: '6px' } }, Object.entries(L.presets || {}).map(([k, n]) =>
+      h('button', { class: 'chip-btn', onclick: run(() => api('POST', '/api/llm', { preset: k }), 'Vorlage übernommen.') }, n))),
+    h('div', { class: 'table-wrap' }, lTable),
+    h('p', { class: 'hint' }, 'Ist Claude gesperrt (z. B. kein Guthaben), laufen auch die Claude-Aufgaben automatisch lokal. Sind Server und PC verfügbar, rechnen beide gleichzeitig: Aufträge gehen an den freieren Rechner, Vorschläge laufen zu zweit.'
+      + (L.busy && (L.busy.pc || L.busy.server) ? ` Gerade: PC ${L.busy.pc}, Server ${L.busy.server} Auftrag/Aufträge.` : '')),
     h('p', { class: 'hint' }, 'Tipp: Mit „Lokal, bei Fehler Claude“ anfangen. Clips auswählen und Überarbeiten sind die schwersten Aufgaben – erst umstellen, wenn dir die lokalen Ergebnisse gefallen. '
       + 'Ohne Bildverständnis (Server-Modell) entfällt die Bild-Prüfung fertiger Clips; die Facecam kommt dann aus der Gesichtserkennung des PCs.'),
     h('p', { class: 'hint' }, 'Weitere Spar-Hebel bei Claude (Kasten oben): Denkstufe beim Schneiden auf „Hoch“ oder „Mittel“, Viral-Tipps nicht automatisch umsetzen.'),

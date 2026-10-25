@@ -149,6 +149,8 @@ const server = http.createServer(async (req, res) => {
   if (p === '/falimg/last') { res.writeHead(200, { 'Content-Type': 'image/jpeg' }); return res.end(falLast); }
   if (p.startsWith('/whisper/')) { res.writeHead(200, { 'Content-Length': 2048 }); return res.end(Buffer.alloc(2048)); }
   if (p === '/v1/messages') {
+    // MOCK_CLAUDE_NO_CREDIT=1: Anthropic-Konto ohne Guthaben nachstellen
+    if (process.env.MOCK_CLAUDE_NO_CREDIT) { log.push({ claudeNoCredit: true }); return jsonOut(res, 400, { type: 'error', error: { type: 'invalid_request_error', message: 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.' } }); }
     const j = JSON.parse(b.toString());
     // stream: true → dieselbe Antwort als Server-Sent Events (wie die echte API)
     const json = !j.stream ? jsonOut : (res2, st, m) => {

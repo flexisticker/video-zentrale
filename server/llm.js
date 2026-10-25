@@ -20,8 +20,15 @@ export const TASKS = {
   trailer: 'Trailer-Dramaturgie',
 };
 export const MODES = ['claude', 'auto', 'lokal'];
-// Vorschlag: die vielen kleinen Aufgaben lokal, Clips auswählen/Überarbeiten zunächst weiter mit Claude
-const DEFAULT_MODES = { texte: 'auto', pruefung: 'auto', themen: 'auto', coach: 'auto', scout: 'auto', schnitt: 'claude', ueberarbeiten: 'claude', trailer: 'claude' };
+// Vorlagen. Standard (Wunsch des Kunden): das Teure lokal (lange Abschriften, viele Bilder), das Günstige bei Claude.
+// Ist Claude gesperrt (kein Guthaben), laufen auch die Claude-Aufgaben lokal (ai.ask).
+export const PRESETS = {
+  sparen: { name: 'Teures lokal, Günstiges Claude (empfohlen)', modes: { texte: 'claude', pruefung: 'claude', themen: 'claude', coach: 'claude', scout: 'auto', schnitt: 'auto', ueberarbeiten: 'auto', trailer: 'auto' } },
+  lokal: { name: 'Alles lokal (kostenlos)', modes: { texte: 'auto', pruefung: 'auto', themen: 'auto', coach: 'auto', scout: 'auto', schnitt: 'auto', ueberarbeiten: 'auto', trailer: 'auto' } },
+  claude: { name: 'Alles Claude (beste Qualität)', modes: { texte: 'claude', pruefung: 'claude', themen: 'claude', coach: 'claude', scout: 'claude', schnitt: 'claude', ueberarbeiten: 'claude', trailer: 'claude' } },
+};
+const DEFAULT_MODES = PRESETS.sparen.modes;
+const OLD_DEFAULTS = { texte: 'auto', pruefung: 'auto', themen: 'auto', coach: 'auto', scout: 'auto', schnitt: 'claude', ueberarbeiten: 'claude', trailer: 'claude' };
 
 const TMP = path.join(DATA_DIR, 'tmp');
 export function cfg() {
@@ -32,6 +39,8 @@ export function cfg() {
   c.pc ??= { enabled: false, model: 'qwen2.5vl:7b' };
   c.tasks ??= {};
   c.stats ??= {};
+  // 1.31.0 hatte „Kleines lokal“ als Vorgabe – noch unverändert gespeichert → auf die neue Vorgabe umstellen
+  if (!c.presetV2) { if (Object.entries(OLD_DEFAULTS).every(([k, v]) => !c.tasks[k] || c.tasks[k] === v)) c.tasks = {}; c.presetV2 = true; }
   return c;
 }
 export const modeOf = (task) => { const m = cfg().tasks[task] || DEFAULT_MODES[task] || 'claude'; return MODES.includes(m) ? m : 'claude'; };
@@ -39,7 +48,7 @@ export const modeOf = (task) => { const m = cfg().tasks[task] || DEFAULT_MODES[t
 export function status() {
   const c = cfg();
   return { url: c.url, model: c.model, ctx: c.ctx, pc: { ...c.pc, ready: pcReady(), helperCan: helper.can('llm') },
-    tasks: Object.fromEntries(Object.keys(TASKS).map((k) => [k, modeOf(k)])), names: TASKS, stats: c.stats, lastError: c.lastError || '', lastAt: c.lastAt || '' };
+    tasks: Object.fromEntries(Object.keys(TASKS).map((k) => [k, modeOf(k)])), names: TASKS, presets: Object.fromEntries(Object.entries(PRESETS).map(([k, p]) => [k, p.name])), busy: { ...busy }, stats: c.stats, lastError: c.lastError || '', lastAt: c.lastAt || '' };
 }
 export function configure(b = {}) {
   const c = cfg();
@@ -54,6 +63,7 @@ export function configure(b = {}) {
     if (typeof b.pc.enabled === 'boolean') c.pc.enabled = b.pc.enabled;
     if (typeof b.pc.model === 'string' && /^[\w.:/-]{2,80}$/.test(b.pc.model.trim())) c.pc.model = b.pc.model.trim();
   }
+  if (PRESETS[b.preset]) c.tasks = { ...PRESETS[b.preset].modes };
   if (b.tasks && typeof b.tasks === 'object') for (const [k, v] of Object.entries(b.tasks)) if (TASKS[k] && MODES.includes(v)) c.tasks[k] = v;
   if (b.resetStats === true) c.stats = {};
   save();
@@ -64,6 +74,19 @@ const pcReady = () => !!cfg().pc.enabled && helper.canNow('llm');
 export const serverReady = () => !!cfg().url;
 // Ist für diese Aufgabe überhaupt eine lokale KI erreichbar (ohne Netz-Test)?
 export const ready = () => pcReady() || serverReady();
+// Wie viele Rechner können gerade gleichzeitig rechnen (Server + PC)?
+export const engines = () => (pcReady() ? 1 : 0) + (serverReady() ? 1 : 0);
+// Laufende Aufträge je Rechner – neue Aufträge gehen an den freieren (bei Gleichstand an den PC: schneller, sieht Bilder)
+const busy = { pc: 0, server: 0 };
+function pickTarget(hasImages) {
+  const pc = pcReady(), srv = serverReady();
+  if (pc && !srv) return 'pc';
+  if (srv && !pc) return 'server';
+  if (!pc && !srv) return null;
+  // der freiere Rechner bekommt den Auftrag; bei Gleichstand der PC (schneller, sieht Bilder – wichtig bei Aufgaben mit Bildern)
+  void hasImages;
+  return busy.pc <= busy.server ? 'pc' : 'server';
+}
 // Modelle, die Bilder verstehen (Name genügt als Hinweis; beim Server fragt test() Ollama selbst)
 const visionByName = (m) => /vl|vision|llava|gemma3|minicpm-v|moondream|qwen3-vl|mistral-small3\.[12]|llama4/i.test(m || '');
 let serverVision = { model: '', vision: null, at: 0 };
@@ -159,9 +182,22 @@ export const recordClaude = (task, cost, tokens) => record(task, 'claude', { cou
 
 // → { out, engine, model, vision, cut } – wirft bei Fehler (Aufrufer entscheidet über Claude als Rückfall)
 export async function chat(task, content, schema, price) {
+  const target = pickTarget(content.some((b) => b.type === 'image'));
+  if (!target) throw new Error('Keine lokale KI eingerichtet (Einstellungen → Lokale KI).');
+  busy[target]++;
+  try { return await chatOn(target, task, content, schema, price); }
+  catch (e) {
+    // PC hat den Auftrag nicht abgeholt (rechnet gerade Sprache/Analyse) oder ist weg → Server übernimmt
+    if (target === 'pc' && serverReady() && /abgeholt|nicht rechtzeitig|verschwunden|Rechenhelfer/i.test(e.message)) {
+      busy.server++;
+      try { return await chatOn('server', task, content, schema, price); } finally { busy.server--; }
+    }
+    throw e;
+  } finally { busy[target]--; }
+}
+async function chatOn(target, task, content, schema, price) {
   const c = cfg();
-  const usePc = pcReady();
-  if (!usePc && !c.url) throw new Error('Keine lokale KI eingerichtet (Einstellungen → Lokale KI).');
+  const usePc = target === 'pc';
   const model = usePc ? c.pc.model : c.model;
   const vision = usePc ? visionByName(model) : await serverHasVision();
   const ctx = usePc ? Math.min(c.ctx, 16384) : c.ctx;   // 8 GB Grafikspeicher: Kontext begrenzen
