@@ -26,7 +26,7 @@ const cfg = () => db().ai;
 
 export function status() {
   const c = cfg();
-  return { configured: !!c.apiKey, auto: c.auto, autoTips: c.autoTips !== false, qc: c.qc !== false, scout: c.scout !== false, cutEffort: cutEffort(), hints: c.hints, keyHint: c.apiKey ? '…' + c.apiKey.slice(-4) : '',
+  return { configured: !!c.apiKey, usable: canAsk('texte'), auto: c.auto, autoTips: c.autoTips !== false, qc: c.qc !== false, scout: c.scout !== false, cutEffort: cutEffort(), hints: c.hints, keyHint: c.apiKey ? '…' + c.apiKey.slice(-4) : '',
     spent: c.spent || 0, count: c.count || 0, blocked: claudeBlocked() };
 }
 
@@ -57,7 +57,7 @@ export function afterSuggest(fn) { suggested = fn; }
 // Schnitt-Entscheidungen (Highlights, Kurzfassung, Überarbeiten): höchste Denkstufe, gestreamt (lange Denkzeit → kein HTTP-Timeout)
 export const CUT_EFFORTS = ['medium', 'high', 'xhigh', 'max'];
 export const cutEffort = () => (CUT_EFFORTS.includes(cfg().cutEffort) ? cfg().cutEffort : 'max');
-// Ein KI-Auftrag: je nach Einstellung lokal (Ollama, llm.js) oder Claude; „auto“ = lokal, bei Fehler Claude.
+// Ein KI-Auftrag: je nach Einstellung lokal (Ollama, llm.js) oder Claude; „auto“ = lokal, bei Fehler Claude; „claude“ = Claude, bei Fehler lokal.
 // → { out, engine, model, vision (Bilder gesehen?), cost }
 // Claude gesperrt (kein Guthaben, Schlüssel ungültig/ohne Rechte)? → 6 Stunden lang gar nicht erst fragen, alles lokal
 const BLOCK_MS = 6 * 3600_000;
@@ -66,22 +66,30 @@ const isBlockErr = (e) => e instanceof Anthropic.AuthenticationError || e instan
 export function claudeBlocked() { const b = cfg().blocked; return b?.at && Date.now() - Date.parse(b.at) < BLOCK_MS ? b : null; }
 export function unblockClaude() { delete cfg().blocked; saveNow(); }
 const claudeUsable = () => !!cfg().apiKey && !claudeBlocked();
+// Läuft diese Aufgabe gerade zuerst lokal?
+const goesLocal = (task) => { const m = llm.modeOf(task); return llm.ready() && (m === 'lokal' || m === 'auto' || (m === 'claude' && !claudeUsable())); };
 export function canAsk(task) {
   const m = llm.modeOf(task);
   if (m === 'lokal') return llm.ready();
+  if (m === 'nurclaude') return claudeUsable();
   return claudeUsable() || llm.ready();   // Claude-Aufgaben laufen lokal weiter, wenn Claude nicht geht
 }
 export async function ask(task, content, schema, { effort, maxTokens = 64000 } = {}) {
   const mode = llm.modeOf(task);
   const local = async (why = '') => ({ ...(await llm.chat(task, content, schema, PRICE)), cost: 0, ...(why ? { why } : {}) });
+  const fallback = mode === 'claude' && llm.ready();   // „Claude, sonst lokal“
   let localErr = null;
-  // lokal zuerst: Aufgabe steht auf lokal/auto – oder Claude ist gesperrt bzw. ohne Schlüssel
-  if ((mode !== 'claude' || !claudeUsable()) && llm.ready()) {
+  // lokal zuerst: Aufgabe steht auf lokal/auto – oder (Claude, sonst lokal) Claude ist gesperrt bzw. ohne Schlüssel
+  if ((mode === 'lokal' || mode === 'auto' || (mode === 'claude' && !claudeUsable())) && llm.ready()) {
     try { return await local(mode === 'claude' ? (cfg().apiKey ? 'Claude gesperrt' : 'kein Claude-Schlüssel') : ''); }
     catch (e) { localErr = e; if (mode === 'lokal' || !claudeUsable()) throw new Error('Lokale KI: ' + e.message); }
   } else if (mode === 'lokal') throw new Error('Lokale KI nicht erreichbar (Ollama-Adresse fehlt bzw. PC nicht freigegeben).');
-  if (!cfg().apiKey) throw new Error('Kein Claude-API-Schlüssel und keine lokale KI eingerichtet (Einstellungen).');
-  if (claudeBlocked()) throw new Error(`Claude gesperrt (${claudeBlocked().reason}) und keine lokale KI erreichbar – Einstellungen → Lokale KI.`);
+  if (!cfg().apiKey) throw new Error(mode === 'nurclaude' ? 'Aufgabe steht auf „Nur Claude“, aber kein Claude-API-Schlüssel eingetragen.' : 'Keine KI eingerichtet – Claude-Schlüssel oder lokale KI (Einstellungen).');
+  if (claudeBlocked()) throw new Error(`Claude gesperrt (${claudeBlocked().reason})` + (mode === 'nurclaude' ? ' – Aufgabe steht auf „Nur Claude“.' : ' und keine lokale KI erreichbar – Einstellungen → Lokale KI.'));
+  const viaLocal = async (msg) => {
+    if (!fallback || localErr) throw new Error(msg);
+    try { return await local('Claude: ' + msg); } catch (x) { throw new Error(msg + ' Lokale KI: ' + x.message); }
+  };
   let r;
   try {
     r = await api().beta.messages.stream({ model: MODEL, max_tokens: maxTokens, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
@@ -90,16 +98,18 @@ export async function ask(task, content, schema, { effort, maxTokens = 64000 } =
     const msg = friendly(e);
     if (isBlockErr(e)) {
       cfg().blocked = { at: new Date().toISOString(), reason: msg }; saveNow();
-      if (llm.ready() && !localErr) { try { return await local('Claude gesperrt'); } catch (x) { throw new Error(msg + ' Lokale KI: ' + x.message); } }
+      if (llm.ready() && !localErr && mode !== 'nurclaude') { try { return await local('Claude gesperrt'); } catch (x) { throw new Error(msg + ' Lokale KI: ' + x.message); } }
     }
-    throw new Error(msg);
+    return viaLocal(msg);
   }
   const cost = (r.usage?.input_tokens || 0) * PRICE.input + (r.usage?.output_tokens || 0) * PRICE.output;
   const a = cfg(); a.spent = Math.round(((a.spent || 0) + cost) * 10000) / 10000; a.count = (a.count || 0) + 1; save();
   llm.recordClaude(task, cost, (r.usage?.input_tokens || 0) + (r.usage?.output_tokens || 0));
-  if (r.stop_reason === 'refusal') throw new Error('abgelehnt');
-  if (r.stop_reason === 'max_tokens') throw new Error('Claude hat zu lange nachgedacht (Antwort abgeschnitten) – bitte noch einmal starten.');
-  return { out: JSON.parse(r.content.filter((b) => b.type === 'text').map((b) => b.text).join('')), engine: localErr ? 'Claude (lokal gescheitert)' : 'Claude', model: r.model || MODEL, vision: true, cost };
+  if (r.stop_reason === 'refusal') return viaLocal('abgelehnt');
+  if (r.stop_reason === 'max_tokens') return viaLocal('Claude hat zu lange nachgedacht (Antwort abgeschnitten) – bitte noch einmal starten.');
+  let out;
+  try { out = JSON.parse(r.content.filter((b) => b.type === 'text').map((b) => b.text).join('')); } catch { return viaLocal('Antwort von Claude nicht lesbar.'); }
+  return { out, engine: localErr ? 'Claude (lokal gescheitert)' : 'Claude', model: r.model || MODEL, vision: true, cost };
 }
 async function cutCall(content, schema, { effort, task = 'schnitt' } = {}) { return (await ask(task, content, schema, { effort })).out; }
 const SENTENCE_RULES = 'SAUBERE SCHNITTE (sehr wichtig): Schneide nie mitten im Satz. Das Gesprochene ist in nummerierte Sätze zerlegt (S12 [Start–Ende] Text). '
@@ -462,7 +472,7 @@ export async function scoutMoments(v, sents, profile, { signals = '', wish = '',
   const o = await cutCall([{ type: 'text', text }], schema, { effort: 'high', task: 'scout' });
   return (o.moments || []).slice(0, max).map((m) => {
     const r = bounds.fromSentences(sents, m.fromSentence, m.toSentence);
-    return r && r.end - r.start < 240 ? { start: r.start, end: r.end, t: (r.start + r.end) / 2, label: 'Claude: ' + String(m.why || '').slice(0, 80) } : null;
+    return r && r.end - r.start < 240 ? { start: r.start, end: r.end, t: (r.start + r.end) / 2, label: 'KI: ' + String(m.why || '').slice(0, 80) } : null;
   }).filter(Boolean);
 }
 
@@ -570,7 +580,7 @@ export async function reviewClip(sheetFile, info = {}) {
   const schema = { type: 'object', additionalProperties: false, required: ['ok', 'score', 'issues', 'fixWish'], properties: {
     ok: { type: 'boolean' }, score: { type: 'integer' }, issues: { type: 'array', items: { type: 'string' } }, fixWish: { type: 'string' } } };
   // Ohne Bildverständnis (lokales Textmodell) ist eine Bild-Prüfung sinnlos → nur die technische Prüfung zählt
-  if (llm.modeOf('pruefung') !== 'claude' && llm.ready() && !(await llm.visionAvailable())) return null;
+  if (goesLocal('pruefung') && !(await llm.visionAvailable())) return null;
   const o = await cutCall([{ type: 'text', text }, vision.asImage(sheetFile)], schema, { effort: 'medium', task: 'pruefung' });
   return { ok: !!o.ok, score: Math.max(1, Math.min(10, Math.round(Number(o.score) || 0))) || null,
     issues: (o.issues || []).slice(0, 6).map((x) => String(x).slice(0, 160)), fixWish: String(o.fixWish || '').slice(0, 400) };
@@ -636,10 +646,10 @@ export async function chooseSummary(v, parts, segs, target, profile, wish = '') 
 const queue = [];
 let running = 0;
 // lokal mit Server + PC: zwei Vorschläge gleichzeitig (je Rechner einer), sonst einer nach dem anderen
-const parallel = () => (llm.modeOf('texte') !== 'claude' || !claudeUsable() ? Math.max(1, llm.engines()) : 1);
+const parallel = () => (goesLocal('texte') ? Math.max(1, llm.engines()) : 1);
 
 export function enqueue(v, extra = '') {
-  if (!canAsk('texte')) throw new Error('Kein Claude-API-Schlüssel und keine lokale KI eingerichtet (Einstellungen).');
+  if (!canAsk('texte')) throw new Error('Keine KI erreichbar – Claude-Schlüssel oder lokale KI einrichten (Einstellungen).');
   if (['queued', 'running'].includes(v.ai?.state)) return;
   v.ai = { ...(v.ai || {}), state: 'queued', error: '' };
   queue.push({ id: v.id, extra });
@@ -711,7 +721,7 @@ export async function coach(profileId) {
 // Spiel/Thema für ältere Videos nachträglich bestimmen (für die Ordnung): je Video Titel, Datei, Inhalt, Gesprochenes;
 // ohne jeden Text ein Standbild. Ein Aufruf je 20 Videos → items [{id, game}] (leer = unklar).
 export async function detectTopics(list, onProgress = () => {}) {
-  if (!canAsk('themen')) throw new Error('Für die Themen-Erkennung braucht es den Claude-Schlüssel oder die lokale KI (Einstellungen).');
+  if (!canAsk('themen')) throw new Error('Für die Themen-Erkennung ist keine KI erreichbar (Claude-Schlüssel oder lokale KI, Einstellungen).');
   const known = [...new Set(Object.values(db().videos).map((v) => v.orgTopic || v.ai?.game).filter(Boolean))].slice(0, 60);
   const out = {};
   let cost = 0;
@@ -921,7 +931,7 @@ export async function reviseLong(raw, out, wish, segs, loud, profile) {
     const last = segsOut[segsOut.length - 1];
     if (last && x[0] <= last[1] + 0.5) last[1] = Math.max(last[1], x[1]); else segsOut.push(x);
   }
-  if (!segsOut.length) throw new Error('Claude hat keine brauchbaren Abschnitte geliefert.');
+  if (!segsOut.length) throw new Error('Die KI hat keine brauchbaren Abschnitte geliefert.');
   const tz = o.teaser;
   const teaser = tz?.use && Number.isFinite(Number(tz.at)) && !pro
     ? { at: Math.max(0, Math.min(dur - 3, Number(tz.at))), len: Math.max(3, Math.min(8, Number(tz.len) || 5)), text: String(tz.text || '').slice(0, 60) } : null;

@@ -186,7 +186,7 @@ export function plan() {
     if (v.missing || !ORG_FOLDERS.includes(v.folder)) continue;
     const why = busy(v) ? 'wird gerade bearbeitet oder hochgeladen'
       : v.orgLock ? 'von dir zurückgeholt (bleibt, wo es ist)'
-      : v.folder === 'geschnitten' && !(v.ai?.state === 'done' || v.editedAt) ? 'wartet auf Claudes Vorschlag' : '';
+      : v.folder === 'geschnitten' && !(v.ai?.state === 'done' || v.editedAt) ? 'wartet auf den KI-Vorschlag' : '';
     if (!topicOf(v)) noTopic.push(v.id);
     if (why) { skipped.push({ id: v.id, folder: v.folder, file: v.file, why }); continue; }
     let want = null;

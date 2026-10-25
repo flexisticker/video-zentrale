@@ -370,7 +370,7 @@ async function api(req, res, url) {
       else if (v.revise?.state === 'queued') queue.cut++;
       if (v.rerender?.state === 'running') server.push({ id: v.id, kind: 'cut', name: name(v), step: '🪞 ' + (v.rerender.reason || 'Neu rechnen') + ': ' + (v.rerender.step || 'läuft'), progress: v.rerender.progress || 0 });
       else if (v.rerender?.state === 'queued') queue.cut++;
-      if (v.ai?.state === 'running') server.push({ id: v.id, kind: 'ai', name: name(v), step: 'Claude schreibt Vorschläge' });
+      if (v.ai?.state === 'running') server.push({ id: v.id, kind: 'ai', name: name(v), step: 'KI schreibt Vorschläge' });
       else if (v.ai?.state === 'queued') queue.ai++;
       for (const [k, label] of [['yt', 'YouTube'], ['tt', 'TikTok']]) {
         if (v[k]?.state === 'uploading') server.push({ id: v.id, kind: 'upload', name: name(v), step: 'Upload zu ' + label, progress: v[k].progress || 0, note: v[k].note || '' });

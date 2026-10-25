@@ -1,7 +1,7 @@
 // Lokale KI (Ollama) statt Claude – spart Kosten. Zwei Orte:
 //   Server = Ollama-Container auf dem Unraid-Server (läuft immer, nur Prozessor → langsam, meist reines Textmodell)
 //   PC     = Ollama über den Rechenhelfer auf der RTX 3070 (nur wenn die Grafikkarte freigegeben ist, Modell mit Bildverständnis)
-// Je Aufgabe einstellbar: claude | lokal (nur Ollama) | auto (Ollama, bei Fehler Claude).
+// Je Aufgabe einstellbar: lokal (nur Ollama) | auto (Ollama, bei Fehler Claude) | claude (Claude, bei Fehler Ollama) | nurclaude.
 // Aufträge kommen im Anthropic-Format (content-Blöcke + JSON-Schema) und werden für Ollama umgebaut (/api/chat mit format = Schema).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,7 +19,8 @@ export const TASKS = {
   ueberarbeiten: 'Überarbeiten / Viral-Tipps umsetzen',
   trailer: 'Trailer-Dramaturgie',
 };
-export const MODES = ['claude', 'auto', 'lokal'];
+export const MODES = ['lokal', 'auto', 'claude', 'nurclaude'];
+export const MODE_NAMES = { lokal: 'Nur lokal', auto: 'Lokal, sonst Claude', claude: 'Claude, sonst lokal', nurclaude: 'Nur Claude' };
 // Vorlagen. Standard (Wunsch des Kunden): das Teure lokal (lange Abschriften, viele Bilder), das Günstige bei Claude.
 // Ist Claude gesperrt (kein Guthaben), laufen auch die Claude-Aufgaben lokal (ai.ask).
 export const PRESETS = {
@@ -48,7 +49,7 @@ export const modeOf = (task) => { const m = cfg().tasks[task] || DEFAULT_MODES[t
 export function status() {
   const c = cfg();
   return { url: c.url, model: c.model, ctx: c.ctx, pc: { ...c.pc, ready: pcReady(), helperCan: helper.can('llm') },
-    tasks: Object.fromEntries(Object.keys(TASKS).map((k) => [k, modeOf(k)])), names: TASKS, presets: Object.fromEntries(Object.entries(PRESETS).map(([k, p]) => [k, p.name])), busy: { ...busy }, stats: c.stats, lastError: c.lastError || '', lastAt: c.lastAt || '' };
+    tasks: Object.fromEntries(Object.keys(TASKS).map((k) => [k, modeOf(k)])), names: TASKS, presets: Object.fromEntries(Object.entries(PRESETS).map(([k, p]) => [k, p.name])), modeNames: MODE_NAMES, busy: { ...busy }, stats: c.stats, lastError: c.lastError || '', lastAt: c.lastAt || '' };
 }
 export function configure(b = {}) {
   const c = cfg();

@@ -414,6 +414,10 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   Verteilung `pickTarget()` (freierer Rechner, Gleichstand → PC; `busy {pc, server}`), PC-Auftrag nicht abgeholt/abgebrochen → Server übernimmt; Vorschlag-Warteschlange
   `parallel()` = Anzahl Rechner, wenn lokal. Mock: `MOCK_CLAUDE_NO_CREDIT=1` (test/mock.js), `MOCK_OLLAMA_DELAY`. Getestet: Guthaben-Fehler → 1× Claude, danach direkt lokal;
   4 Vorschläge auf Server + PC verteilt.
+- 1.32.0 (25.10.2026): Oberfläche/Schritte/Warnungen sagen „KI“ statt „Claude“ (nur Claude-Zugang, Kosten, Guthaben heißen weiter Claude); Vorschlag zeigt
+  „erstellt von: <engine>“; `ai.status().usable` = irgendeine KI erreichbar. Modi je Aufgabe jetzt 4 (`llm.MODES`/`MODE_NAMES`): lokal, auto (lokal, sonst Claude),
+  claude (**Claude, sonst lokal** – bei jedem Claude-Fehler/Ablehnung/abgeschnittener oder unlesbarer Antwort lokal, `viaLocal` in `ai.ask`), nurclaude (nie lokal).
+  `goesLocal(task)` für Bildprüfung/Parallelität. Getestet per Skript (Mock-Ollama, Claude unerreichbar).
 - Ideen danach: „Best of der Woche“ automatisch (Zeitplan), Platz-Einblendungen „Platz 3/2/1“.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
   Sendeplätze je Kanal **stellt der Kunde selbst ein** (keine festen Startzeiten), „Einplanen“ auf nächsten freien Platz, Shorts

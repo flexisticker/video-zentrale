@@ -31,7 +31,7 @@ export const TEMPO = {
   schnell: { gap: 0.35, quiet: 4, fillers: true, zoom: true },
 };
 export const TEMPO_NAMES = { aus: 'aus (nichts herausschneiden)', ruhig: 'ruhig (nur lange Pausen)', normal: 'normal (Pausen + „ähm“)', schnell: 'schnell (Jump Cuts + Zooms)' };
-export const HOOK_STYLES = { auto: 'Claude entscheidet', preview: 'Höhepunkt vorweg + Zurückspulen', cold: 'direkt mitten rein', off: 'aus' };
+export const HOOK_STYLES = { auto: 'KI entscheidet', preview: 'Höhepunkt vorweg + Zurückspulen', cold: 'direkt mitten rein', off: 'aus' };
 
 const FILLER = /^(ä+h*m*|äh+m*|ö+h*m*|e+h*m+|h+m+|m+h+m+)$/i;
 const isFiller = (t) => FILLER.test(String(t).trim().replace(/[.,!?…]/g, ''));

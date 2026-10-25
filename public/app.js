@@ -397,7 +397,7 @@ function renderMain() {
       h('button', { class: 'btn small', disabled: !S.sel.size, onclick: () => bulk('restore') }, '↩ Wiederherstellen'),
       h('button', { class: 'btn small danger', disabled: !S.sel.size, onclick: () => bulk('delete') }, '✕ Endgültig löschen'),
     ] : [
-      S.tab === 'geschnitten' ? h('button', { class: 'btn small primary', disabled: !S.sel.size, title: 'Aus dem Rohvideo neu schneiden – mit Tonfall-/Chat-Signalen, Bildaufbau, Prüfung und Viral-Tipps (je Video ein Claude-Aufruf)',
+      S.tab === 'geschnitten' ? h('button', { class: 'btn small primary', disabled: !S.sel.size, title: 'Aus dem Rohvideo neu schneiden – mit Tonfall-/Chat-Signalen, Bildaufbau, Prüfung und Viral-Tipps (je Video ein KI-Aufruf)',
         onclick: () => bulk('revise') }, '🔁 Mit neuen Erkenntnissen überarbeiten') : null,
       h('button', { class: 'btn small danger', disabled: !S.sel.size, onclick: () => bulk('trash') }, '🗑 In den Papierkorb')]) : null;
   mainEl.replaceChildren(...[
@@ -425,7 +425,7 @@ async function bulk(action) {
   let wish = '';
   if (action === 'revise') {
     wish = prompt(`${ids.length} Video(s) mit den neuen Erkenntnissen neu schneiden (Tonfall, Lacher, Twitch-Chat, Facecam-Bildaufbau, Prüfung, Viral-Tipps)?\n\n`
-      + 'Optional ein gemeinsamer Wunsch (leer lassen = Claude entscheidet). Jede neue Fassung erscheint als v2 daneben; kostet je Video einen Claude-Aufruf.', '');
+      + 'Optional ein gemeinsamer Wunsch (leer lassen = die KI entscheidet). Jede neue Fassung erscheint als v2 daneben; je Video ein KI-Aufruf (bei Claude kostenpflichtig, lokal kostenlos).', '');
     if (wish === null) return;
     try {
       const r = await api('POST', '/api/videos/bulk', { action, ids, wish });
@@ -482,7 +482,7 @@ function card(v) {
       h('div', { class: 'title' }, v.title || v.file),
       h('div', { class: 'meta' }, fmtDate(v.mtime), ' · ', fmtSize(v.size)),
       h('div', { class: 'chips' }, channelBadge(v),
-        ['queued', 'running'].includes(v.ai?.state) ? h('span', { class: 'chip run' }, '✨ Claude schreibt …') : null,
+        ['queued', 'running'].includes(v.ai?.state) ? h('span', { class: 'chip run' }, '✨ KI schreibt …') : null,
         v.cut?.state === 'queued' ? h('span', { class: 'chip run', title: v.cut.waitPc ? 'Wartet, bis du die Grafikkarte des PCs freigibst (Einstellungen → Rechenhelfer oder Desktop-Verknüpfung). „Jetzt schneiden“ im Video schneidet sofort ohne PC-Analyse.' : '' },
           v.cut.waitPc && !v.cut.now ? '🔒 wartet auf PC-Freigabe' : S.settings?.cut?.window?.enabled && !S.settings?.cut?.windowOpen && !v.cut.now
           ? `🌙 schneidet ab ${S.settings.cut.window.from} Uhr` : '✂ wartet auf Schnitt') : null,
@@ -515,10 +515,10 @@ async function renderStats() {
   const chBox = (c) => h('div', { class: 'box' },
     h('h3', {}, h('span', { class: 'dot', style: { background: c.color } }), ' ', c.name, h('span', { class: 'hint' }, ` · ${c.count} Video${c.count === 1 ? '' : 's'} mit Zahlen`)),
     !c.count ? h('p', { class: 'hint' }, 'Noch keine Zahlen – sobald Videos hochgeladen sind und YouTube/TikTok verbunden ist, kommen sie hier an (alle 6 Stunden).') : [
-      c.corr != null ? h('p', { class: 'hint' }, `Trefferquote von Claudes Viral-Einschätzung: ${c.corr >= 0.5 ? 'gut' : c.corr >= 0.2 ? 'mittel' : 'schwach'} (Rangkorrelation ${String(c.corr).replace('.', ',')})`) : null,
+      c.corr != null ? h('p', { class: 'hint' }, `Trefferquote der Viral-Einschätzung der KI: ${c.corr >= 0.5 ? 'gut' : c.corr >= 0.2 ? 'mittel' : 'schwach'} (Rangkorrelation ${String(c.corr).replace('.', ',')})`) : null,
       h('b', {}, '🏆 Lief am besten'), h('div', { class: 'statlist' }, c.top.map(row)),
       c.count > 10 ? [h('b', {}, '📉 Lief am schwächsten'), h('div', { class: 'statlist' }, c.flop.map(row))] : null,
-      h('p', { class: 'hint' }, '„2×“ = doppelt so viele Aufrufe wie üblich auf diesem Kanal. Ab 6 Videos mit Zahlen bekommt Claude die besten und schwächsten als Beispiele für den nächsten Schnitt.')]);
+      h('p', { class: 'hint' }, '„2×“ = doppelt so viele Aufrufe wie üblich auf diesem Kanal. Ab 6 Videos mit Zahlen bekommt die KI die besten und schwächsten als Beispiele für den nächsten Schnitt.')]);
   const errs = Object.entries(st.errors || {});
   const tw = st.twitch;
   mainEl.replaceChildren(...[
@@ -541,11 +541,11 @@ async function renderCoach() {
   const box = (p) => {
     const c = all[p.id];
     const btn = h('button', { class: 'btn primary', onclick: async () => {
-      btn.disabled = true; btn.textContent = 'Claude schaut sich deine Videos an … (ca. 30 s)';
+      btn.disabled = true; btn.textContent = 'Die KI schaut sich deine Videos an … (ca. 30 s)';
       try { await api('POST', '/api/coach', { profileId: p.id }); renderCoach(); } catch (x) { toast(x.message, true); btn.disabled = false; btn.textContent = c ? '↻ Neue Tipps holen' : '💡 Tipps holen'; }
     } }, c ? '↻ Neue Tipps holen' : '💡 Tipps holen');
     const head = h('h3', {}, h('span', { class: 'dot', style: { background: p.color } }), ' ', p.name);
-    if (!c) return h('div', { class: 'box coach' }, head, h('p', { class: 'hint' }, 'Claude schaut sich deine letzten Videos dieses Kanals an und gibt dir persönliche Tipps und Ideen (kostet ein paar Cent).'), btn);
+    if (!c) return h('div', { class: 'box coach' }, head, h('p', { class: 'hint' }, 'Die KI schaut sich deine letzten Videos dieses Kanals an und gibt dir persönliche Tipps und Ideen (mit Claude ein paar Cent, lokal kostenlos).'), btn);
     return h('div', { class: 'box coach' }, head,
       h('p', { class: 'hint' }, `Stand ${fmtDate(c.at)} · aus ${c.videos} Videos`),
       h('p', {}, c.summary),
@@ -557,7 +557,7 @@ async function renderCoach() {
   };
   mainEl.replaceChildren(h('div', { class: 'posting' },
     h('h2', { class: 'h2' }, '💡 Dein Coach'),
-    h('p', { class: 'hint' }, 'Persönliche Tipps aus deinen letzten Videos – Einstieg, Rhythmus, Themen, Aufnahme, Titel. Aufrufzahlen kennt Claude (noch) nicht, nur Inhalte und Einschätzungen. Die Tipps je Video stehen im Video unter „Viral-Potenzial“.'),
+    h('p', { class: 'hint' }, 'Persönliche Tipps aus deinen letzten Videos – Einstieg, Rhythmus, Themen, Aufnahme, Titel. Aufrufzahlen kennt die KI (noch) nicht, nur Inhalte und Einschätzungen. Die Tipps je Video stehen im Video unter „Viral-Potenzial“.'),
     ...profilesList().map(box)));
 }
 
@@ -1008,7 +1008,7 @@ function renderViral(v) {
   const x = v.viral;
   if (!x?.score) return null;
   return h('div', { class: 'section viralbox' }, h('div', { class: 'row' }, h('b', {}, 'Viral-Potenzial'), viralChip(v, true),
-    h('span', { class: 'hint' }, x.by === 'Schnitt' ? '(Einschätzung beim Schnitt)' : '(Einschätzung von Claude)')),
+    h('span', { class: 'hint' }, x.by === 'Schnitt' ? '(Einschätzung beim Schnitt)' : '(Einschätzung der KI)')),
     x.why ? h('div', {}, x.why) : null, x.tip ? h('div', {}, h('b', {}, '💡 ' + x.tip)) : null,
     (x.hook || x.edit || x.packaging || x.nextTime) ? h('ul', { class: 'vtips' },
       x.hook ? h('li', {}, h('b', {}, 'Einstieg: '), x.hook) : null,
@@ -1026,27 +1026,27 @@ function tipsAction(v) {
   if (v.revise?.newId && v.tipsApplied && /^Viral-Tipps/.test(v.revise.wish || '')) return h('p', { class: 'ok-text' }, '⚡ Tipps umgesetzt: ', h('a', { href: '#video/' + v.revise.newId }, v.revise.newFile || 'neue Fassung öffnen'));
   if (v.canRevise !== true) return null;
   return h('div', { class: 'row', style: { marginTop: '8px' } }, h('button', { class: 'btn small primary', onclick: async () => {
-    try { Object.assign(v, await api('POST', `/api/videos/${v.id}/apply-tips`)); await refresh(); updateDetail(true); pollActivity(); startPolling(); toast('Claude schneidet nach den Tipps neu – die neue Fassung erscheint als v2.'); }
+    try { Object.assign(v, await api('POST', `/api/videos/${v.id}/apply-tips`)); await refresh(); updateDetail(true); pollActivity(); startPolling(); toast('Die KI schneidet nach den Tipps neu – die neue Fassung erscheint als v2.'); }
     catch (e) { toast(e.message, true); }
   } }, '⚡ Tipps umsetzen (neu schneiden)'), h('span', { class: 'hint' }, 'als v2 zum Vergleichen'));
 }
 
 function renderAi(box, v) {
   const a = v.ai || {};
-  const conf = S.settings?.ai?.configured;
-  const hint = h('input', { placeholder: 'Hinweis für Claude (optional), z. B. „Thema: 1v3 in Runde 5“' });
+  const conf = S.settings?.ai?.usable ?? S.settings?.ai?.configured;
+  const hint = h('input', { placeholder: 'Hinweis für die KI (optional), z. B. „Thema: 1v3 in Runde 5“' });
   const ask = h('button', { class: 'btn primary', disabled: !conf || ['queued', 'running'].includes(a.state), onclick: async () => {
     try { await detail.ensureSaved(); Object.assign(v, await api('POST', `/api/videos/${v.id}/ai`, { extra: hint.value })); await refresh(); updateDetail(); startPolling(); }
     catch (x) { toast(x.message, true); }
-  } }, a.titles ? '✨ Neuen Vorschlag holen' : '✨ Vorschlag von Claude');
-  const kids = [h('h3', {}, '✨ Claude')];
-  if (!conf) kids.push(h('div', { class: 'hint' }, 'Claude ist noch nicht eingerichtet – ', h('a', { href: '#einstellungen' }, 'Einstellungen → Claude'), '.'));
-  if (a.state === 'queued' || a.state === 'running') kids.push(h('div', { class: 'status' }, 'Claude schaut sich das Video an und schreibt … (ca. 20–60 s)'));
+  } }, a.titles ? '✨ Neuen Vorschlag holen' : '✨ KI-Vorschlag holen');
+  const kids = [h('h3', {}, '✨ KI-Vorschlag')];
+  if (!conf) kids.push(h('div', { class: 'hint' }, 'Keine KI eingerichtet – ', h('a', { href: '#einstellungen' }, 'Einstellungen → Claude bzw. Lokale KI'), '.'));
+  if (a.state === 'queued' || a.state === 'running') kids.push(h('div', { class: 'status' }, 'Die KI schaut sich das Video an und schreibt … (mit Claude ca. 20–60 s, lokal evtl. einige Minuten)'));
   if (a.state === 'error') kids.push(h('div', { class: 'status err' }, a.error || 'Fehler'));
   if (a.titles?.length) {
     const d = detail;
     kids.push(
-      h('div', { class: 'meta' }, a.summary, a.game ? ' · ' + a.game : '', a.applied ? ' · automatisch übernommen' : ''),
+      h('div', { class: 'meta' }, a.summary, a.game ? ' · ' + a.game : '', a.applied ? ' · automatisch übernommen' : '', a.engine ? ' · erstellt von: ' + a.engine : ''),
       h('div', { class: 'ai-titles' }, h('b', {}, 'Titel – anklicken zum Übernehmen:'),
         a.titles.map((t) => h('button', { class: 'btn small ai-pick', onclick: () => d.setField('title', t) }, t))),
       h('div', { class: 'row' },
@@ -1074,7 +1074,7 @@ function renderAi(box, v) {
         h('div', { class: 'row' },
           h('button', { class: 'btn small ghost', onclick: async () => { try { Object.assign(v, await api('POST', `/api/videos/${v.id}/variants`)); await refresh(); updateDetail(true); toast('Neu erzeugt.'); } catch (x) { toast(x.message, true); } } }, '↻ Varianten neu bauen (z. B. nach neuen Fotos)')),
         ) : null,
-      a.frames?.length ? h('details', {}, h('summary', { class: 'meta' }, 'Standbilder – Claude empfiehlt Bild ' + a.thumbnailFrame + (a.thumbnailText ? ', Text: „' + a.thumbnailText + '“' : '') + ':'),
+      a.frames?.length ? h('details', {}, h('summary', { class: 'meta' }, 'Standbilder – die KI empfiehlt Bild ' + a.thumbnailFrame + (a.thumbnailText ? ', Text: „' + a.thumbnailText + '“' : '') + ':'),
         h('div', { class: 'frames' }, a.frames.map((n) => {
           const b = h('button', { class: 'frame' + (n === a.thumbnailFrame ? ' best' : ''), title: 'Als Titelbild nehmen', onclick: () => d.setCoverFromFrame(n) });
           b.style.backgroundImage = `url("/api/videos/${v.id}/ai-frame/${n}?t=${encodeURIComponent(a.at)}")`;
@@ -1086,7 +1086,7 @@ function renderAi(box, v) {
   add(box, ...kids.filter(Boolean)); // add() filtert null
 }
 
-// Was soll geschnitten werden? Je Video einstellbar, dazu ein Wunsch in Worten für Claude.
+// Was soll geschnitten werden? Je Video einstellbar, dazu ein Wunsch in Worten für die KI.
 function cutPlanForm(v, c) {
   const p = v.plan || {};
   const pro = isPro(channelOf(v));
@@ -1109,7 +1109,7 @@ function cutPlanForm(v, c) {
     h('div', { class: 'two' },
       h('div', {}, h('label', {}, pro ? 'LinkedIn-Clips (4:5)' : 'Shorts / Clips (Hochformat)'), shorts),
       h('div', {}, h('label', {}, 'Kurzfassung (beste Stellen am Stück)'), summary)),
-    h('label', {}, 'Dein Wunsch an Claude (optional)'), wish,
+    h('label', {}, 'Dein Wunsch an die KI (optional)'), wish,
     h('div', { class: 'row', style: { marginTop: '8px' } },
       c?.state === 'queued'
         ? h('button', { class: 'btn', onclick: async () => { try { Object.assign(v, await api('POST', `/api/videos/${v.id}/cutplan`, plan())); toast('Gemerkt – wird beim Schnitt so gemacht.'); } catch (x) { toast(x.message, true); } } }, 'Plan merken')
@@ -1140,7 +1140,7 @@ function renderCut(box, v) {
     }
     if (c?.warning) add(sec, h('div', { class: 'hint' }, 'Hinweis: ' + c.warning));
     if (c?.signals) add(sec, h('div', { class: 'hint' }, '📡 Signale beim Schnitt: ' + [c.voiceTrack === 'pc' ? 'Stimme vom PC getrennt (Demucs)' : c.voiceTrack ? `Stimme aus Spur ${c.voiceTrack}` : 'Mischspur (keine eigene Stimmspur)',
-      c.signals.events ? `${c.signals.events} Geräusch-Marker (Lachen …)` : '', c.signals.twitch ? `${c.signals.twitch} Twitch-Signale` : '', c.signals.scout ? `${c.signals.scout} Momente von Claudes Durchsicht` : '', c.signals.pc ? `${c.signals.pc} Signale vom PC (Geräusche/Spieltexte)` : ''].filter(Boolean).join(' · ')));
+      c.signals.events ? `${c.signals.events} Geräusch-Marker (Lachen …)` : '', c.signals.twitch ? `${c.signals.twitch} Twitch-Signale` : '', c.signals.scout ? `${c.signals.scout} Momente aus der KI-Durchsicht` : '', c.signals.pc ? `${c.signals.pc} Signale vom PC (Geräusche/Spieltexte)` : ''].filter(Boolean).join(' · ')));
     if (v.analyse?.at) add(sec, h('div', { class: 'hint' }, `🖥 PC-Analyse ${fmtDate(v.analyse.at)}: ${v.analyse.events} Geräusche, ${v.analyse.ocr} Texte${v.analyse.voice ? ', Stimme getrennt' : ''}${v.analyse.took ? ` (${Math.round(v.analyse.took)} s)` : ''}`));
     else if (v.analyse?.error) add(sec, h('div', { class: 'hint' }, '🖥 PC-Analyse ging nicht: ' + v.analyse.error));
     const tws = S.settings?.twitch?.streams || [];
@@ -1508,7 +1508,7 @@ function renderRevise(box, v) {
     kids.push(h('div', { class: 'rev-new' },
       h('b', {}, '🔁 Überarbeitete Fassung'),
       h('p', {}, 'Dein Wunsch: „' + (v.revisionWish || '') + '“'),
-      v.revisionChanges ? h('p', { class: 'hint' }, 'Claude: ' + v.revisionChanges) : null,
+      v.revisionChanges ? h('p', { class: 'hint' }, 'KI: ' + v.revisionChanges) : null,
       v.revisionKept ? h('p', { class: 'ok-text' }, '✓ Behalten – die vorherige Fassung liegt im Papierkorb.')
         : h('div', { class: 'row' },
           old && old.folder !== 'papierkorb' ? h('button', { class: 'btn small primary', onclick: act(async () => { await api('POST', `/api/videos/${v.id}/keep-revision`); await refresh(); updateDetail(true); }, 'Behalten – die vorherige liegt im Papierkorb.') }, '✓ Diese behalten') : null,
@@ -1535,7 +1535,7 @@ function renderRevise(box, v) {
       const add = (c) => { wish.value = wish.value.trim() ? wish.value.trim().replace(/[.;,]?$/, '; ') + c : c; wish.focus(); };
       const chips = h('div', { class: 'chips' }, (isShort ? REVISE_CHIPS : REVISE_CHIPS_LONG).map((c) => h('button', { class: 'chip-btn', onclick: () => add(c) }, c)));
       const target = isShort ? null : h('input', { type: 'number', min: 1, max: 120, placeholder: 'z. B. 10', style: { width: '90px' } });
-      sec.append(h('p', { class: 'hint' }, (isShort ? 'Claude schneidet den Clip aus dem Rohvideo neu.' : 'Claude sieht sich die ganze Aufnahme an und schneidet die Fassung aus dem Rohvideo neu.')
+      sec.append(h('p', { class: 'hint' }, (isShort ? 'Die KI schneidet den Clip aus dem Rohvideo neu.' : 'Die KI sieht sich die ganze Aufnahme an und schneidet die Fassung aus dem Rohvideo neu.')
           + ' Die neue Fassung erscheint daneben als „v2“ – du entscheidest, welche bleibt.'),
         chips, wish,
         target ? h('div', { class: 'row', style: { marginTop: '6px', alignItems: 'center' } }, h('span', { class: 'hint' }, 'Ziellänge (Minuten, optional):'), target,
@@ -1564,7 +1564,7 @@ async function trailerDialog() {
   document.body.append(modal);
   const sel = (key, opts, onch) => h('select', { onchange: (e) => { st[key] = isNaN(e.target.value) ? e.target.value : Number(e.target.value); onch?.(); } },
     opts.map(([k, n]) => h('option', { value: k, selected: String(st[key]) === String(k) }, n)));
-  const wish = h('input', { placeholder: 'Wunsch an Claude (optional), z. B. „nur Rage-Momente“, „viel Fortnite“' });
+  const wish = h('input', { placeholder: 'Wunsch an die KI (optional), z. B. „nur Rage-Momente“, „viel Fortnite“' });
   const cIntro = h('input', { type: 'checkbox', checked: true }), cWm = h('input', { type: 'checkbox', checked: true }), cLab = h('input', { type: 'checkbox', checked: true });
   const draw = async () => {
     clearTimeout(timer);
@@ -1580,7 +1580,7 @@ async function trailerDialog() {
     const jobs = (d.jobs || []).slice(0, 5);
     const busy = jobs.some((j) => ['queued', 'running'].includes(j.state));
     body.replaceChildren(...[
-      h('p', { class: 'hint' }, 'Die Zentrale nimmt die besten Momente aus allen Shorts des Kanals (Viral-Punkte, echte Aufrufe, Twitch-Clips). Claude baut daraus einen Spannungsbogen: stärkster Einstieg, Abwechslung, bestes Highlight zum Schluss – mit Logo-Intro, „Jetzt abonnieren“ am Ende und Musik.'),
+      h('p', { class: 'hint' }, 'Die Zentrale nimmt die besten Momente aus allen Shorts des Kanals (Viral-Punkte, echte Aufrufe, Twitch-Clips). Die KI baut daraus einen Spannungsbogen: stärkster Einstieg, Abwechslung, bestes Highlight zum Schluss – mit Logo-Intro, „Jetzt abonnieren“ am Ende und Musik.'),
       h('div', { class: 'two' },
         h('div', {}, h('label', {}, 'Kanal'), sel('profileId', chans.map((p) => [p.id, p.name]), draw)),
         h('div', {}, h('label', {}, 'Zeitraum'), sel('days', [[0, 'alle Videos'], [7, 'letzte 7 Tage (Best of der Woche)'], [30, 'letzte 30 Tage'], [90, 'letzte 3 Monate'], [365, 'letztes Jahr']], draw))),
@@ -1606,7 +1606,7 @@ async function trailerDialog() {
             toast('Trailer wird erstellt – er erscheint danach unter „Zur Freigabe“.'); pollActivity(); startPolling(); draw();
           } catch (x) { toast(x.message, true); }
         } }, '🎬 Trailer erstellen'),
-        h('span', { class: 'hint' }, 'Kostet ca. 0,30–1,50 $ Claude (+ KI-Musik, falls keine eigene im Ordner).')),
+        h('span', { class: 'hint' }, 'Mit Claude ca. 0,30–1,50 $, lokal kostenlos (+ KI-Musik, falls keine eigene im Ordner).')),
       jobs.length ? h('div', { class: 'section' }, h('b', {}, 'Zuletzt'), jobs.map((j) => h('div', { class: 'row' },
         h('span', {}, `${fmtDate(j.at)} · ${j.profileName} · ${j.opts.format} · ${String(Math.round(j.opts.seconds / 60 * 10) / 10).replace('.', ',')} Min.`),
         j.state === 'done' ? h('a', { class: 'btn small', href: '#video/' + j.outId, onclick: close }, '▶ öffnen') : null,
@@ -1638,9 +1638,9 @@ async function convertDialog(after = () => {}) {
         : 'Alles ist schon an seinem Platz.'),
       pl.noTopic ? h('div', { class: 'box', style: { margin: '10px 0' } },
         h('p', {}, `🎮 ${pl.noTopic} Video(s) ohne erkanntes Spiel/Thema – sie landen sonst unter „Sonstiges“.`),
-        running ? h('p', { class: 'hint' }, `Claude erkennt die Themen … ${tj.done} von ${tj.total}`)
+        running ? h('p', { class: 'hint' }, `Die KI erkennt die Themen … ${tj.done} von ${tj.total}`)
           : h('button', { class: 'btn', onclick: async () => { try { await api('POST', '/api/org/topics'); draw(); } catch (x) { toast(x.message, true); } } },
-            `Spiel/Thema von Claude erkennen lassen (ca. ${Math.max(0.01, pl.noTopic * 0.004).toFixed(2).replace('.', ',')} $)`),
+            `Spiel/Thema von der KI erkennen lassen (mit Claude ca. ${Math.max(0.01, pl.noTopic * 0.004).toFixed(2).replace('.', ',')} $)`),
         tj?.state === 'done' && tj.total ? h('p', { class: 'hint' }, `Zuletzt: ${tj.found} von ${tj.total} erkannt${tj.cost != null ? ` (${String(tj.cost).replace('.', ',')} $)` : ''}. Den Rest kannst du in der Bibliothek von Hand setzen (✎ Spiel).`) : null,
         tj?.state === 'error' ? h('p', { class: 'bad' }, tj.error) : null) : null,
       pl.moves.length ? h('div', { class: 'org-log', style: { maxHeight: '45vh' } }, pl.moves.slice(0, 300).map((x) => h('div', { class: 'org-row' },
@@ -1705,7 +1705,7 @@ async function renderLibrary() {
         kids.length ? h('div', { class: 'lib-kids' }, kids.map(kidRow)) : h('span', { class: 'hint' }, ' noch nichts geschnitten'));
     })));
   mainEl.replaceChildren(...[h('div', { class: 'bar' }, h('h2', { class: 'h2' }, '📚 Bibliothek'),
-      h('span', { class: 'hint' }, 'Jede Aufnahme mit allem, was daraus entstanden ist – sortiert nach Spiel/Thema (von Claude erkannt).'),
+      h('span', { class: 'hint' }, 'Jede Aufnahme mit allem, was daraus entstanden ist – sortiert nach Spiel/Thema (von der KI erkannt).'),
       h('div', { style: { flex: '1' } }), h('button', { class: 'btn small', onclick: () => convertDialog(renderLibrary) }, '🗂 Vorhandene umstellen …')),
     o?.pending ? h('div', { class: 'alert-line' }, `${o.pending} Video(s) liegen noch nach der alten Ordnung. `,
       h('button', { class: 'btn small primary', onclick: () => convertDialog(renderLibrary) }, 'Ansehen & umstellen')) : null,
@@ -1738,7 +1738,7 @@ function drawActivity() {
   // Zentrale
   const own = a.server.filter((x) => !x.waiting);
   const waiting = a.server.filter((x) => x.waiting);   // Schnitt wartet auf die Spracherkennung des Helfers
-  const waits = [q.cut && `${q.cut} Schnitt`, q.ai && `${q.ai} Claude`, q.upload && `${q.upload} Upload`].filter(Boolean).join(', ');
+  const waits = [q.cut && `${q.cut} Schnitt`, q.ai && `${q.ai} KI`, q.upload && `${q.upload} Upload`].filter(Boolean).join(', ');
   const srv = h('div', { class: 'act-box' + (own.length ? ' run' : '') },
     h('b', {}, own.length ? '⚙ Zentrale arbeitet' : '⚙ Zentrale'),
     own.length ? own.map((x) => h('span', open(x.id), `${ACT_ICON[x.kind] || '•'} ${x.step}${pct(x)} · „${x.name}“` + (x.note ? ` ⚠ ${x.note}` : '')))
@@ -1873,7 +1873,7 @@ async function renderSettings() {
     const color = h('input', { type: 'color', value: p.color, class: 'color' });
     const def = h('input', { type: 'checkbox', checked: p.isDefault });
     const kw = h('textarea', { rows: 3, value: p.keywords, placeholder: 'z. B. fortnite, minecraft, clutch' });
-    const style = h('textarea', { rows: 2, value: p.aiStyle, placeholder: 'Worum geht es, wie soll Claude schreiben, wer schaut zu?' });
+    const style = h('textarea', { rows: 2, value: p.aiStyle, placeholder: 'Worum geht es, wie soll die KI schreiben, wer schaut zu?' });
     const cat = h('select', {}, CATEGORIES.map(([id, n]) => h('option', { value: id, selected: p.category === id }, n)));
     const tags = h('input', { value: p.tags });
     const footer = h('textarea', { rows: 3, value: p.footer, placeholder: 'z. B. Links zu Discord/Shop, „Musik: Epidemic Sound“' });
@@ -1882,7 +1882,7 @@ async function renderSettings() {
     const proMusic = h('input', { type: 'checkbox', checked: p.music });
     const clipHints = h('textarea', { rows: 2, value: p.clipHints || '', placeholder: 'z. B. Funny Moments, wo ich mich ärgere, Fails, Clutches …' });
     const chShorts = h('input', { type: 'number', min: 0, max: 10, value: p.shorts ?? '', placeholder: 'Standard' });
-    const hookSel = h('select', {}, Object.entries({ auto: 'Claude entscheidet je Clip', preview: 'Höhepunkt vorweg + Zurückspulen', cold: 'direkt mitten rein', off: 'aus' })
+    const hookSel = h('select', {}, Object.entries({ auto: 'KI entscheidet je Clip', preview: 'Höhepunkt vorweg + Zurückspulen', cold: 'direkt mitten rein', off: 'aus' })
       .filter(([k]) => !isPro(p) || k !== 'preview').map(([k, n]) => h('option', { value: k, selected: (p.hookStyle || 'auto') === k }, n)));
     const tempoSel = h('select', {}, Object.entries({ aus: 'aus (nichts herausschneiden)', ruhig: 'ruhig (nur lange Pausen)', normal: 'normal (Pausen + „ähm“)', schnell: 'schnell (Jump Cuts + Zooms)' })
       .map(([k, n]) => h('option', { value: k, selected: (p.tempo || 'normal') === k }, n)));
@@ -1890,9 +1890,9 @@ async function renderSettings() {
     const fxSel = h('select', {}, Object.entries({ aus: 'aus', dezent: 'dezent (wenige Emojis/Sounds)', normal: 'normal (+ Freeze, Zeitlupe, Zoom, Wackeln)', viel: 'viel (+ KI-Sticker)' })
       .map(([k, n]) => h('option', { value: k, selected: (p.fxLevel || 'normal') === k }, n)));
     const fxImg = h('input', { type: 'checkbox', checked: !!p.fxImages });
-    const capSel = h('select', {}, h('option', { value: 'auto', selected: (p.captionStyle || 'auto') === 'auto' }, 'Claude wählt je Clip passend'),
+    const capSel = h('select', {}, h('option', { value: 'auto', selected: (p.captionStyle || 'auto') === 'auto' }, 'KI wählt je Clip passend'),
       (CAP.styles || []).map((x) => h('option', { value: x.id, selected: p.captionStyle === x.id }, `${x.name} – ${x.desc}`)));
-    const lookSel = h('select', {}, h('option', { value: 'auto', selected: (p.hookLook || 'auto') === 'auto' }, 'Claude wählt je Clip'),
+    const lookSel = h('select', {}, h('option', { value: 'auto', selected: (p.hookLook || 'auto') === 'auto' }, 'KI wählt je Clip'),
       (CAP.looks || []).map((x) => h('option', { value: x.id, selected: p.hookLook === x.id }, x.name)));
     const coverSel = h('select', {}, Object.entries({ aus: 'aus', bild: 'als erstes Bild (unsichtbar beim Abspielen)', kurz: '0,4 Sekunden stehend' })
       .map(([k, n]) => h('option', { value: k, selected: (p.coverFrame || 'aus') === k }, n)));
@@ -1950,14 +1950,14 @@ async function renderSettings() {
     const box = h('div', { class: 'box channelbox' }, head,
       h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Name'), name), h('div', {}, h('label', {}, 'Farbe'), color)),
       isPro(p) ? null : h('label', { class: 'check' }, def, 'Standardkanal (wenn kein Stichwort passt)'),
-      h('label', {}, 'Beschreibung für Claude (Thema, Ton, Publikum)'), style,
+      h('label', {}, 'Beschreibung für die KI (Thema, Ton, Publikum)'), style,
       h('label', {}, 'Stichwörter für den Vorschlag (mit Komma; Titel/Dateiname zählt doppelt)'), kw,
       h('div', { class: 'two' }, h('div', {}, h('label', {}, 'YouTube-Kategorie'), cat), h('div', {}, h('label', {}, 'Standard-Tags'), tags)),
       h('label', {}, 'Text unter jeder YouTube-Beschreibung'), footer,
-      h('label', {}, '✂ Was soll Claude als Clips rausholen?'), clipHints,
+      h('label', {}, '✂ Was soll die KI als Clips rausholen?'), clipHints,
       h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Clips je Video (leer = Standard)'), chShorts), h('div', {})),
       h('div', { class: 'two' }, h('div', {}, h('label', {}, '⚡ Hook am Anfang der Clips'), hookSel), h('div', {}, h('label', {}, '✂ Tempo der Clips'), tempoSel)),
-      h('label', {}, 'Hinweis zum Hook für Claude'), hookHint,
+      h('label', {}, 'Hinweis zum Hook für die KI'), hookHint,
       h('div', { class: 'two' }, h('div', {}, h('label', {}, '🎉 Effekte in Clips (Emojis, Sounds, Freeze …)'), fxSel),
         h('div', {}, h('label', { class: 'check', style: { marginTop: '22px' } }, fxImg, 'KI-Sticker aus meinen Fotos (Stufe „viel“, ca. 5 Cent)'))),
       isPro(p) ? null : h('div', { class: 'two' }, h('div', {}, h('label', {}, '🔤 Untertitel-Stil'), capSel),
@@ -1974,7 +1974,7 @@ async function renderSettings() {
         st.profiles.length > 1 ? h('button', { class: 'btn ghost danger', onclick: () => confirm(`Kanal „${p.name}“ löschen?`) && run(() => api('DELETE', '/api/profiles/' + p.id), 'Kanal gelöscht.')() }, 'Löschen') : null),
       ...(isPro(p) ? [h('div', { class: 'conn' }, h('b', {}, h('span', { class: 'dot', style: { background: '#0a66c2' } }), ' LinkedIn – nur Download'),
         h('p', { class: 'hint' }, 'Kein automatischer Upload: Im Video gibt es „Video herunterladen“ und „Beitrag kopieren“. Videos aus dem Ordner \\\\PowerServer\\videos\\eingang-profi landen automatisch hier, '
-          + 'werden im Profi-Stil geschnitten (Format und Untertitel unter „Automatischer Schnitt“) und Claude schreibt den Beitrag in der Ich-Form.'),
+          + 'werden im Profi-Stil geschnitten (Format und Untertitel unter „Automatischer Schnitt“) und die KI schreibt den Beitrag in der Ich-Form.'),
         h('label', { class: 'check' }, proMusic, 'Hintergrundmusik in LinkedIn-Clips'))] : [ytPart, ttPart]));
     box.style.borderTop = '3px solid ' + p.color;
     return box;
@@ -2028,7 +2028,7 @@ async function renderSettings() {
   const aEffort = h('select', {}, [['max', 'Maximum – beste Schnitte (empfohlen, ca. 0,20–1 $ je Aufnahme)'], ['xhigh', 'Sehr hoch'], ['high', 'Hoch'], ['medium', 'Mittel – günstig, schneller']]
     .map(([k, n]) => h('option', { value: k, selected: (a.cutEffort || 'max') === k }, n)));
   const aHints = h('textarea', { rows: 3, value: a.hints, placeholder: 'z. B. „Ich heiße Micha“, „keine Emojis im Titel“, „immer auf Deutsch“' });
-  const claudeBox = h('div', { class: 'box' }, h('h3', {}, '✨ Claude (Vorschläge für Titel & Texte)'),
+  const claudeBox = h('div', { class: 'box' }, h('h3', {}, '✨ KI-Einstellungen & Claude-Zugang'),
     a.configured ? h('p', { class: 'ok-text' }, '✓ eingerichtet · bisher ' + a.count + ' Vorschläge, ca. ' + (a.spent || 0).toFixed(2).replace('.', ',') + ' $') : null,
     a.blocked ? h('div', { class: 'alert-line' }, `⛔ Claude gesperrt seit ${fmtDate(a.blocked.at)}: ${a.blocked.reason} Alle KI-Aufgaben laufen solange lokal (Ollama). Nach 6 Stunden versucht es die Zentrale von selbst wieder.`,
       h('button', { class: 'btn small', style: { marginLeft: '8px' }, onclick: run(() => api('POST', '/api/ai/config', { unblock: true }), 'Claude wird wieder versucht.') }, 'Guthaben aufgeladen – wieder versuchen')) : null,
@@ -2038,12 +2038,12 @@ async function renderSettings() {
       h('li', {}, 'Ein Vorschlag kostet etwa 2–6 Cent (Claude Opus 5.5 schaut 6 Standbilder an).')),
     h('label', {}, 'API-Schlüssel'), aKey,
     h('label', { class: 'check' }, aAuto, 'Neue Videos unter „Zur Freigabe“ automatisch vorschlagen lassen'),
-    h('label', { class: 'check' }, aTips, '⚡ Viral-Tipps zu Einstieg und Schnitt einmal automatisch umsetzen (neue Fassung „v2“ zum Vergleichen, kostet je Video einen weiteren Claude-Aufruf)'),
-    h('label', { class: 'check' }, aScout, '👀 Claude liest vor dem Schnitt die ganze Aufnahme und meldet starke Momente (findet auch leise Lacher; ca. 0,10–0,30 $ je Aufnahme)'),
+    h('label', { class: 'check' }, aTips, '⚡ Viral-Tipps zu Einstieg und Schnitt einmal automatisch umsetzen (neue Fassung „v2“ zum Vergleichen, je Video ein weiterer KI-Aufruf)'),
+    h('label', { class: 'check' }, aScout, '👀 Die KI liest vor dem Schnitt die ganze Aufnahme und meldet starke Momente (findet auch leise Lacher; mit Claude ca. 0,10–0,30 $ je Aufnahme)'),
     h('label', { class: 'check' }, aQc, '✔ Fertige Clips prüfen lassen (Gesicht verdeckt? Untertitel lesbar? Action im Bild? – ca. 1 Cent je Clip)'),
     h('label', {}, '✂ Denkstufe beim Schneiden (Highlights, Kurzfassung, Überarbeiten)'), aEffort,
-    h('p', { class: 'hint' }, 'Claude wählt Anfang und Ende als ganze Sätze; je höher die Stufe, desto gründlicher prüft es Pointe, Zusammenhang und saubere Übergänge.'),
-    h('label', {}, 'Allgemeine Hinweise an Claude'), aHints,
+    h('p', { class: 'hint' }, 'Die KI wählt Anfang und Ende als ganze Sätze; je höher die Stufe, desto gründlicher prüft es Pointe, Zusammenhang und saubere Übergänge.'),
+    h('label', {}, 'Allgemeine Hinweise an die KI'), aHints,
     h('div', { class: 'row', style: { marginTop: '12px' } },
       h('button', { class: 'btn', onclick: run(() => api('POST', '/api/ai/config', { apiKey: aKey.value, auto: aAuto.checked, autoTips: aTips.checked, scout: aScout.checked, qc: aQc.checked, cutEffort: aEffort.value, hints: aHints.value }), 'Gespeichert.') }, 'Speichern'),
       a.configured ? h('button', { class: 'btn ghost danger', onclick: () => confirm('API-Schlüssel entfernen?') && run(() => api('POST', '/api/ai/config', { removeKey: true }), 'Schlüssel entfernt.')() }, 'Schlüssel entfernen') : null));
@@ -2057,7 +2057,7 @@ async function renderSettings() {
     .map(([k, n]) => h('option', { value: k, selected: Number(L.ctx || 16384) === k }, n)));
   const lPc = h('input', { type: 'checkbox', checked: !!L.pc?.enabled });
   const lPcModel = h('input', { value: L.pc?.model || 'qwen2.5vl:7b', placeholder: 'qwen2.5vl:7b' });
-  const modeNames = { claude: 'Claude', auto: 'Lokal, bei Fehler Claude', lokal: 'Nur lokal' };
+  const modeNames = L.modeNames || { lokal: 'Nur lokal', auto: 'Lokal, sonst Claude', claude: 'Claude, sonst lokal', nurclaude: 'Nur Claude' };
   const lSel = {};
   const fmtMoney = (x) => (x || 0).toFixed(2).replace('.', ',') + ' $';
   const statRow = (k) => {
@@ -2096,9 +2096,9 @@ async function renderSettings() {
     h('div', { class: 'chips', style: { marginBottom: '6px' } }, Object.entries(L.presets || {}).map(([k, n]) =>
       h('button', { class: 'chip-btn', onclick: run(() => api('POST', '/api/llm', { preset: k }), 'Vorlage übernommen.') }, n))),
     h('div', { class: 'table-wrap' }, lTable),
-    h('p', { class: 'hint' }, 'Ist Claude gesperrt (z. B. kein Guthaben), laufen auch die Claude-Aufgaben automatisch lokal. Sind Server und PC verfügbar, rechnen beide gleichzeitig: Aufträge gehen an den freieren Rechner, Vorschläge laufen zu zweit.'
+    h('p', { class: 'hint' }, '„Claude, sonst lokal“: läuft bei Claude und geht lokal weiter, wenn Claude gesperrt ist (z. B. kein Guthaben) oder einen Fehler meldet. „Nur Claude“ nutzt nie die lokale KI. Sind Server und PC verfügbar, rechnen beide gleichzeitig: Aufträge gehen an den freieren Rechner, Vorschläge laufen zu zweit.'
       + (L.busy && (L.busy.pc || L.busy.server) ? ` Gerade: PC ${L.busy.pc}, Server ${L.busy.server} Auftrag/Aufträge.` : '')),
-    h('p', { class: 'hint' }, 'Tipp: Mit „Lokal, bei Fehler Claude“ anfangen. Clips auswählen und Überarbeiten sind die schwersten Aufgaben – erst umstellen, wenn dir die lokalen Ergebnisse gefallen. '
+    h('p', { class: 'hint' }, 'Tipp: Mit „Lokal, sonst Claude“ anfangen. Clips auswählen und Überarbeiten sind die schwersten Aufgaben – erst umstellen, wenn dir die lokalen Ergebnisse gefallen. '
       + 'Ohne Bildverständnis (Server-Modell) entfällt die Bild-Prüfung fertiger Clips; die Facecam kommt dann aus der Gesichtserkennung des PCs.'),
     h('p', { class: 'hint' }, 'Weitere Spar-Hebel bei Claude (Kasten oben): Denkstufe beim Schneiden auf „Hoch“ oder „Mittel“, Viral-Tipps nicht automatisch umsetzen.'),
     h('div', { class: 'row', style: { marginTop: '10px' } },
@@ -2148,15 +2148,15 @@ async function renderSettings() {
     h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Shorts je Video (0 = keine)'), cShorts),
       h('div', {}, h('label', {}, 'Länge von – bis (s)'), h('div', { class: 'row' }, cSmin, cSmax))),
     h('div', {}, h('label', {}, 'Kurzfassung (beste Stellen am Stück) – Standard'), cSum),
-    h('p', { class: 'hint' }, 'Je Video kannst du im Video selbst (Eingang/Rohvideos) festlegen, was entstehen soll, und Claude einen Wunsch mitgeben.'),
+    h('p', { class: 'hint' }, 'Je Video kannst du im Video selbst (Eingang/Rohvideos) festlegen, was entstehen soll, und der KI einen Wunsch mitgeben.'),
     h('label', { class: 'check' }, cMove, 'Original danach nach „Rohvideos“ verschieben'),
     h('label', { class: 'check' }, wnOn, '🌙 Nachtbetrieb: nur in diesem Zeitfenster schneiden'),
     h('div', { class: 'row' }, h('span', { class: 'hint' }, 'von'), wnFrom, h('span', { class: 'hint' }, 'bis'), wnTo,
       h('span', { class: 'hint' }, c.window?.enabled ? (c.windowOpen ? '(gerade offen)' : '(gerade zu – „Jetzt schneiden“ geht trotzdem)') : '')),
     h('label', { class: 'check' }, capOn, 'Animierte Untertitel in Shorts (Wort für Wort)'),
-    h('label', { class: 'check' }, hookTxt, '⚡ Hook-Text von Claude groß im ersten Bild der Shorts (Hook-Stil und Tempo je Kanal unter „Kanäle“)'),
+    h('label', { class: 'check' }, hookTxt, '⚡ Hook-Text der KI groß im ersten Bild der Shorts (Hook-Stil und Tempo je Kanal unter „Kanäle“)'),
     h('div', { class: 'row' }, h('span', { class: 'hint' }, 'Farbe des gesprochenen Worts:'), capColor),
-    h('label', { class: 'check' }, camAuto, '🖼 Bildaufbau automatisch: Claude findet die Facecam (auch wenn sie wandert) und wählt Facecam oben / Ausschnitt um die Action / Blur'),
+    h('label', { class: 'check' }, camAuto, '🖼 Bildaufbau automatisch: die KI findet die Facecam (auch wenn sie wandert) und wählt Facecam oben / Ausschnitt um die Action / Blur'),
     h('label', { class: 'check' }, camOn, 'Feste Facecam statt automatisch (von Hand markierter Bereich)'),
     h('label', {}, '🎙 Tonspur deiner Stimme (für Tonfall, Lacher, Spracherkennung)'), cVoice,
     h('p', { class: 'hint' }, 'Mit OBS-Mehrspur (Spur 1 = alles, Spur 2 = Mikrofon, Spur 3 = Spiel) hört die Zentrale deine Reaktionen getrennt vom Spiel. Twitch-VODs haben nur eine Spur – dann wird die Mischspur genutzt.'),
@@ -2165,7 +2165,7 @@ async function renderSettings() {
     camPart,
     h('p', { class: 'hint' }, c.gpu?.nvenc ? '🟢 Grafikkarte (NVENC) wird zum Kodieren genutzt.' : '⚪ Grafikkarte nicht genutzt' + (c.gpu?.error ? ' – ' + c.gpu.error : '') + '. In Unraid: --runtime=nvidia, NVIDIA_VISIBLE_DEVICES=all, NVIDIA_DRIVER_CAPABILITIES=all.'),
     h('h3', { style: { marginTop: '16px' } }, '🗣 Sprache erkennen (Whisper)'),
-    h('p', { class: 'hint' }, 'Wandelt Gesprochenes in Text – Claude versteht dann, was du sagst. Läuft lokal auf dem Server, kostet nichts. Das Modell wird beim ersten Mal geladen.'),
+    h('p', { class: 'hint' }, 'Wandelt Gesprochenes in Text – die KI versteht dann, was du sagst. Läuft lokal auf dem Server, kostet nichts. Das Modell wird beim ersten Mal geladen.'),
     dl ? h('p', { class: dl.error ? 'err' : 'hint' }, dl.error || `Lade Modell „${dl.model}“ … ${dl.total ? Math.round(dl.done / dl.total * 100) + ' %' : Math.round(dl.done / 1e6) + ' MB'}`) : null,
     h('label', { class: 'check' }, wOn, 'Sprache erkennen'),
     h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Modell'), wModel), h('div', {}, h('label', {}, 'CPU-Kerne (ohne Grafikkarte)'), wThreads)),
@@ -2214,7 +2214,7 @@ async function renderSettings() {
   // ----- Zahlen (Statistik) -----
   const sYa = cb(!!y.analytics), sTl = cb(!!t.statsList);
   const statsBox = h('div', { class: 'box' }, h('h3', {}, '📈 Zahlen von YouTube, TikTok und Twitch'),
-    h('p', { class: 'hint' }, 'Alle 6 Stunden holt die Zentrale Aufrufe, Likes und Kommentare deiner hochgeladenen Videos (Reiter „📈 Zahlen“). Claude lernt daraus, was bei deinem Publikum läuft.'
+    h('p', { class: 'hint' }, 'Alle 6 Stunden holt die Zentrale Aufrufe, Likes und Kommentare deiner hochgeladenen Videos (Reiter „📈 Zahlen“). Die KI lernt daraus, was bei deinem Publikum läuft.'
       + (st.stats?.lastRun ? ' Zuletzt: ' + fmtDate(st.stats.lastRun) + '.' : '')),
     h('label', { class: 'check' }, sYa, 'YouTube Analytics: wie viel % angesehen wird (danach jeden Kanal unter „YouTube“ einmal trennen und neu verbinden – zusätzliches Nur-Lese-Recht)'),
     h('label', { class: 'check' }, sTl, 'TikTok-Zahlen (Recht video.list) – erst einschalten, wenn TikTok die App freigegeben hat und „Display API“ hinzugefügt ist, danach Kanäle neu verbinden'),
@@ -2284,7 +2284,7 @@ async function renderSettings() {
       h('button', { class: 'btn small ghost danger', onclick: () => confirm('Foto löschen?') && run(() => api('DELETE', '/api/photos/' + p.id), 'Gelöscht.')() }, 'Löschen'));
   }));
   const thumbBox = h('div', { class: 'box wide' }, h('h3', {}, '🖼 Titelbilder & Fotos von dir'),
-    h('p', { class: 'hint' }, 'Lade 4–8 Fotos mit verschiedenen Gesichtsausdrücken hoch (überrascht, jubelnd, zeigend …). Claude wählt je Video das passende Foto, Standbild und den Text; die Zentrale baut 3 Varianten (1280 × 720). Mit fal.ai werden Fotos automatisch freigestellt.'),
+    h('p', { class: 'hint' }, 'Lade 4–8 Fotos mit verschiedenen Gesichtsausdrücken hoch (überrascht, jubelnd, zeigend …). Die KI wählt je Video das passende Foto, Standbild und den Text; die Zentrale baut 3 Varianten (1280 × 720). Mit fal.ai werden Fotos automatisch freigestellt.'),
     h('div', { class: 'row' }, upLabel, upChannel, h('button', { class: 'btn primary', onclick: () => upInput.click() }, '⤒ Fotos hochladen'), upInput),
     phList.photos.length ? photoGrid : h('p', { class: 'hint' }, 'Noch keine Fotos.'),
     h('h3', { style: { marginTop: '16px' } }, 'fal.ai'),
@@ -2452,8 +2452,8 @@ async function renderSettings() {
     cr ? crRow('claude') : null);
   const sx = await api('GET', '/api/sfx').catch(() => null);
   const sfxBox = h('div', { class: 'box' }, h('h3', {}, '🔊 Soundeffekte'),
-    h('p', { class: 'hint' }, 'Claude setzt in Shorts passende Sounds (Whoosh, Bass-Boom, Zurückspulen, Pop …). Der Grundbaukasten wird einmal per KI erzeugt (fal.ai, laut Anbieter kommerziell nutzbar) und dann immer wieder verwendet. '
-      + 'Eigene Sounds (z. B. von Epidemic Sound) einfach in den Ordner „musik\\sfx“ legen – gleicher Name wie unten ersetzt den KI-Sound, andere Namen kann Claude zusätzlich nutzen. Bekannte Internet-Meme-Sounds bitte nicht verwenden (Urheberrecht).'),
+    h('p', { class: 'hint' }, 'Die KI setzt in Shorts passende Sounds (Whoosh, Bass-Boom, Zurückspulen, Pop …). Der Grundbaukasten wird einmal per KI erzeugt (fal.ai, laut Anbieter kommerziell nutzbar) und dann immer wieder verwendet. '
+      + 'Eigene Sounds (z. B. von Epidemic Sound) einfach in den Ordner „musik\\sfx“ legen – gleicher Name wie unten ersetzt den KI-Sound, andere Namen kann die KI zusätzlich nutzen. Bekannte Internet-Meme-Sounds bitte nicht verwenden (Urheberrecht).'),
     sx ? h('p', {}, `${sx.ready} von ${sx.total} Baukasten-Sounds vorhanden`, sx.own.length ? ` · ${sx.own.length} eigene` : '', sx.custom ? ` · ${sx.custom} Sonder-Sounds` : '',
       sx.spent ? ` · bisher ca. ${sx.spent.toFixed(2).replace('.', ',')} $` : '', sx.building ? ' · wird gerade erzeugt …' : '') : null,
     sx && sx.ready < sx.total ? h('button', { class: 'btn primary', disabled: !sx.falKey || sx.building, onclick: run(() => api('POST', '/api/sfx/build'), 'Baukasten wird erzeugt – dauert ein paar Minuten.') },
@@ -2463,10 +2463,10 @@ async function renderSettings() {
     h('p', { class: 'hint' }, 'Fehlt ein Sound beim Schnitt, wird er automatisch erzeugt (sofern der fal.ai-Schlüssel eingetragen ist).'));
   const og = await api('GET', '/api/org').catch(() => null);
   const orgBox = h('div', { class: 'box' }, h('h3', {}, '🗂 Ordnung'),
-    h('p', { class: 'hint' }, 'Die Zentrale benennt Videos sprechend um (Datum, Spiel/Thema laut Claude, Titel, Art) und legt sie in Ordner: '
+    h('p', { class: 'hint' }, 'Die Zentrale benennt Videos sprechend um (Datum, Spiel/Thema laut KI, Titel, Art) und legt sie in Ordner: '
       + 'Rohvideos\\Kanal\\JJJJ-MM\\Spiel, Hochgeladen\\Kanal\\JJJJ\\MM. „Zur Freigabe“ wird nur umbenannt. Nie während Schnitt oder Upload; jede Verschiebung lässt sich rückgängig machen.'),
     og ? [
-      ...[['enabled', 'Automatisch ordnen (nach Schnitt, Claude-Vorschlag und Upload, sonst stündlich)'], ['rename', 'Dateien sprechend umbenennen'], ['folders', 'Unterordner anlegen (Kanal / Monat / Spiel)']].map(([k, label]) =>
+      ...[['enabled', 'Automatisch ordnen (nach Schnitt, KI-Vorschlag und Upload, sonst stündlich)'], ['rename', 'Dateien sprechend umbenennen'], ['folders', 'Unterordner anlegen (Kanal / Monat / Spiel)']].map(([k, label]) =>
         h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!og[k], onchange: (e) => run(() => api('POST', '/api/org/config', { [k]: e.target.checked }), 'Gespeichert.')() }), label)),
       h('div', { class: 'row', style: { alignItems: 'center', flexWrap: 'wrap' } },
         h('span', { class: 'hint' }, 'Rohvideos zum Aufräumen vorschlagen nach'),
@@ -2481,7 +2481,7 @@ async function renderSettings() {
           h('button', { class: 'btn small ghost', title: 'Zurück an den alten Platz; das Video wird danach nicht mehr automatisch verschoben.',
             onclick: run(async () => { await api('POST', '/api/org/undo', { index: i }); await refresh(); }, 'Rückgängig gemacht.') }, '↶ Rückgängig'))))) : null,
     ] : null);
-  const jumps = [['s-kanaele', 'Kanäle'], ['s-claude', 'Claude'], ['s-lokal', 'Lokale KI'], ['s-schnitt', 'Schnitt'], ['s-twitch', 'Twitch'], ['s-zahlen', 'Zahlen'], ['s-musik', 'Musik'], ['s-sfx', 'Sounds'], ['s-guthaben', 'Guthaben'], ['s-ordnung', 'Ordnung'], ['s-bilder', 'Titelbilder'],
+  const jumps = [['s-kanaele', 'Kanäle'], ['s-claude', 'KI & Claude'], ['s-lokal', 'Lokale KI'], ['s-schnitt', 'Schnitt'], ['s-twitch', 'Twitch'], ['s-zahlen', 'Zahlen'], ['s-musik', 'Musik'], ['s-sfx', 'Sounds'], ['s-guthaben', 'Guthaben'], ['s-ordnung', 'Ordnung'], ['s-bilder', 'Titelbilder'],
     ['s-helfer', 'Rechenhelfer'], ['s-google', 'YouTube-App'], ['s-tiktok', 'TikTok-App'], ['s-info', 'Info-Seite'], ['s-sicherung', 'Sicherung'], ['s-allgemein', 'Allgemein']];
   [[claudeBox, 's-claude'], [llmBox, 's-lokal'], [cutBox, 's-schnitt'], [twitchBox, 's-twitch'], [statsBox, 's-zahlen'], [musicBox, 's-musik'], [sfxBox, 's-sfx'], [creditBox, 's-guthaben'], [orgBox, 's-ordnung'], [thumbBox, 's-bilder'], [helperBox, 's-helfer'], [googleBox, 's-google'],
     [tiktokBox, 's-tiktok'], [infoBox, 's-info'], [backupBox, 's-sicherung'], [account, 's-allgemein']].forEach(([el, id]) => { el.id = id; el.style.scrollMarginTop = '110px'; });

@@ -352,10 +352,10 @@ export async function runJob(id) {
     step('Momente sammeln');
     const cands = candidates(profile.id, t.opts.days);
     if (!cands.length) throw new Error('Keine Shorts gefunden.');
-    step('Claude stellt die Highlights zusammen');
+    step('KI stellt die Highlights zusammen');
     let p;
     if (ai.canAsk('trailer')) {
-      try { p = await plan(t, cands, profile); } catch (e) { t.warning = 'Claude: ' + e.message + ' – nach Punkten zusammengestellt.'; }
+      try { p = await plan(t, cands, profile); } catch (e) { t.warning = 'KI: ' + e.message + ' – nach Punkten zusammengestellt.'; }
     }
     if (!p?.segs?.length) p = planSimple(t, cands);
     const { out, total, track } = await render(t, p, profile, step);

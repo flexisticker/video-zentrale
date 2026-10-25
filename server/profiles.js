@@ -30,7 +30,7 @@ export function suggest(v) {
   const manual = v.channel && get(v.channel);
   if (manual) return { id: manual.id, name: manual.name, manual: true, reason: v.channelFrom === 'json' ? 'aus der .json' : 'von dir gewählt' };
   const byAi = v.ai?.channel && get(v.ai.channel);
-  if (byAi) return { id: byAi.id, name: byAi.name, manual: false, reason: 'Claude: ' + (v.ai.channelReason || 'passt zum Inhalt') };
+  if (byAi) return { id: byAi.id, name: byAi.name, manual: false, reason: 'KI: ' + (v.ai.channelReason || 'passt zum Inhalt') };
   const title = norm(v.title + ' ' + v.file);
   const rest = norm([v.tags, v.description, v.tiktok, v.note].join(' '));
   let best = null;

@@ -635,9 +635,9 @@ async function runCut(v) {
     let forced = tw.forced;
     // Späher: Claude liest die ganze Abschrift und meldet starke Momente (auch leise Lacher, die keine Lautstärke-Spitze haben)
     if (ai.canAsk('scout') && db().ai.scout !== false && sents.length >= 15) {
-      step('Claude liest die ganze Aufnahme');
+      step('KI liest die ganze Aufnahme');
       try { forced = [...forced, ...await ai.scoutMoments(v, sentsA, profile, { signals: [tw.lines, an.lines].filter(Boolean).join('\n'), wish: plan.wish, max: Math.min(20, plan.shorts * 3) })]; }
-      catch (e) { v.cut.warning = 'Claude-Späher: ' + e.message; }
+      catch (e) { v.cut.warning = 'KI-Späher: ' + e.message; }
     }
     cands = signals.peaks(tl, { duration, max: Math.min(30, Math.max(12, plan.shorts * 4)), min: Math.max(4, plan.shorts * 2), forced });
     v.cut.signals = { voice: !!voice, events: events.length, twitch: tw.extra.length, scout: forced.length - tw.forced.length, pc: an.events.length + an.extra.length };
@@ -647,7 +647,7 @@ async function runCut(v) {
     step('Highlights auswählen');
     if (ai.canAsk('schnitt')) {
       try { shorts = await ai.chooseHighlights(v, cands, segs, { ...c, shorts: plan.shorts }, profile, plan.wish, { sents: sentsA }); }
-      catch (e) { v.cut.warning = 'Claude-Auswahl: ' + e.message + ' – stärkste Stellen genommen.'; }
+      catch (e) { v.cut.warning = 'KI-Auswahl: ' + e.message + ' – stärkste Stellen genommen.'; }
     }
     if (!shorts.length) shorts = [...cands].sort((a, b) => b.score - a.score).slice(0, plan.shorts).map((x) => ({ ...x, title: '', reason: x.why?.length ? x.why.join(', ') : 'laute/bewegte Stelle' }));
     // Schnittgrenzen einrasten: ganze Sätze, Sprechpausen, Bildwechsel – nie mitten im Satz/Wort
@@ -671,7 +671,7 @@ async function runCut(v) {
       : candidates(loud, scenes, duration, cut, SEG, want);
     if (ai.canAsk('schnitt')) {
       try { reel = await ai.chooseSummary(v, parts, segs, plan.summary, profile, plan.wish); }
-      catch (e) { v.cut.warning = 'Claude-Kurzfassung: ' + e.message + ' – beste Stellen nach Lautstärke genommen.'; }
+      catch (e) { v.cut.warning = 'KI-Kurzfassung: ' + e.message + ' – beste Stellen nach Lautstärke genommen.'; }
     }
     if (!reel.length) {
       let total = 0;
@@ -1044,7 +1044,7 @@ async function reviseLongVersion(out, raw, wish, words, segs, profile, step) {
   const summary = out.source.kind === 'summary';
   step('Lautstärke messen');
   const { values: loud, fine, hasAudio } = await loudness(file, raw.duration);
-  step('Claude plant die neue Fassung');
+  step('KI plant die neue Fassung');
   const r = await ai.reviseLong(raw, out, wish, segs, hasAudio ? loud : null, profile);
   // Abschnitte einrasten (ganze Sätze, Sprechpausen), danach überlappende zusammenführen
   const sents = bounds.numbered(segs);
@@ -1082,7 +1082,7 @@ async function reviseLongVersion(out, raw, wish, words, segs, profile, step) {
     edit: { teaser: r.teaser, tempo: r.tempo, parts: keep.length, how },
     title: r.title || out.title, description: out.description, tags: out.tags, category: out.category, viral: out.viral,
     revisionOf: out.id, revisionRoot: rootId, revisionWish: wish, revisionChanges: r.changes,
-    note: `Überarbeitung (v${n}) von „${out.file}“. Wunsch: ${wish}. Claude: ${r.changes} ${how}.` + music.noteOf(track),
+    note: `Überarbeitung (v${n}) von „${out.file}“. Wunsch: ${wish}. KI: ${r.changes} ${how}.` + music.noteOf(track),
     music: track ? { kind: track.kind, name: track.name, mood: track.mood || '' } : null,
     transcriptText: segs ? r.segments.map(([a, b]) => whisper.textOf(segs, a, b)).join(' … ').slice(0, 20000) : '',
   }, { channel: out.channel || profile?.id, channelFrom: out.channelFrom || 'überarbeitung' });
@@ -1093,7 +1093,7 @@ export function revisable(out) {
   if (!['short', 'long', 'summary'].includes(out?.source?.kind)) return 'Überarbeiten geht bei Videos aus dem automatischen Schnitt (Shorts, Lang- und Kurzfassung).';
   const raw = db().videos[out.source.rawId];
   if (!raw || raw.missing) return 'Das Rohvideo ist nicht mehr da – ohne Rohvideo kann nicht neu geschnitten werden.';
-  if (!ai.canAsk('ueberarbeiten')) return 'Für die Überarbeitung braucht es den Claude-Schlüssel oder die lokale KI (Einstellungen).';
+  if (!ai.canAsk('ueberarbeiten')) return 'Für die Überarbeitung ist keine KI erreichbar (Claude-Schlüssel oder lokale KI, Einstellungen).';
   return '';
 }
 // Viral-Tipps (Einstieg/Schnitt) als Überarbeitungswunsch
@@ -1175,7 +1175,7 @@ async function runRevision({ revise: outId, wish }) {
     if (vIdx != null) { const r = await loudness(file, raw.duration, win, vIdx); if (signals.voiceUsable(r.values.slice(Math.floor(win.from)))) vFine = r.fine; }
     const sents = bounds.numbered(segs);
     const sentsA = signals.annotate(sents, signals.prosody(sents.filter((x) => x.e > win.from && x.s < win.from + win.span), words, vFine || (hasAudio ? fine : null), words?.events || whisper.loadEvents(raw)));
-    step('Claude plant die neue Fassung');
+    step('KI plant die neue Fassung');
     const r = await ai.reviseShort(raw, out, wish, segs, profile, { ...lim, sents: sentsA });
     // Grenzen einrasten (ganze Sätze, Sprechpausen)
     const snap = bounds.snapRange(r.start, r.end, { sents, words, fine: hasAudio ? fine : null, dur: raw.duration, ...lim });
@@ -1213,7 +1213,7 @@ async function runRevision({ revise: outId, wish }) {
       title: r.title || out.title, description: out.description, tags: out.tags, category: out.category,
       viral: r.viral ? { score: r.viral, why: r.viralWhy, tip: r.viralTip, by: 'Überarbeitung' } : out.viral,
       revisionOf: out.id, revisionRoot: rootId, revisionWish: wish, revisionChanges: r.changes,
-      note: `Überarbeitung (v${n}) von „${out.file}“. Wunsch: ${wish}. Claude: ${r.changes}` + (how ? ' ' + how + '.' : '') + music.noteOf(track),
+      note: `Überarbeitung (v${n}) von „${out.file}“. Wunsch: ${wish}. KI: ${r.changes}` + (how ? ' ' + how + '.' : '') + music.noteOf(track),
       music: track ? { kind: track.kind, name: track.name, mood: track.mood || '' } : null,
       transcriptText: segs ? whisper.textOf(segs, s.start, s.end) : '',
     }, { channel: out.channel || profile?.id, channelFrom: out.channelFrom || 'überarbeitung' });

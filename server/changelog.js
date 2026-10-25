@@ -1,5 +1,9 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.32.0', date: '25.10.2026', items: [
+    'Knöpfe und Texte sagen jetzt „KI“ statt „Claude“ (z. B. „✨ KI-Vorschlag holen“) – egal ob Claude oder die lokale KI rechnet. Im Vorschlag steht, wer ihn erstellt hat.',
+    'Je Aufgabe vier Wege (Einstellungen → Lokale KI): „Nur lokal“, „Lokal, sonst Claude“, „Claude, sonst lokal“ und „Nur Claude“. „Claude, sonst lokal“ springt jetzt bei jedem Claude-Fehler auf die lokale KI um, nicht nur bei fehlendem Guthaben.',
+  ] },
   { version: '1.31.1', date: '25.10.2026', items: [
     'Neue Vorgabe „Teures lokal, Günstiges Claude“: Clips auswählen, Späher, Überarbeiten und Trailer rechnet Ollama; Titel/Texte, Prüfung, Themen und Coach bleiben bei Claude. Vorlagen per Knopf: auch „Alles lokal“ oder „Alles Claude“.',
     '⛔ Ist Claude gesperrt (kein Guthaben, Schlüssel ungültig), laufen automatisch alle KI-Aufgaben lokal – die Zentrale fragt Claude dann 6 Stunden lang nicht mehr (Knopf „Guthaben aufgeladen – wieder versuchen“).',
