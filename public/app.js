@@ -1489,7 +1489,7 @@ function renderMirror(box, v) {
   else {
     kids.push(h('div', { class: 'row', style: { alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
       h('button', { class: 'btn small' + (v.mirror ? ' primary' : ''), onclick: run }, v.mirror ? '🪞 Gespiegelt – zurückspiegeln' : '🪞 Video spiegeln'),
-      children ? h('label', { class: 'hint', style: { display: 'flex', alignItems: 'center', gap: '4px' } }, children,
+      children ? h('label', { class: 'check hint', style: { display: 'flex', alignItems: 'center', gap: '6px', flex: '1 1 200px', minWidth: 0 } }, children,
         isRawV ? `auch die ${sib} schon geschnittenen Videos neu rechnen` : `auch die ${sib} anderen Videos dieser Aufnahme`) : null),
       h('p', { class: 'hint' }, isRawV ? 'Gilt für alle Schnitte und Überarbeitungen aus dieser Aufnahme. Untertitel, Hook-Texte und Effekte bleiben lesbar.'
         : v.source ? 'Rechnet das Video mit gleichem Schnitt neu – nur das Bild wird gespiegelt, Untertitel und Texte bleiben lesbar. Dauert etwa so lange wie der Schnitt.'

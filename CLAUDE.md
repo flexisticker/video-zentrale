@@ -425,6 +425,9 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   (sonst 6 Std.), deutsche Meldung in `friendly`. Getestet mit nachgebautem 400 (ohne/mit Mock-Ollama).
 - 1.32.3: „null“ im Überarbeiten-Kasten bei Shorts (`sec.append(…, target)` mit target = null → native append schreibt „null“; jetzt gefiltert).
 - 1.32.4: Kunde: nach Umstellen „kein KI mehr startbar“ (Claude bis 01.11. gesperrt, lokal nicht bereit). `ai.status().whyNot` nennt die Gründe, Hinweis im KI-Vorschlag mit Sprung zu `#s-lokal`.
+- 1.32.5: iPhone: Video-Ansicht breiter als der Bildschirm. Ursache: `.detail` am Handy `1fr` (= minmax(auto)) + `.btn` nowrap → längster Knopf bestimmt die Breite
+  (nachgestellt bei 300 px: 19 px Überlauf). Jetzt `minmax(0, 1fr)`, `min-width: 0` für Kinder, ≤ 600 px Knöpfe mit Umbruch + `overflow-x: hidden` am Sheet;
+  Spiegeln-Häkchen `label.check` (globale Regel `input { width: 100% }` schob es in die Mitte). **Regel: Grid-Spalten am Handy immer `minmax(0, 1fr)`.**
 - Ideen danach: „Best of der Woche“ automatisch (Zeitplan), Platz-Einblendungen „Platz 3/2/1“.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
   Sendeplätze je Kanal **stellt der Kunde selbst ein** (keine festen Startzeiten), „Einplanen“ auf nächsten freien Platz, Shorts

@@ -111,7 +111,7 @@ ol.steps { padding-left: 20px; margin: 6px 0; color: var(--muted); font-size: 13
 .toast.bad { border-color: var(--bad); }
 
 @media (max-width: 860px) {
-  .detail { grid-template-columns: 1fr; }
+  .detail { grid-template-columns: minmax(0, 1fr); }
   .top { padding: 8px 12px; }
   main { padding: 14px 12px; }
   .two { grid-template-columns: 1fr; }
@@ -395,3 +395,12 @@ a.statrow:hover { outline: 1px solid var(--line, rgba(255,255,255,.15)); }
 .llmtable select { min-width: 170px; }
 .table-wrap { overflow-x: auto; }
 .settings > .box { min-width: 0; }
+
+/* Handy: nichts darf breiter als der Bildschirm werden (iOS-Safari rechnet min-content von Flex/Grid-Kindern großzügiger) */
+.detail > *, .sheet > *, .section, .mirrorbox, .mirrorbox > * { min-width: 0; max-width: 100%; }
+.sheet img, .sheet video, .sheet canvas { max-width: 100%; }
+@media (max-width: 600px) {
+  .modal > .sheet { overflow-x: hidden; }
+  .sheet .btn { white-space: normal; max-width: 100%; text-align: left; }
+  .sheet .meta { overflow-wrap: anywhere; }
+}

@@ -1,5 +1,8 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.32.5', date: '25.10.2026', items: [
+    'Handy: Die Video-Ansicht war auf schmalen Bildschirmen breiter als das Display (man musste seitlich schieben). Lange Knöpfe brechen jetzt um, nichts ragt mehr über den Rand. Das Häkchen „auch die anderen Videos dieser Aufnahme“ sitzt wieder direkt vor dem Text.',
+  ] },
   { version: '1.32.4', date: '25.10.2026', items: [
     'Ist gerade keine KI erreichbar, steht im Video jetzt genau warum (z. B. „Claude bis 01.11. gesperrt · lokale KI: keine Server-Adresse eingetragen · PC-Grafikkarte nicht freigegeben“) – mit Sprung zu Einstellungen → Lokale KI.',
   ] },
