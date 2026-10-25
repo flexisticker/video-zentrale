@@ -19,16 +19,17 @@ export const TASKS = {
   ueberarbeiten: 'Überarbeiten / Viral-Tipps umsetzen',
   trailer: 'Trailer-Dramaturgie',
 };
-export const MODES = ['lokal', 'auto', 'claude', 'nurclaude'];
-export const MODE_NAMES = { lokal: 'Nur lokal', auto: 'Lokal, sonst Claude', claude: 'Claude, sonst lokal', nurclaude: 'Nur Claude' };
+export const MODES = ['smart', 'cloud', 'lokal', 'auto', 'claude', 'nurclaude'];
+export const MODE_NAMES = { smart: '🤖 Automatisch (Preis & Qualität)', cloud: 'Günstige Cloud-KI, sonst lokal', lokal: 'Nur lokal', auto: 'Lokal, sonst Claude', claude: 'Claude, sonst lokal', nurclaude: 'Nur Claude' };
 // Vorlagen. Standard (Wunsch des Kunden): das Teure lokal (lange Abschriften, viele Bilder), das Günstige bei Claude.
 // Ist Claude gesperrt (kein Guthaben), laufen auch die Claude-Aufgaben lokal (ai.ask).
 export const PRESETS = {
-  sparen: { name: 'Teures lokal, Günstiges Claude (empfohlen)', modes: { texte: 'claude', pruefung: 'claude', themen: 'claude', coach: 'claude', scout: 'auto', schnitt: 'auto', ueberarbeiten: 'auto', trailer: 'auto' } },
+  smart: { name: '🤖 KI entscheidet nach Preis & Qualität (empfohlen)', modes: { texte: 'smart', pruefung: 'smart', themen: 'smart', coach: 'smart', scout: 'smart', schnitt: 'smart', ueberarbeiten: 'smart', trailer: 'smart' } },
+  sparen: { name: 'Teures lokal, Günstiges Claude', modes: { texte: 'claude', pruefung: 'claude', themen: 'claude', coach: 'claude', scout: 'auto', schnitt: 'auto', ueberarbeiten: 'auto', trailer: 'auto' } },
   lokal: { name: 'Alles lokal (kostenlos)', modes: { texte: 'auto', pruefung: 'auto', themen: 'auto', coach: 'auto', scout: 'auto', schnitt: 'auto', ueberarbeiten: 'auto', trailer: 'auto' } },
   claude: { name: 'Alles Claude (beste Qualität)', modes: { texte: 'claude', pruefung: 'claude', themen: 'claude', coach: 'claude', scout: 'claude', schnitt: 'claude', ueberarbeiten: 'claude', trailer: 'claude' } },
 };
-const DEFAULT_MODES = PRESETS.sparen.modes;
+const DEFAULT_MODES = PRESETS.smart.modes;
 const OLD_DEFAULTS = { texte: 'auto', pruefung: 'auto', themen: 'auto', coach: 'auto', scout: 'auto', schnitt: 'claude', ueberarbeiten: 'claude', trailer: 'claude' };
 
 const TMP = path.join(DATA_DIR, 'tmp');
@@ -42,6 +43,9 @@ export function cfg() {
   c.stats ??= {};
   // 1.31.0 hatte „Kleines lokal“ als Vorgabe – noch unverändert gespeichert → auf die neue Vorgabe umstellen
   if (!c.presetV2) { if (Object.entries(OLD_DEFAULTS).every(([k, v]) => !c.tasks[k] || c.tasks[k] === v)) c.tasks = {}; c.presetV2 = true; }
+  // 1.34.0: Standard ist jetzt „KI entscheidet“
+  // (Wunsch des Kunden: „die KI soll entscheiden, was wo am besten ist“ → einmalig alle Aufgaben auf Automatisch, danach frei änderbar)
+  if (!c.presetV3) { c.tasks = {}; c.presetV3 = true; }
   return c;
 }
 export const modeOf = (task) => { const m = cfg().tasks[task] || DEFAULT_MODES[task] || 'claude'; return MODES.includes(m) ? m : 'claude'; };
@@ -180,6 +184,7 @@ function record(task, where, k) {
   save();
 }
 export const recordClaude = (task, cost, tokens) => record(task, 'claude', { count: 1, cost, tokens });
+export const recordCloud = (task, id, k) => record(task, 'cloud:' + id, k);
 
 // → { out, engine, model, vision, cut } – wirft bei Fehler (Aufrufer entscheidet über Claude als Rückfall)
 export async function chat(task, content, schema, price, { onTarget } = {}) {

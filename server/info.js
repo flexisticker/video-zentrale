@@ -130,7 +130,7 @@ Die Token werden nur auf dem eigenen Server gespeichert und ausschließlich genu
 <h2>Weitergabe</h2>
 <div class="card">
 <p>Daten der Plattformen (TikTok, YouTube) werden nicht an Dritte weitergegeben. Für die Bearbeitung der <b>eigenen</b> Videos nutzt die App folgende Dienste als Auftragsverarbeiter:
-Anthropic (KI-Vorschläge für Schnitt, Titel und Texte anhand von Standbildern und Transkript) und fal.ai (Erzeugung von Titelbildern und Musik).
+Anthropic sowie fal.ai/OpenRouter mit Google Gemini (KI-Vorschläge für Schnitt, Titel und Texte anhand von Standbildern und Transkript) und fal.ai (Erzeugung von Titelbildern und Musik). Teile der Auswertung laufen auf eigenen Rechnern (Ollama).
 Die Übertragung an diese Dienste umfasst keine Daten von TikTok- oder YouTube-Konten.</p>
 </div>
 <h2>Speicherdauer und Widerruf</h2>
@@ -146,7 +146,7 @@ Löschung, Einschränkung, Datenübertragbarkeit und Beschwerde bei einer Aufsic
 from TikTok: display name, avatar, an anonymous account identifier (user.info.basic) and the OAuth access/refresh tokens; from YouTube: channel name and OAuth tokens.
 Tokens are stored only on the company’s own server and used solely to upload videos the owner approved to his own accounts (video.upload, video.publish) and to check the upload status.</p>
 <p><b>No sharing:</b> TikTok and YouTube data are not shared with or sold to third parties, not used for advertising and not combined with other data. No data of other users is accessed.
-For editing the owner’s own videos the app uses Anthropic (AI suggestions based on frames and transcript) and fal.ai (thumbnails, music) as processors; no TikTok or YouTube account data is sent to them.</p>
+For editing the owner’s own videos the app uses Anthropic and fal.ai/OpenRouter with Google Gemini (AI suggestions based on frames and transcript) and fal.ai (thumbnails, music) as processors, plus self-hosted models (Ollama); no TikTok or YouTube account data is sent to them.</p>
 <p><b>Retention and revocation:</b> tokens are kept while the connection exists and deleted when it is disconnected. Access can be revoked at any time in the app or in the TikTok/Google account settings.
 You have the rights of access, rectification, erasure, restriction, portability and to lodge a complaint with a supervisory authority (GDPR Art. 15–21, 77).</p>
 </div>`;

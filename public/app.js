@@ -1041,7 +1041,7 @@ function renderAi(box, v) {
     catch (x) { toast(x.message, true); }
   } }, a.titles ? '✨ Neuen Vorschlag holen' : '✨ KI-Vorschlag holen');
   const kids = [h('h3', {}, '✨ KI-Vorschlag')];
-  if (!conf) kids.push(h('div', { class: 'hint' }, 'Gerade ist keine KI erreichbar' + (S.settings?.ai?.whyNot ? ': ' + S.settings.ai.whyNot : '') + ' – ', h('a', { href: '#einstellungen', onclick: () => setTimeout(() => document.getElementById('s-lokal')?.scrollIntoView({ behavior: 'smooth' }), 400) }, 'Einstellungen → Lokale KI'), '.'));
+  if (!conf) kids.push(h('div', { class: 'hint' }, 'Gerade ist keine KI erreichbar' + (S.settings?.ai?.whyNot ? ': ' + S.settings.ai.whyNot : '') + ' – ', h('a', { href: '#einstellungen', onclick: () => setTimeout(() => document.getElementById('s-cloud')?.scrollIntoView({ behavior: 'smooth' }), 400) }, 'Einstellungen → KI-Anbieter'), '.'));
   if (a.state === 'queued' || a.state === 'running') kids.push(h('div', { class: 'status' }, 'Die KI schaut sich das Video an und schreibt … (mit Claude ca. 20–60 s, lokal evtl. einige Minuten)'));
   if (a.state === 'error') kids.push(h('div', { class: 'status err' }, a.error || 'Fehler'));
   if (a.titles?.length) {
@@ -2122,7 +2122,7 @@ async function renderSettings() {
   const lPcModel = h('input', { value: L.pc?.model || 'qwen2.5vl:7b', placeholder: 'qwen2.5vl:7b' });
   const modeNames = L.modeNames || { lokal: 'Nur lokal', auto: 'Lokal, sonst Claude', claude: 'Claude, sonst lokal', nurclaude: 'Nur Claude' };
   const lSel = {};
-  const fmtMoney = (x) => (x || 0).toFixed(2).replace('.', ',') + ' $';
+  const fmtMoney = (x) => (x || 0).toFixed(x > 0 && x < 0.1 ? 4 : 2).replace('.', ',') + ' $';   // Cloud-Aufträge kosten oft Bruchteile eines Cents
   const statRow = (k) => {
     const s = L.stats?.[k] || {};
     const loc = ['server', 'pc'].reduce((a, w) => a + (s[w]?.count || 0), 0), fail = ['server', 'pc'].reduce((a, w) => a + (s[w]?.failed || 0), 0);
@@ -2130,6 +2130,8 @@ async function renderSettings() {
     lSel[k] = h('select', {}, Object.entries(modeNames).map(([m, n]) => h('option', { value: m, selected: (L.tasks?.[k] || 'claude') === m }, n)));
     return h('tr', {}, h('td', {}, L.names?.[k] || k), h('td', {}, lSel[k]),
       h('td', { class: 'hint' }, `Claude ${s.claude?.count || 0}× · ${fmtMoney(s.claude?.cost)}`),
+      h('td', { class: 'hint' }, (() => { const cl = Object.entries(s).filter(([w]) => w.startsWith('cloud:')); const n = cl.reduce((x, [, v]) => x + (v.count || 0), 0);
+        return n ? `Cloud ${n}× · ${fmtMoney(cl.reduce((x, [, v]) => x + (v.cost || 0), 0))}` : 'Cloud –'; })()),
       h('td', { class: 'hint' }, `lokal ${loc}×${fail ? ` (${fail} Fehler)` : ''} · gespart ≈ ${fmtMoney(saved)}`));
   };
   const lTable = h('table', { class: 'llmtable' }, h('tbody', {}, Object.keys(L.names || {}).map(statRow)));
@@ -2169,6 +2171,51 @@ async function renderSettings() {
       h('button', { class: 'btn', onclick: run(() => api('POST', '/api/llm', { url: lUrl.value, model: lModel.value, ctx: Number(lCtx.value), pc: { enabled: lPc.checked, model: lPcModel.value },
         tasks: Object.fromEntries(Object.entries(lSel).map(([k, el]) => [k, el.value])) }), 'Gespeichert.') }, 'Speichern'),
       h('button', { class: 'btn ghost', onclick: () => confirm('Kostenübersicht zurücksetzen?') && run(() => api('POST', '/api/llm', { resetStats: true }), 'Zurückgesetzt.')() }, 'Zähler zurücksetzen')));
+
+  // ----- Cloud-KI (günstig): fal.ai, Google, DeepSeek, eigene Adresse -----
+  const CL = st.cloud || { providers: {}, budgets: {}, spend: {} };
+  const clRows = {};
+  const tierSel = (v) => h('select', {}, Object.entries(CL.tiers || { 1: 'einfach', 2: 'gut', 3: 'sehr gut' }).map(([k, n]) => h('option', { value: k, selected: Number(v) === Number(k) }, n)));
+  const clList = h('div', { class: 'cloudlist' }, Object.entries(CL.providers).map(([id, p]) => {
+    const r = clRows[id] = { enabled: h('input', { type: 'checkbox', checked: p.enabled }), model: h('input', { value: p.model || '' }),
+      key: id === 'fal' ? null : h('input', { type: 'password', placeholder: p.hasKey ? 'gespeichert ' + p.keyHint + ' – leer lassen = behalten' : 'API-Schlüssel', autocomplete: 'off' }),
+      url: id === 'custom' ? h('input', { value: p.url || '', placeholder: 'http://192.168.1.10:20128/v1' }) : null,
+      priceIn: h('input', { type: 'number', step: '0.01', min: 0, value: p.priceIn }), priceOut: h('input', { type: 'number', step: '0.01', min: 0, value: p.priceOut }),
+      vision: h('input', { type: 'checkbox', checked: p.vision }), tier: tierSel(p.tier), budget: h('input', { type: 'number', step: '1', min: 0, value: CL.budgets?.[id] || '', placeholder: 'ohne' }) };
+    const out = h('span', { class: 'hint' });
+    const state = p.blocked ? h('span', { class: 'err' }, `⛔ gesperrt: ${p.blocked.reason} `, h('button', { class: 'chip-btn', onclick: run(() => api('POST', '/api/cloud', { providers: { [id]: { unblock: true } } }), 'Wird wieder versucht.') }, 'wieder versuchen'))
+      : p.ready ? h('span', { class: 'ok-text' }, '✓ bereit') : h('span', { class: 'hint' }, p.enabled ? (p.hasKey || id === 'custom' ? '–' : 'Schlüssel fehlt') : 'aus');
+    return h('details', { class: 'cloudrow', open: id === 'fal' || p.enabled },
+      h('summary', {}, h('b', {}, p.name), ' ', state, p.spent ? h('span', { class: 'hint' }, ` · diesen Monat ${fmtMoney(p.spent)}`) : null),
+      h('p', { class: 'hint' }, p.hint),
+      h('label', { class: 'check' }, r.enabled, 'benutzen'),
+      r.url ? [h('label', {}, 'Adresse'), r.url] : null,
+      r.key ? [h('label', {}, 'Schlüssel'), r.key] : null,
+      h('label', {}, 'Modell'), r.model,
+      h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Preis rein ($ je Mio. Tokens)'), r.priceIn), h('div', {}, h('label', {}, 'Preis raus ($ je Mio. Tokens)'), r.priceOut)),
+      h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Qualität'), r.tier), h('div', {}, h('label', {}, 'Monatsbudget ($)'), r.budget)),
+      h('label', { class: 'check' }, r.vision, 'sieht Bilder (Standbilder, Kontaktbögen)'),
+      h('div', { class: 'row', style: { marginTop: '6px' } }, h('button', { class: 'btn small', onclick: async () => {
+        out.textContent = 'Prüfe …';
+        try { await saveCloud(); const t = await api('POST', '/api/cloud/test', { id }); out.textContent = t.ok ? `✓ antwortet („${t.answer}“, ${String(t.secs?.toFixed(1)).replace('.', ',')} s${t.cost ? ', ' + fmtMoney(t.cost) : ''})` : '✗ ' + t.error; }
+        catch (x) { out.textContent = '✗ ' + x.message; }
+      } }, '🔌 Testen'), out));
+  }));
+  const clStrategy = h('select', {}, [['sparen', 'Sparen – die günstigste KI, die gut genug ist'], ['qualitaet', 'Qualität – die beste verfügbare, darin die günstigste']]
+    .map(([k, n]) => h('option', { value: k, selected: CL.strategy === k }, n)));
+  const clClaudeBudget = h('input', { type: 'number', step: '1', min: 0, value: CL.budgets?.claude || '', placeholder: 'ohne' });
+  const saveCloud = () => api('POST', '/api/cloud', { strategy: clStrategy.value, budgets: { claude: clClaudeBudget.value, ...Object.fromEntries(Object.entries(clRows).map(([id, r]) => [id, r.budget.value])) },
+    providers: Object.fromEntries(Object.entries(clRows).map(([id, r]) => [id, { enabled: r.enabled.checked, model: r.model.value, ...(r.key && r.key.value ? { key: r.key.value } : {}), ...(r.url ? { url: r.url.value } : {}),
+      priceIn: Number(r.priceIn.value), priceOut: Number(r.priceOut.value), vision: r.vision.checked, tier: Number(r.tier.value) }])) });
+  const cloudBox = h('div', { class: 'box' }, h('h3', {}, '☁️ KI-Anbieter & automatische Wahl'),
+    h('p', { class: 'hint' }, 'Steht eine Aufgabe (unten bei „Lokale KI“) auf „🤖 Automatisch“, wählt die Zentrale je Auftrag die günstigste KI, die gut genug ist: '
+      + 'lokal (kostenlos) für Einfaches, Cloud-KI wie Gemini Flash für Clips/Texte, Claude nur wenn nichts Günstigeres passt oder bei „Qualität“. '
+      + 'Braucht die Aufgabe Bilder, kommen nur KIs mit Bildverständnis in Frage. Scheitert eine (Limit, Guthaben, Fehler), nimmt sie automatisch die nächste.'),
+    h('label', {}, 'Strategie'), clStrategy,
+    h('label', {}, `Monatsbudget Claude ($, diesen Monat ${fmtMoney(CL.spend?.claude || 0)} verbraucht)`), clClaudeBudget,
+    clList,
+    h('p', { class: 'hint' }, 'Preise je Million Tokens – so schätzt die Zentrale vorab. fal.ai meldet nach jedem Auftrag die echten Kosten. Qualität: „gut“ reicht für Clips und Texte, „einfach“ nur für Themen/Prüfung.'),
+    h('div', { class: 'row', style: { marginTop: '10px' } }, h('button', { class: 'btn', onclick: run(() => saveCloud(), 'Gespeichert.') }, 'Speichern')));
 
   // ----- Automatischer Schnitt -----
   const c = st.cut, w = c.whisper;
@@ -2545,9 +2592,9 @@ async function renderSettings() {
           h('button', { class: 'btn small ghost', title: 'Zurück an den alten Platz; das Video wird danach nicht mehr automatisch verschoben.',
             onclick: run(async () => { await api('POST', '/api/org/undo', { index: i }); await refresh(); }, 'Rückgängig gemacht.') }, '↶ Rückgängig'))))) : null,
     ] : null);
-  const jumps = [['s-kanaele', 'Kanäle'], ['s-claude', 'KI & Claude'], ['s-lokal', 'Lokale KI'], ['s-schnitt', 'Schnitt'], ['s-twitch', 'Twitch'], ['s-zahlen', 'Zahlen'], ['s-musik', 'Musik'], ['s-sfx', 'Sounds'], ['s-guthaben', 'Guthaben'], ['s-ordnung', 'Ordnung'], ['s-bilder', 'Titelbilder'],
+  const jumps = [['s-kanaele', 'Kanäle'], ['s-claude', 'KI & Claude'], ['s-cloud', 'KI-Anbieter'], ['s-lokal', 'Lokale KI'], ['s-schnitt', 'Schnitt'], ['s-twitch', 'Twitch'], ['s-zahlen', 'Zahlen'], ['s-musik', 'Musik'], ['s-sfx', 'Sounds'], ['s-guthaben', 'Guthaben'], ['s-ordnung', 'Ordnung'], ['s-bilder', 'Titelbilder'],
     ['s-helfer', 'Rechenhelfer'], ['s-google', 'YouTube-App'], ['s-tiktok', 'TikTok-App'], ['s-info', 'Info-Seite'], ['s-sicherung', 'Sicherung'], ['s-allgemein', 'Allgemein']];
-  [[claudeBox, 's-claude'], [llmBox, 's-lokal'], [cutBox, 's-schnitt'], [twitchBox, 's-twitch'], [statsBox, 's-zahlen'], [musicBox, 's-musik'], [sfxBox, 's-sfx'], [creditBox, 's-guthaben'], [orgBox, 's-ordnung'], [thumbBox, 's-bilder'], [helperBox, 's-helfer'], [googleBox, 's-google'],
+  [[claudeBox, 's-claude'], [cloudBox, 's-cloud'], [llmBox, 's-lokal'], [cutBox, 's-schnitt'], [twitchBox, 's-twitch'], [statsBox, 's-zahlen'], [musicBox, 's-musik'], [sfxBox, 's-sfx'], [creditBox, 's-guthaben'], [orgBox, 's-ordnung'], [thumbBox, 's-bilder'], [helperBox, 's-helfer'], [googleBox, 's-google'],
     [tiktokBox, 's-tiktok'], [infoBox, 's-info'], [backupBox, 's-sicherung'], [account, 's-allgemein']].forEach(([el, id]) => { el.id = id; el.style.scrollMarginTop = '110px'; });
   const jumpBar = h('div', { class: 'setjump' }, jumps.map(([id, label]) => h('button', { class: 'btn small', onclick: () => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, label)));
   mainEl.replaceChildren(jumpBar,
@@ -2556,7 +2603,7 @@ async function renderSettings() {
       h('button', { class: 'btn small', onclick: () => { const n = prompt('Name des neuen Kanals:'); if (n) run(() => api('POST', '/api/profiles', { name: n }), 'Kanal angelegt.')(); } }, '+ Kanal')),
     h('div', { class: 'settings' }, st.profiles.map(channelBox)),
     h('h2', { class: 'h2', style: { marginTop: '24px' } }, 'Apps & Zugang'),
-    h('div', { class: 'settings' }, claudeBox, llmBox, cutBox, twitchBox, statsBox, musicBox, sfxBox, creditBox, orgBox, thumbBox, helperBox, googleBox, tiktokBox, infoBox, backupBox, account));
+    h('div', { class: 'settings' }, claudeBox, cloudBox, llmBox, cutBox, twitchBox, statsBox, musicBox, sfxBox, creditBox, orgBox, thumbBox, helperBox, googleBox, tiktokBox, infoBox, backupBox, account));
 }
 
 start();

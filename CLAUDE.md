@@ -444,6 +444,18 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   - `runRerender`: `probeVideoLen` vor dem Ersetzen (leere Ausgabe → Fehler, Original bleibt).
   - Getestet: Halluzinations-Filter (Skript), Texte neu erzeugen über Mock-Ollama, Hook im neu gerechneten Bild, Dialog 390 px, KI-Anzeige mit Ollama-Angabe.
   - **Angeboten, nicht gebaut:** Tonspuren je Video beim Import anzeigen + vorhören + Stimmspur wählen (Kunde: Mikro auf eigener OBS-Spur).
+- 1.34.0 (25.10.2026): **Cloud-KI + automatische Wahl** (Kunde: „Gemini Flash nehmen wir … die KI soll entscheiden, was wo am besten ist, auch von den Preisen“).
+  - `server/cloud.js`: OpenAI-kompatible Chat Completions, Anbieter `fal` (https://fal.run/openrouter/router/openai/v1, `Authorization: Key <fal-Schlüssel>`, Modell
+    `google/gemini-3.8-flash`, 0,75/3,75 $ je Mio. – Preise/Modell-ID per Websuche 25.10.2026, **nicht live geprüft**; fal meldet `usage.cost`), `google`
+    (generativelanguage …/v1beta/openai, `gemini-flash-latest`), `deepseek` (nur Text, `json_object`), `custom` (URL, z. B. OmniRoute :20128/v1). `db().cloud {providers, blocked,
+    spend[JJJJ-MM][id], budgets, strategy sparen|qualitaet}`. Schema per `response_format json_schema strict`, bei 400 → `json_object` + Schema im Text; Pflichtfelder prüfen + 1 Wiederholung.
+    Sperre: 401/403 + Guthaben-Texte 6 Std., 429 10 Min. Test-Schalter `CLOUD_<ID>_URL`. Mock `test/mock-cloud.js` (`MOCK_CLOUD_FAIL`, `_NOSCHEMA`, `_COST`).
+  - ai.js: Claude-Aufruf herausgelöst (`askClaude`, zählt auch `cloud.addSpend('claude')`, Monatsbudget), Modus **`smart`** (Standard, Migration `presetV3` setzt alle Aufgaben einmalig darauf)
+    und `cloud` (ohne Claude). `TASK_REQ` (Mindest-Stufe 1–3, Bilder need/nice), `candidates()` (lokal Stufe 1/Preis 0, Cloud, Claude Stufe 3 mit Denk-Faktor 3; sortiert: Stufe erfüllt ›
+    [Qualität] › Bilder › geschätzte Kosten), `askSmart()` probiert der Reihe nach. `NoVisionError` → `reviewClip` ohne Bild-KI = null. Parallel 3 bei Cloud. Stats `cloud:<id>`.
+  - Routen `GET/POST /api/cloud`, `POST /api/cloud/test {id}`; UI Kasten „☁️ KI-Anbieter & automatische Wahl“ (`#s-cloud`). Info-Seite nennt fal/OpenRouter/Gemini.
+  - Getestet (Skript + Playwright): texte/pruefung → fal mit Bild, themen → lokal, schnitt → fal; 402 → Sperre, lokal übernimmt; kein json_schema → json_object; Einstellungen 1300/390 px.
+    **Nicht getestet:** echtes fal-OpenRouter (Modell-ID, `strict`-Schema mit Gemini, Kosten-Feld), Google/DeepSeek echt, Qualität von Gemini bei der Clip-Auswahl.
 - Ideen danach: „Best of der Woche“ automatisch (Zeitplan), Platz-Einblendungen „Platz 3/2/1“.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
   Sendeplätze je Kanal **stellt der Kunde selbst ein** (keine festen Startzeiten), „Einplanen“ auf nächsten freien Platz, Shorts

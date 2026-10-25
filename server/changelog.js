@@ -1,5 +1,10 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.34.0', date: '25.10.2026', items: [
+    '🤖 Die KI entscheidet selbst, welche KI rechnet: je Aufgabe die günstigste, die gut genug ist – lokal (kostenlos) für Einfaches, Gemini Flash über dein fal-Guthaben für Clips, Titel und Prüfung, Claude nur wenn nötig. Alle Aufgaben stehen jetzt auf „🤖 Automatisch“ (änderbar unter Einstellungen → Lokale KI).',
+    '☁️ Neuer Kasten „KI-Anbieter“: fal.ai (Gemini Flash, ist schon an), Google Gemini direkt, DeepSeek, eigene Adresse (z. B. OmniRoute) – mit Preisen, Qualitätsstufe, Bildverständnis, Testknopf und Monatsbudget je Anbieter (auch für Claude).',
+    'Scheitert eine KI (kein Guthaben, Limit, Fehler), übernimmt automatisch die nächste; der Anbieter wird eine Weile übersprungen. Kosten je Aufgabe und Anbieter in der Übersicht.',
+  ] },
   { version: '1.33.0', date: '25.10.2026', items: [
     '✏️ Eingeblendete Texte eines Shorts (Hook-Text, Freeze, Zeitlupe, Text-Effekte) ändern oder von der KI neu schreiben lassen – Knopf „Texte ändern / neu erzeugen“ im Video, danach wird mit gleichem Schnitt neu gerechnet.',
     'Gleiche eingeblendete Texte kommen nur noch einmal, Wortwiederholungen („WARTE WARTE WARTE“) werden zusammengefasst.',

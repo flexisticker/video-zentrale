@@ -16,6 +16,7 @@ import * as credits from './credits.js';
 import * as bounds from './bounds.js';
 import * as vision from './vision.js';
 import * as llm from './llm.js';
+import * as cloud from './cloud.js';
 import { STYLES, STYLE_IDS, HOOK_LOOKS } from './captions.js';
 
 const MODEL = 'claude-opus-5-5';
@@ -75,6 +76,8 @@ export function unblockClaude() { delete cfg().blocked; saveNow(); }
 const claudeUsable = () => !!cfg().apiKey && !claudeBlocked();
 // Läuft diese Aufgabe gerade zuerst lokal?
 const goesLocal = (task) => { const m = llm.modeOf(task); return llm.ready() && (m === 'lokal' || m === 'auto' || (m === 'claude' && !claudeUsable())); };
+// Wie viele KI-Aufträge gleichzeitig? Cloud-KIs vertragen mehrere, lokal je Rechner einer
+const smartParallel = (task) => ['smart', 'cloud'].includes(llm.modeOf(task)) && cloud.engines().length ? 3 : 0;
 // Warum geht gerade keine KI? (für den Hinweis im Video)
 function whyNot() {
   const out = [];
@@ -83,10 +86,13 @@ function whyNot() {
   const L = llm.status();
   if (!L.url) out.push('lokale KI: keine Server-Adresse eingetragen (z. B. http://192.168.1.10:11434)');
   if (L.pc?.enabled && !L.pc.ready) out.push(L.pc.helperCan ? 'PC-Grafikkarte gerade nicht freigegeben' : 'PC: Ollama im Rechenhelfer noch nicht bereit');
+  if (!cloud.engines().length) out.push('Cloud-KI: keine eingerichtet bzw. gerade gesperrt (Einstellungen → KI-Anbieter)');
   return out.join(' · ');
 }
 export function canAsk(task) {
   const m = llm.modeOf(task);
+  if (m === 'smart') return claudeUsable() || llm.ready() || cloud.engines().length > 0;
+  if (m === 'cloud') return llm.ready() || cloud.engines().length > 0;
   if (m === 'lokal') return llm.ready();
   if (m === 'nurclaude') return claudeUsable();
   return claudeUsable() || llm.ready();   // Claude-Aufgaben laufen lokal weiter, wenn Claude nicht geht
@@ -104,6 +110,7 @@ export async function ask(task, content, schema, opts = {}) {
 }
 async function askInner(task, content, schema, { effort, maxTokens = 64000 } = {}, job = {}) {
   const mode = llm.modeOf(task);
+  if (mode === 'smart' || mode === 'cloud') return askSmart(task, content, schema, { effort, maxTokens, noClaude: mode === 'cloud' }, job);
   const local = async (why = '') => ({ ...(await llm.chat(task, content, schema, PRICE, { onTarget: (e) => { job.engine = e; } })), cost: 0, ...(why ? { why } : {}) });
   const fallback = mode === 'claude' && llm.ready();   // „Claude, sonst lokal“
   let localErr = null;
@@ -114,10 +121,21 @@ async function askInner(task, content, schema, { effort, maxTokens = 64000 } = {
   } else if (mode === 'lokal') throw new Error('Lokale KI nicht erreichbar (Ollama-Adresse fehlt bzw. PC nicht freigegeben).');
   if (!cfg().apiKey) throw new Error(mode === 'nurclaude' ? 'Aufgabe steht auf „Nur Claude“, aber kein Claude-API-Schlüssel eingetragen.' : 'Keine KI eingerichtet – Claude-Schlüssel oder lokale KI (Einstellungen).');
   if (claudeBlocked()) throw new Error(`Claude gesperrt (${claudeBlocked().reason})` + (mode === 'nurclaude' ? ' – Aufgabe steht auf „Nur Claude“.' : ' und keine lokale KI erreichbar – Einstellungen → Lokale KI.'));
-  const viaLocal = async (msg) => {
-    if (!fallback || localErr) throw new Error(msg);
-    try { return await local('Claude: ' + msg); } catch (x) { throw new Error(msg + ' Lokale KI: ' + x.message); }
-  };
+  try {
+    const r = await askClaude(task, content, schema, { effort, maxTokens }, job);
+    return localErr ? { ...r, engine: 'Claude (lokal gescheitert)' } : r;
+  } catch (e) {
+    if (claudeBlocked() && llm.ready() && !localErr && mode !== 'nurclaude') { try { return await local('Claude gesperrt'); } catch (x) { throw new Error(e.message + ' Lokale KI: ' + x.message); } }
+    if (!fallback || localErr) throw e;
+    try { return await local('Claude: ' + e.message); } catch (x) { throw new Error(e.message + ' Lokale KI: ' + x.message); }
+  }
+}
+
+// Ein Claude-Aufruf. Wirft bei jedem Fehler (Sperre bei Guthaben/Schlüssel/Limit wird vermerkt), zählt Kosten.
+async function askClaude(task, content, schema, { effort, maxTokens = 64000 } = {}, job = {}) {
+  if (!cfg().apiKey) throw new Error('kein Claude-Schlüssel');
+  if (claudeBlocked()) throw new Error(`Claude gesperrt (${claudeBlocked().reason})`);
+  if (cloud.overBudget('claude')) throw new Error('Claude-Monatsbudget erreicht');
   const call = (c) => (job.engine = 'Claude', api().beta.messages.stream({ model: MODEL, max_tokens: maxTokens, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
     output_config: { effort: effort || cutEffort(), format: { type: 'json_schema', schema } }, messages: [{ role: 'user', content: c }] }).finalMessage());
   let r;
@@ -133,21 +151,77 @@ async function askInner(task, content, schema, { effort, maxTokens = 64000 } = {
   } catch (e) {
     if (e instanceof Anthropic.BadRequestError) console.warn(`[ki] Claude 400 bei „${task}“:`, e.message);
     const msg = friendly(e);
-    if (isBlockErr(e)) {
-      cfg().blocked = { at: new Date().toISOString(), reason: msg, ...(limitUntil(e.message) ? { until: limitUntil(e.message) } : {}) }; saveNow();
-      if (llm.ready() && !localErr && mode !== 'nurclaude') { try { return await local('Claude gesperrt'); } catch (x) { throw new Error(msg + ' Lokale KI: ' + x.message); } }
-    }
-    return viaLocal(msg);
+    if (isBlockErr(e)) { cfg().blocked = { at: new Date().toISOString(), reason: msg, ...(limitUntil(e.message) ? { until: limitUntil(e.message) } : {}) }; saveNow(); }
+    throw new Error(msg);
   }
   const cost = (r.usage?.input_tokens || 0) * PRICE.input + (r.usage?.output_tokens || 0) * PRICE.output;
   const a = cfg(); a.spent = Math.round(((a.spent || 0) + cost) * 10000) / 10000; a.count = (a.count || 0) + 1; save();
   llm.recordClaude(task, cost, (r.usage?.input_tokens || 0) + (r.usage?.output_tokens || 0));
-  if (r.stop_reason === 'refusal') return viaLocal('abgelehnt');
-  if (r.stop_reason === 'max_tokens') return viaLocal('Claude hat zu lange nachgedacht (Antwort abgeschnitten) – bitte noch einmal starten.');
+  cloud.addSpend('claude', cost);
+  if (r.stop_reason === 'refusal') throw new Error('Claude hat abgelehnt.');
+  if (r.stop_reason === 'max_tokens') throw new Error('Claude hat zu lange nachgedacht (Antwort abgeschnitten) – bitte noch einmal starten.');
   let out;
-  try { out = JSON.parse(r.content.filter((b) => b.type === 'text').map((b) => b.text).join('')); } catch { return viaLocal('Antwort von Claude nicht lesbar.'); }
-  return { out, engine: localErr ? 'Claude (lokal gescheitert)' : 'Claude', model: r.model || MODEL, vision: true, cost };
+  try { out = JSON.parse(r.content.filter((b) => b.type === 'text').map((b) => b.text).join('')); } catch { throw new Error('Antwort von Claude nicht lesbar.'); }
+  return { out, engine: 'Claude', model: r.model || MODEL, vision: true, cost };
 }
+
+// ---------- Automatische Wahl („KI entscheidet“) ----------
+// Je Aufgabe: Mindest-Qualität (1 einfach, 2 gut, 3 sehr gut) und ob Bilder nötig/nützlich sind.
+export const TASK_REQ = {
+  schnitt: { tier: 2, vision: 'nice', out: 6000 }, ueberarbeiten: { tier: 2, vision: 'nice', out: 6000 }, trailer: { tier: 2, out: 4000 },
+  scout: { tier: 2, out: 3000 }, texte: { tier: 2, vision: 'nice', out: 3000 }, pruefung: { tier: 1, vision: 'need', out: 800 },
+  themen: { tier: 1, out: 1500 }, coach: { tier: 2, out: 3000 },
+};
+export class NoVisionError extends Error {}
+// Alle gerade nutzbaren KIs mit geschätzten Kosten für diesen Auftrag, beste zuerst
+export async function candidates(task, content, { maxTokens = 64000, noClaude = false } = {}) {
+  const req = TASK_REQ[task] || { tier: 2, out: 3000 };
+  const hasImg = content.some((b) => b.type === 'image');
+  const inTok = content.reduce((a, b) => a + (b.type === 'text' ? b.text.length / 3.2 : b.type === 'image' ? 1200 : 0), 0);
+  const outTok = Math.min(maxTokens, req.out || 3000);
+  const list = [];
+  if (llm.ready()) list.push({ id: 'lokal', kind: 'local', label: 'Ollama (lokal)', tier: 1, vision: await llm.visionAvailable().catch(() => false), priceIn: 0, priceOut: 0 });
+  for (const e of cloud.engines()) list.push(e);
+  if (!noClaude && cfg().apiKey && !claudeBlocked() && !cloud.overBudget('claude')) list.push({ id: 'claude', kind: 'claude', label: 'Claude', tier: 3, vision: true, priceIn: PRICE.input * 1e6, priceOut: PRICE.output * 1e6, think: 3 });
+  for (const e of list) e.cost = (inTok * e.priceIn + outTok * (e.think || 1) * e.priceOut) / 1e6;
+  const need = req.vision === 'need' && hasImg, nice = req.vision === 'nice' && hasImg;
+  const ok = need ? list.filter((e) => e.vision) : list;
+  const quality = cloud.cfg().strategy === 'qualitaet';
+  ok.sort((a, b) => ((b.tier >= req.tier) - (a.tier >= req.tier))
+    || (quality ? b.tier - a.tier : 0)
+    || (nice ? b.vision - a.vision : 0)
+    || a.cost - b.cost || (a.kind === 'local' ? -1 : 0));
+  return ok.map((e) => ({ ...e, belowTier: e.tier < req.tier }));
+}
+async function askSmart(task, content, schema, { effort, maxTokens = 64000, noClaude = false } = {}, job = {}) {
+  const list = await candidates(task, content, { maxTokens, noClaude });
+  if (!list.length) {
+    if (TASK_REQ[task]?.vision === 'need' && content.some((b) => b.type === 'image')) throw new NoVisionError('Keine KI mit Bildverständnis erreichbar.');
+    throw new Error('Keine KI erreichbar – ' + (whyNot() || 'Einstellungen → KI-Anbieter.'));
+  }
+  const errs = [];
+  for (const e of list) {
+    try {
+      job.engine = e.label;
+      if (e.kind === 'local') {
+        const r = await llm.chat(task, content, schema, PRICE, { onTarget: (x) => { job.engine = x; } });
+        return { ...r, cost: 0, why: errs.join(' · ') };
+      }
+      if (e.kind === 'cloud') {
+        const r = await cloud.chat(e.id, task, content, schema, { maxTokens: Math.min(maxTokens, 32000) });
+        llm.recordCloud(task, e.id, { count: 1, cost: r.cost, tokens: r.tokens, secs: r.secs });
+        return { ...r, why: errs.join(' · ') };
+      }
+      return { ...(await askClaude(task, content, schema, { effort, maxTokens }, job)), why: errs.join(' · ') };
+    } catch (x) {
+      if (e.kind === 'cloud') llm.recordCloud(task, e.id, { failed: 1 });
+      errs.push(`${e.label}: ${String(x.message).slice(0, 160)}`);
+      console.warn(`[ki] ${task}: ${e.label} gescheitert – nächste KI.`, x.message);
+    }
+  }
+  throw new Error('Alle KIs gescheitert – ' + errs.join(' · '));
+}
+
 async function cutCall(content, schema, { effort, task = 'schnitt' } = {}) { return (await ask(task, content, schema, { effort })).out; }
 const SENTENCE_RULES = 'SAUBERE SCHNITTE (sehr wichtig): Schneide nie mitten im Satz. Das Gesprochene ist in nummerierte Sätze zerlegt (S12 [Start–Ende] Text). '
   + 'Gib Anfang und Ende als Satznummern an (fromSentence = erster Satz, toSentence = letzter Satz des Clips); geschnitten wird kurz vor dem ersten und '
@@ -657,7 +731,9 @@ export async function reviewClip(sheetFile, info = {}) {
     ok: { type: 'boolean' }, score: { type: 'integer' }, issues: { type: 'array', items: { type: 'string' } }, fixWish: { type: 'string' } } };
   // Ohne Bildverständnis (lokales Textmodell) ist eine Bild-Prüfung sinnlos → nur die technische Prüfung zählt
   if (goesLocal('pruefung') && !(await llm.visionAvailable())) return null;
-  const o = await cutCall([{ type: 'text', text }, vision.asImage(sheetFile)], schema, { effort: 'medium', task: 'pruefung' });
+  let o;
+  try { o = await cutCall([{ type: 'text', text }, vision.asImage(sheetFile)], schema, { effort: 'medium', task: 'pruefung' }); }
+  catch (e) { if (e instanceof NoVisionError) return null; throw e; }
   return { ok: !!o.ok, score: Math.max(1, Math.min(10, Math.round(Number(o.score) || 0))) || null,
     issues: (o.issues || []).slice(0, 6).map((x) => String(x).slice(0, 160)), fixWish: String(o.fixWish || '').slice(0, 400) };
 }
@@ -722,7 +798,7 @@ export async function chooseSummary(v, parts, segs, target, profile, wish = '') 
 const queue = [];
 let running = 0;
 // lokal mit Server + PC: zwei Vorschläge gleichzeitig (je Rechner einer), sonst einer nach dem anderen
-const parallel = () => (goesLocal('texte') ? Math.max(1, llm.engines()) : 1);
+const parallel = () => smartParallel('texte') || (goesLocal('texte') ? Math.max(1, llm.engines()) : 1);
 
 export function enqueue(v, extra = '') {
   if (!canAsk('texte')) throw new Error('Keine KI erreichbar – Claude-Schlüssel oder lokale KI einrichten (Einstellungen).');
