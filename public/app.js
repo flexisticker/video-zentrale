@@ -2046,6 +2046,59 @@ async function renderSettings() {
       h('button', { class: 'btn', onclick: run(() => api('POST', '/api/ai/config', { apiKey: aKey.value, auto: aAuto.checked, autoTips: aTips.checked, scout: aScout.checked, qc: aQc.checked, cutEffort: aEffort.value, hints: aHints.value }), 'Gespeichert.') }, 'Speichern'),
       a.configured ? h('button', { class: 'btn ghost danger', onclick: () => confirm('API-Schlüssel entfernen?') && run(() => api('POST', '/api/ai/config', { removeKey: true }), 'Schlüssel entfernt.')() }, 'Schlüssel entfernen') : null));
 
+  // ----- Lokale KI (Ollama) -----
+  const L = st.llm || { tasks: {}, names: {}, stats: {}, pc: {} };
+  const lUrl = h('input', { value: L.url || '', placeholder: 'http://192.168.1.10:11434' });
+  const lModel = h('input', { value: L.model || '', placeholder: 'qwen2.5:7b-instruct', list: 'llm-models' });
+  const lModels = h('datalist', { id: 'llm-models' });
+  const lCtx = h('select', {}, [[8192, '8.000 (schnell, kurze Aufnahmen)'], [16384, '16.000 (Standard)'], [32768, '32.000 (lange Aufnahmen, braucht viel RAM)']]
+    .map(([k, n]) => h('option', { value: k, selected: Number(L.ctx || 16384) === k }, n)));
+  const lPc = h('input', { type: 'checkbox', checked: !!L.pc?.enabled });
+  const lPcModel = h('input', { value: L.pc?.model || 'qwen2.5vl:7b', placeholder: 'qwen2.5vl:7b' });
+  const modeNames = { claude: 'Claude', auto: 'Lokal, bei Fehler Claude', lokal: 'Nur lokal' };
+  const lSel = {};
+  const fmtMoney = (x) => (x || 0).toFixed(2).replace('.', ',') + ' $';
+  const statRow = (k) => {
+    const s = L.stats?.[k] || {};
+    const loc = ['server', 'pc'].reduce((a, w) => a + (s[w]?.count || 0), 0), fail = ['server', 'pc'].reduce((a, w) => a + (s[w]?.failed || 0), 0);
+    const saved = ['server', 'pc'].reduce((a, w) => a + (s[w]?.saved || 0), 0);
+    lSel[k] = h('select', {}, Object.entries(modeNames).map(([m, n]) => h('option', { value: m, selected: (L.tasks?.[k] || 'claude') === m }, n)));
+    return h('tr', {}, h('td', {}, L.names?.[k] || k), h('td', {}, lSel[k]),
+      h('td', { class: 'hint' }, `Claude ${s.claude?.count || 0}× · ${fmtMoney(s.claude?.cost)}`),
+      h('td', { class: 'hint' }, `lokal ${loc}×${fail ? ` (${fail} Fehler)` : ''} · gespart ≈ ${fmtMoney(saved)}`));
+  };
+  const lTable = h('table', { class: 'llmtable' }, h('tbody', {}, Object.keys(L.names || {}).map(statRow)));
+  const lTestOut = h('div', { class: 'hint' }, L.lastError ? h('span', { class: 'err' }, 'Letzter Fehler: ' + L.lastError) : '');
+  const lTest = async () => {
+    lTestOut.textContent = 'Prüfe …';
+    try {
+      await api('POST', '/api/llm', { url: lUrl.value, model: lModel.value, ctx: Number(lCtx.value), pc: { enabled: lPc.checked, model: lPcModel.value } });
+      const t = await api('POST', '/api/llm/test');
+      const s = t.server;
+      lModels.replaceChildren(...(s?.models || []).map((m) => h('option', { value: m })));
+      lTestOut.replaceChildren(
+        h('div', {}, !s ? '– Server: keine Adresse eingetragen' : s.ok ? (s.has ? `✓ Server erreichbar, Modell „${lModel.value}“ vorhanden${s.vision ? ', versteht Bilder' : ' (reines Textmodell – sieht keine Bilder)'}`
+          : `⚠ Server erreichbar, aber Modell „${lModel.value}“ fehlt. Vorhanden: ${(s.models || []).join(', ') || 'keine'}`) : '✗ Server: ' + s.error),
+        h('div', {}, !t.pc.enabled ? '– PC: aus' : t.pc.ready ? `✓ PC bereit (Modell ${t.pc.model}${t.pc.vision ? ', versteht Bilder' : ''})`
+          : t.pc.helperCan ? '⏸ PC kann es, Grafikkarte gerade nicht freigegeben – dann rechnet der Server' : '⏳ PC: Rechenhelfer 1.9 nötig (neu herunterladen) – richtet Ollama dort beim nächsten Start ein'));
+    } catch (x) { lTestOut.textContent = '✗ ' + x.message; }
+  };
+  const llmBox = h('div', { class: 'box' }, h('h3', {}, '🏠 Lokale KI (Ollama) – spart Claude-Kosten'),
+    h('p', { class: 'hint' }, 'Die Zentrale kann Aufgaben an deinen eigenen Ollama geben statt an Claude – kostenlos, aber langsamer und schwächer. Ist der PC freigegeben, rechnet er (schnell, mit Bildverständnis); sonst der Server (nur Prozessor).'),
+    h('label', {}, 'Ollama auf dem Server (Adresse)'), lUrl,
+    h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Modell auf dem Server'), lModel, lModels), h('div', {}, h('label', {}, 'Kontext (wie viel Text auf einmal)'), lCtx)),
+    h('label', { class: 'check', style: { marginTop: '8px' } }, lPc, '🖥 PC mitnutzen, wenn die Grafikkarte freigegeben ist (Rechenhelfer lädt Ollama + Modell einmalig, ca. 7 GB)'),
+    h('label', {}, 'Modell auf dem PC (mit Bildverständnis)'), lPcModel,
+    h('div', { class: 'row', style: { marginTop: '8px' } }, h('button', { class: 'btn small', onclick: lTest }, '🔌 Verbindung testen'), lTestOut),
+    h('h4', { style: { marginTop: '14px' } }, 'Wer macht was?'), h('div', { class: 'table-wrap' }, lTable),
+    h('p', { class: 'hint' }, 'Tipp: Mit „Lokal, bei Fehler Claude“ anfangen. Clips auswählen und Überarbeiten sind die schwersten Aufgaben – erst umstellen, wenn dir die lokalen Ergebnisse gefallen. '
+      + 'Ohne Bildverständnis (Server-Modell) entfällt die Bild-Prüfung fertiger Clips; die Facecam kommt dann aus der Gesichtserkennung des PCs.'),
+    h('p', { class: 'hint' }, 'Weitere Spar-Hebel bei Claude (Kasten oben): Denkstufe beim Schneiden auf „Hoch“ oder „Mittel“, Viral-Tipps nicht automatisch umsetzen.'),
+    h('div', { class: 'row', style: { marginTop: '10px' } },
+      h('button', { class: 'btn', onclick: run(() => api('POST', '/api/llm', { url: lUrl.value, model: lModel.value, ctx: Number(lCtx.value), pc: { enabled: lPc.checked, model: lPcModel.value },
+        tasks: Object.fromEntries(Object.entries(lSel).map(([k, el]) => [k, el.value])) }), 'Gespeichert.') }, 'Speichern'),
+      h('button', { class: 'btn ghost', onclick: () => confirm('Kostenübersicht zurücksetzen?') && run(() => api('POST', '/api/llm', { resetStats: true }), 'Zurückgesetzt.')() }, 'Zähler zurücksetzen')));
+
   // ----- Automatischer Schnitt -----
   const c = st.cut, w = c.whisper;
   const cb = (on) => h('input', { type: 'checkbox', checked: on });
@@ -2421,9 +2474,9 @@ async function renderSettings() {
           h('button', { class: 'btn small ghost', title: 'Zurück an den alten Platz; das Video wird danach nicht mehr automatisch verschoben.',
             onclick: run(async () => { await api('POST', '/api/org/undo', { index: i }); await refresh(); }, 'Rückgängig gemacht.') }, '↶ Rückgängig'))))) : null,
     ] : null);
-  const jumps = [['s-kanaele', 'Kanäle'], ['s-claude', 'Claude'], ['s-schnitt', 'Schnitt'], ['s-twitch', 'Twitch'], ['s-zahlen', 'Zahlen'], ['s-musik', 'Musik'], ['s-sfx', 'Sounds'], ['s-guthaben', 'Guthaben'], ['s-ordnung', 'Ordnung'], ['s-bilder', 'Titelbilder'],
+  const jumps = [['s-kanaele', 'Kanäle'], ['s-claude', 'Claude'], ['s-lokal', 'Lokale KI'], ['s-schnitt', 'Schnitt'], ['s-twitch', 'Twitch'], ['s-zahlen', 'Zahlen'], ['s-musik', 'Musik'], ['s-sfx', 'Sounds'], ['s-guthaben', 'Guthaben'], ['s-ordnung', 'Ordnung'], ['s-bilder', 'Titelbilder'],
     ['s-helfer', 'Rechenhelfer'], ['s-google', 'YouTube-App'], ['s-tiktok', 'TikTok-App'], ['s-info', 'Info-Seite'], ['s-sicherung', 'Sicherung'], ['s-allgemein', 'Allgemein']];
-  [[claudeBox, 's-claude'], [cutBox, 's-schnitt'], [twitchBox, 's-twitch'], [statsBox, 's-zahlen'], [musicBox, 's-musik'], [sfxBox, 's-sfx'], [creditBox, 's-guthaben'], [orgBox, 's-ordnung'], [thumbBox, 's-bilder'], [helperBox, 's-helfer'], [googleBox, 's-google'],
+  [[claudeBox, 's-claude'], [llmBox, 's-lokal'], [cutBox, 's-schnitt'], [twitchBox, 's-twitch'], [statsBox, 's-zahlen'], [musicBox, 's-musik'], [sfxBox, 's-sfx'], [creditBox, 's-guthaben'], [orgBox, 's-ordnung'], [thumbBox, 's-bilder'], [helperBox, 's-helfer'], [googleBox, 's-google'],
     [tiktokBox, 's-tiktok'], [infoBox, 's-info'], [backupBox, 's-sicherung'], [account, 's-allgemein']].forEach(([el, id]) => { el.id = id; el.style.scrollMarginTop = '110px'; });
   const jumpBar = h('div', { class: 'setjump' }, jumps.map(([id, label]) => h('button', { class: 'btn small', onclick: () => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, label)));
   mainEl.replaceChildren(jumpBar,
@@ -2432,7 +2485,7 @@ async function renderSettings() {
       h('button', { class: 'btn small', onclick: () => { const n = prompt('Name des neuen Kanals:'); if (n) run(() => api('POST', '/api/profiles', { name: n }), 'Kanal angelegt.')(); } }, '+ Kanal')),
     h('div', { class: 'settings' }, st.profiles.map(channelBox)),
     h('h2', { class: 'h2', style: { marginTop: '24px' } }, 'Apps & Zugang'),
-    h('div', { class: 'settings' }, claudeBox, cutBox, twitchBox, statsBox, musicBox, sfxBox, creditBox, orgBox, thumbBox, helperBox, googleBox, tiktokBox, infoBox, backupBox, account));
+    h('div', { class: 'settings' }, claudeBox, llmBox, cutBox, twitchBox, statsBox, musicBox, sfxBox, creditBox, orgBox, thumbBox, helperBox, googleBox, tiktokBox, infoBox, backupBox, account));
 }
 
 start();

@@ -31,6 +31,12 @@ PC-Analyse (ab Version 1.5):
   Ab Version 1.8 sucht die PC-Analyse auch Gesichter (OpenCV YuNet, Datei face_detection_yunet_2023mar.onnx,
   MIT-Lizenz) – damit findet die Zentrale die Facecam automatisch, auch wenn sie im Stream die Position wechselt.
 
+Lokale KI (ab Version 1.9):
+  Ist in der Zentrale unter Einstellungen → Lokale KI „PC mitnutzen“ an, lädt der Rechenhelfer einmalig Ollama
+  (ca. 1,6 GB, Ordner "ollama") und das KI-Modell (mehrere GB, Ordner "ollama-modelle") und beantwortet KI-Aufträge
+  der Zentrale – nur solange die Grafikkarte freigegeben ist. Startest du ein Spiel oder OBS, wird Ollama beendet und
+  der Grafikspeicher frei. Ein schon installiertes Ollama stört nicht (eigene Kopie auf Port 11435).
+
 Starten von Hand:   "Starten.bat"
 Autostart entfernen: "Autostart entfernen.bat"
 

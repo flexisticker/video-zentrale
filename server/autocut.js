@@ -634,7 +634,7 @@ async function runCut(v) {
     const tl = signals.timeline({ duration, loud, voice: voice?.values, scenes, events, sents, pros, cut, extra: [...tw.extra, ...an.extra] });
     let forced = tw.forced;
     // Späher: Claude liest die ganze Abschrift und meldet starke Momente (auch leise Lacher, die keine Lautstärke-Spitze haben)
-    if (db().ai.apiKey && db().ai.scout !== false && sents.length >= 15) {
+    if (ai.canAsk('scout') && db().ai.scout !== false && sents.length >= 15) {
       step('Claude liest die ganze Aufnahme');
       try { forced = [...forced, ...await ai.scoutMoments(v, sentsA, profile, { signals: [tw.lines, an.lines].filter(Boolean).join('\n'), wish: plan.wish, max: Math.min(20, plan.shorts * 3) })]; }
       catch (e) { v.cut.warning = 'Claude-Späher: ' + e.message; }
@@ -645,7 +645,7 @@ async function runCut(v) {
   let shorts = [];
   if (cands.length) {
     step('Highlights auswählen');
-    if (db().ai.apiKey) {
+    if (ai.canAsk('schnitt')) {
       try { shorts = await ai.chooseHighlights(v, cands, segs, { ...c, shorts: plan.shorts }, profile, plan.wish, { sents: sentsA }); }
       catch (e) { v.cut.warning = 'Claude-Auswahl: ' + e.message + ' – stärkste Stellen genommen.'; }
     }
@@ -669,7 +669,7 @@ async function runCut(v) {
     const sb = sents.length ? bounds.sentenceBlocks(sents, { loud, scenes, cut, target: SEG }) : [];
     const parts = sb.length >= 4 ? [...sb].sort((a, b) => b.score - a.score).slice(0, want).sort((a, b) => a.start - b.start)
       : candidates(loud, scenes, duration, cut, SEG, want);
-    if (db().ai.apiKey) {
+    if (ai.canAsk('schnitt')) {
       try { reel = await ai.chooseSummary(v, parts, segs, plan.summary, profile, plan.wish); }
       catch (e) { v.cut.warning = 'Claude-Kurzfassung: ' + e.message + ' – beste Stellen nach Lautstärke genommen.'; }
     }
@@ -1093,7 +1093,7 @@ export function revisable(out) {
   if (!['short', 'long', 'summary'].includes(out?.source?.kind)) return 'Überarbeiten geht bei Videos aus dem automatischen Schnitt (Shorts, Lang- und Kurzfassung).';
   const raw = db().videos[out.source.rawId];
   if (!raw || raw.missing) return 'Das Rohvideo ist nicht mehr da – ohne Rohvideo kann nicht neu geschnitten werden.';
-  if (!db().ai.apiKey) return 'Für die Überarbeitung braucht es den Claude-Schlüssel (Einstellungen).';
+  if (!ai.canAsk('ueberarbeiten')) return 'Für die Überarbeitung braucht es den Claude-Schlüssel oder die lokale KI (Einstellungen).';
   return '';
 }
 // Viral-Tipps (Einstieg/Schnitt) als Überarbeitungswunsch

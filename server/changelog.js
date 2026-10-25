@@ -1,5 +1,10 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.31.0', date: '25.10.2026', items: [
+    '🏠 Lokale KI (Ollama) statt Claude – spart Kosten: Einstellungen → „Lokale KI“. Die Zentrale nutzt deinen Ollama auf dem Server (z. B. http://192.168.1.10:11434) und – wenn die Grafikkarte freigegeben ist – deinen PC (Rechenhelfer 1.9 richtet Ollama dort selbst ein, Modell mit Bildverständnis).',
+    'Je Aufgabe wählbar: Claude, „Lokal, bei Fehler Claude“ oder „Nur lokal“ – Titel/Texte, Render-Prüfung, Themen, Coach, Späher, Clips auswählen, Überarbeiten, Trailer. Übersicht, was Claude gekostet hat und was lokal gespart wurde.',
+    'Lange Aufnahmen werden für die lokale KI passend gekürzt: Sätze mit Signalen (laut, Lachen …) bleiben, der Rest wird gleichmäßig über die ganze Aufnahme ausgedünnt.',
+  ] },
   { version: '1.30.0', date: '20.10.2026', items: [
     '🪞 Video spiegeln (Knopf im Video): Das Bild wird gespiegelt, Untertitel, Hook-Texte und Effekte bleiben lesbar. Bei Shorts/Lang-/Kurzfassungen wird mit gleichem Schnitt neu gerechnet (ohne Claude), auf Wunsch auch alle anderen Videos derselben Aufnahme. Am Rohvideo gilt es für alle künftigen Schnitte.',
     '🖼 Titelbild als erstes Bild ins Video: Beim Hochladen wird eine Kopie mit deinem Titelbild vorne gebaut (als einzelnes Bild oder 0,4 s) – Vorschauen bei Shorts, TikTok und WhatsApp zeigen dann dein Titelbild. Je Kanal voreinstellbar, je Video änderbar. Bei TikTok „Direkt veröffentlichen“ wird es auch als Cover gewählt.',

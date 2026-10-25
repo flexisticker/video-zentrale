@@ -18,6 +18,7 @@ import * as whisper from './whisper.js';
 import * as thumbs from './thumbs.js';
 import * as cover from './cover.js';
 import * as captions from './captions.js';
+import * as llm from './llm.js';
 import * as layout from './layout.js';
 import * as music from './music.js';
 import * as ver from './version.js';
@@ -731,7 +732,7 @@ async function api(req, res, url) {
 
   if (p === '/api/settings' && m === 'GET') {
     return send(res, 200, { settings: db().settings, youtube: { ...youtube.status(), analytics: !!db().youtube.analytics }, tiktok: { ...tiktok.status(), statsList: !!db().tiktok.statsList },
-      ai: ai.status(), cut: autocut.status(), fal: thumbs.falStatus(), music: music.status(), helper: { waitHours: db().helper.waitHours || 12, mode: db().helper.mode || 'manual', released: helper.released() }, twitch: twitch.status(), stats: { enabled: stats.overview().enabled, lastRun: db().stats?.lastRun || '' },
+      ai: ai.status(), llm: llm.status(), cut: autocut.status(), fal: thumbs.falStatus(), music: music.status(), helper: { waitHours: db().helper.waitHours || 12, mode: db().helper.mode || 'manual', released: helper.released() }, twitch: twitch.status(), stats: { enabled: stats.overview().enabled, lastRun: db().stats?.lastRun || '' },
       profiles: profiles.list().map(profiles.publicProfile), version: VERSION });
   }
   if (p === '/api/public-info' && m === 'GET') return send(res, 200, info.cfg());
@@ -921,6 +922,10 @@ async function api(req, res, url) {
   }
   if (p === '/api/cut/config' && m === 'POST') { autocut.configure(await readJson(req)); return send(res, 200, autocut.status()); }
   if (p === '/api/ai/config' && m === 'POST') { ai.configure(await readJson(req)); return send(res, 200, ai.status()); }
+  // Lokale KI (Ollama): Einstellungen, Verbindungstest
+  if (p === '/api/llm' && m === 'GET') return send(res, 200, llm.status());
+  if (p === '/api/llm' && m === 'POST') { try { return send(res, 200, llm.configure(await readJson(req))); } catch (e) { throw new HttpError(e.status || 400, e.message); } }
+  if (p === '/api/llm/test' && m === 'POST') return send(res, 200, await llm.test());
   if (p === '/api/profiles' && m === 'POST') return send(res, 200, profiles.publicProfile(profiles.create(await readJson(req))));
   if (p === '/api/youtube/config' && m === 'POST') { youtube.configure(await readJson(req)); return send(res, 200, youtube.status()); }
   if (p === '/api/tiktok/config' && m === 'POST') { tiktok.configure(await readJson(req)); return send(res, 200, tiktok.status()); }

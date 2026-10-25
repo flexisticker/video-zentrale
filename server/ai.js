@@ -14,6 +14,7 @@ import * as sfx from './sfx.js';
 import * as credits from './credits.js';
 import * as bounds from './bounds.js';
 import * as vision from './vision.js';
+import * as llm from './llm.js';
 import { STYLES, STYLE_IDS, HOOK_LOOKS } from './captions.js';
 
 const MODEL = 'claude-opus-5-5';
@@ -54,18 +55,35 @@ export function afterSuggest(fn) { suggested = fn; }
 // Schnitt-Entscheidungen (Highlights, Kurzfassung, Überarbeiten): höchste Denkstufe, gestreamt (lange Denkzeit → kein HTTP-Timeout)
 export const CUT_EFFORTS = ['medium', 'high', 'xhigh', 'max'];
 export const cutEffort = () => (CUT_EFFORTS.includes(cfg().cutEffort) ? cfg().cutEffort : 'max');
-async function cutCall(content, schema, { effort } = {}) {
+// Ein KI-Auftrag: je nach Einstellung lokal (Ollama, llm.js) oder Claude; „auto“ = lokal, bei Fehler Claude.
+// → { out, engine, model, vision (Bilder gesehen?), cost }
+export function canAsk(task) {
+  const m = llm.modeOf(task);
+  if (m === 'claude') return !!cfg().apiKey;
+  if (m === 'lokal') return llm.ready();
+  return llm.ready() || !!cfg().apiKey;
+}
+export async function ask(task, content, schema, { effort, maxTokens = 64000 } = {}) {
+  const mode = llm.modeOf(task);
+  let localErr = null;
+  if (mode !== 'claude' && llm.ready()) {
+    try { return { ...(await llm.chat(task, content, schema, PRICE)), cost: 0 }; }
+    catch (e) { localErr = e; if (mode === 'lokal' || !cfg().apiKey) throw new Error('Lokale KI: ' + e.message); }
+  } else if (mode === 'lokal') throw new Error('Lokale KI nicht erreichbar (Ollama-Adresse fehlt bzw. PC nicht freigegeben).');
+  if (!cfg().apiKey) throw new Error('Kein Claude-API-Schlüssel eingetragen (Einstellungen → Claude).');
   let r;
   try {
-    r = await api().beta.messages.stream({ model: MODEL, max_tokens: 64000, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
+    r = await api().beta.messages.stream({ model: MODEL, max_tokens: maxTokens, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
       output_config: { effort: effort || cutEffort(), format: { type: 'json_schema', schema } }, messages: [{ role: 'user', content }] }).finalMessage();
   } catch (e) { throw new Error(friendly(e)); }
   const cost = (r.usage?.input_tokens || 0) * PRICE.input + (r.usage?.output_tokens || 0) * PRICE.output;
   const a = cfg(); a.spent = Math.round(((a.spent || 0) + cost) * 10000) / 10000; a.count = (a.count || 0) + 1; save();
+  llm.recordClaude(task, cost, (r.usage?.input_tokens || 0) + (r.usage?.output_tokens || 0));
   if (r.stop_reason === 'refusal') throw new Error('abgelehnt');
   if (r.stop_reason === 'max_tokens') throw new Error('Claude hat zu lange nachgedacht (Antwort abgeschnitten) – bitte noch einmal starten.');
-  return JSON.parse(r.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
+  return { out: JSON.parse(r.content.filter((b) => b.type === 'text').map((b) => b.text).join('')), engine: localErr ? 'Claude (lokal gescheitert)' : 'Claude', model: r.model || MODEL, vision: true, cost };
 }
+async function cutCall(content, schema, { effort, task = 'schnitt' } = {}) { return (await ask(task, content, schema, { effort })).out; }
 const SENTENCE_RULES = 'SAUBERE SCHNITTE (sehr wichtig): Schneide nie mitten im Satz. Das Gesprochene ist in nummerierte Sätze zerlegt (S12 [Start–Ende] Text). '
   + 'Gib Anfang und Ende als Satznummern an (fromSentence = erster Satz, toSentence = letzter Satz des Clips); geschnitten wird kurz vor dem ersten und '
   + 'kurz nach dem letzten Satz. Der Clip beginnt mit einem Satz, der ohne Vorwissen verständlich ist (nicht mit „und dann …“ als Antwort auf etwas Fehlendes), '
@@ -261,28 +279,11 @@ export async function suggest(v, extra = '') {
     content.push({ type: 'text', text: `Standbild ${f.n} (bei ${Math.round(f.at)} s):` });
     content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: fs.readFileSync(f.file).toString('base64') } });
   }
-  let r;
-  try {
-    r = await api().beta.messages.create({
-      model: MODEL,
-      max_tokens: 16000,
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default', // lehnt Claude ab, versucht es Anthropic automatisch mit einem passenden anderen Modell
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: schema(ids, labels, pro) } },
-      messages: [{ role: 'user', content }],
-    });
-  } catch (e) { throw new Error(friendly(e)); }
-  if (r.stop_reason === 'refusal') throw new Error('Claude hat diesen Vorschlag abgelehnt (Inhaltsprüfung).');
-  if (r.stop_reason === 'max_tokens') throw new Error('Antwort von Claude abgeschnitten – bitte erneut versuchen.');
-  const text = r.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
-  let out;
-  try { out = JSON.parse(text); } catch { throw new Error('Antwort von Claude nicht lesbar.'); }
-  const cost = (r.usage?.input_tokens || 0) * PRICE.input + (r.usage?.output_tokens || 0) * PRICE.output;
-  const c = cfg();
-  c.spent = Math.round(((c.spent || 0) + cost) * 10000) / 10000; c.count = (c.count || 0) + 1;
+  const r = await ask('texte', content, schema(ids, labels, pro), { effort: 'medium', maxTokens: 16000 });
+  const out = r.out, cost = r.cost;
   const clip = (x, n) => String(x || '').slice(0, n);
   v.ai = {
-    state: 'done', at: new Date().toISOString(), model: r.model || MODEL, cost: Math.round(cost * 10000) / 10000,
+    state: 'done', at: new Date().toISOString(), model: r.model || MODEL, engine: r.engine, cost: Math.round(cost * 10000) / 10000,
     frames: frames.map((f) => f.n),
     summary: clip(out.summary, 500), game: clip(out.game, 100),
     channel: ids.includes(out.channel) ? out.channel : '', channelReason: clip(out.channelReason, 300),
@@ -440,7 +441,7 @@ export async function scoutMoments(v, sents, profile, { signals = '', wish = '',
   const schema = { type: 'object', additionalProperties: false, required: ['moments'], properties: { moments: { type: 'array', items: {
     type: 'object', additionalProperties: false, required: ['fromSentence', 'toSentence', 'why'], properties: {
       fromSentence: { type: 'integer' }, toSentence: { type: 'integer' }, why: { type: 'string', description: 'höchstens 12 Wörter' } } } } } };
-  const o = await cutCall([{ type: 'text', text }], schema, { effort: 'high' });
+  const o = await cutCall([{ type: 'text', text }], schema, { effort: 'high', task: 'scout' });
   return (o.moments || []).slice(0, max).map((m) => {
     const r = bounds.fromSentences(sents, m.fromSentence, m.toSentence);
     return r && r.end - r.start < 240 ? { start: r.start, end: r.end, t: (r.start + r.end) / 2, label: 'Claude: ' + String(m.why || '').slice(0, 80) } : null;
@@ -514,7 +515,7 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '', op
         text: TEXT_SCHEMA,
       } } } },
   };
-  const out = await cutCall(content, schemaH);
+  const { out, vision: sawImages } = await ask('schnitt', content, schemaH);
   const dur = v.duration;
   const picked = [];
   for (const s of (out.shorts || []).slice(0, c.shorts)) {
@@ -532,7 +533,7 @@ export async function chooseHighlights(v, cands, segs, c, profile, wish = '', op
       mood: String(s.mood || ''), music: String(s.music || '').slice(0, 200),
       viral: Math.max(1, Math.min(10, Math.round(Number(s.viral) || 0))) || undefined, viralWhy: String(s.viralWhy || '').slice(0, 300), viralTip: String(s.viralTip || '').slice(0, 300),
       hook: s.hook && typeof s.hook === 'object' ? { mode: s.hook.mode, at: Number(s.hook.at), len: Number(s.hook.len), text: String(s.hook.text || '').slice(0, 60) } : null,
-      fx: Array.isArray(s.fx) ? s.fx.slice(0, 15) : [], layoutRaw: s.layout && typeof s.layout === 'object' ? s.layout : null, signals: k.why || [], text: parseText(s.text) });
+      fx: Array.isArray(s.fx) ? s.fx.slice(0, 15) : [], layoutRaw: sawImages && s.layout && typeof s.layout === 'object' ? s.layout : null, signals: k.why || [], text: parseText(s.text) });
   }
   return picked;
 }
@@ -550,7 +551,9 @@ export async function reviewClip(sheetFile, info = {}) {
   ].filter(Boolean).join('\n');
   const schema = { type: 'object', additionalProperties: false, required: ['ok', 'score', 'issues', 'fixWish'], properties: {
     ok: { type: 'boolean' }, score: { type: 'integer' }, issues: { type: 'array', items: { type: 'string' } }, fixWish: { type: 'string' } } };
-  const o = await cutCall([{ type: 'text', text }, vision.asImage(sheetFile)], schema, { effort: 'medium' });
+  // Ohne Bildverständnis (lokales Textmodell) ist eine Bild-Prüfung sinnlos → nur die technische Prüfung zählt
+  if (llm.modeOf('pruefung') !== 'claude' && llm.ready() && !(await llm.visionAvailable())) return null;
+  const o = await cutCall([{ type: 'text', text }, vision.asImage(sheetFile)], schema, { effort: 'medium', task: 'pruefung' });
   return { ok: !!o.ok, score: Math.max(1, Math.min(10, Math.round(Number(o.score) || 0))) || null,
     issues: (o.issues || []).slice(0, 6).map((x) => String(x).slice(0, 160)), fixWish: String(o.fixWish || '').slice(0, 400) };
 }
@@ -592,7 +595,7 @@ export async function chooseSummary(v, parts, segs, target, profile, wish = '') 
       toSentence: { type: 'integer', description: 'letzter Satz (S…), 0 ohne Sprache' },
       start: { type: 'number', description: 'Start in Sekunden ab Videoanfang' },
       end: { type: 'number', description: 'Ende in Sekunden ab Videoanfang' } } } } } };
-  const out = await cutCall(content, schemaS);
+  const out = await cutCall(content, schemaS, { task: 'schnitt' });
   const picked = [];
   for (const x of out.parts || []) {
     const k = parts[x.part - 1];
@@ -616,7 +619,7 @@ const queue = [];
 let running = false;
 
 export function enqueue(v, extra = '') {
-  if (!cfg().apiKey) throw new Error('Kein Claude-API-Schlüssel eingetragen (Einstellungen → Claude).');
+  if (!canAsk('texte')) throw new Error('Kein Claude-API-Schlüssel und keine lokale KI eingerichtet (Einstellungen).');
   if (['queued', 'running'].includes(v.ai?.state)) return;
   v.ai = { ...(v.ai || {}), state: 'queued', error: '' };
   queue.push({ id: v.id, extra });
@@ -644,7 +647,7 @@ async function next() {
 // Neue geschnittene Videos automatisch vorschlagen lassen (nur einmal je Video).
 export function autoQueue() {
   const c = cfg();
-  if (!c.apiKey || !c.auto) return;
+  if (!canAsk('texte') || !c.auto) return;
   for (const v of Object.values(db().videos)) {
     if (v.folder === 'geschnitten' && !v.missing && v.duration != null && !v.ai) enqueue(v);
   }
@@ -672,21 +675,13 @@ export async function coach(profileId) {
       description: '5 persönliche Tipps, nach Wirkung sortiert (Hook, Rhythmus, Themen, Aufnahme, Titel/Titelbild, Regelmäßigkeit, Community)' },
     ideas: { type: 'array', items: { type: 'string' }, description: '3–5 konkrete Ideen für nächste Videos/Shorts, die zu seinem Stil passen' },
   } };
-  let r;
-  try {
-    r = await api().beta.messages.create({ model: MODEL, max_tokens: 8000, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: schemaC } },
-      messages: [{ role: 'user', content: [
+  const r = await ask('coach', [{ type: 'text', text: [
         `Du bist ein erfahrener, ehrlicher Coach für Kurzvideos und YouTube. Der Creator Michael (Deutsch, Du-Form) will mit dem Kanal „${prof.name}“ mehr Reichweite.`,
         `Kanal: ${prof.aiStyle || ''}`, prof.clipHints ? `Worauf er Wert legt: ${prof.clipHints}` : '',
         'Schau dir seine letzten Videos an und gib ihm persönliche, konkrete Tipps – keine Allgemeinplätze. Sei ehrlich, aber motivierend.',
         examplesFor(prof) || 'Zahlen zu Aufrufen liegen noch nicht vor; stütze dich auf Inhalte, Titel und die Viral-Einschätzungen.', '', 'Letzte Videos:', lines,
-      ].filter(Boolean).join('\n') }] });
-  } catch (e) { throw new Error(friendly(e)); }
-  if (r.stop_reason === 'refusal') throw new Error('abgelehnt');
-  const out = JSON.parse(r.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
-  const cost = (r.usage?.input_tokens || 0) * PRICE.input + (r.usage?.output_tokens || 0) * PRICE.output;
-  const a = cfg(); a.spent = Math.round(((a.spent || 0) + cost) * 10000) / 10000; a.count = (a.count || 0) + 1;
+      ].filter(Boolean).join('\n') }], schemaC, { effort: 'medium', maxTokens: 8000 });
+  const out = r.out, cost = r.cost;
   db().coach = { ...(db().coach || {}), [prof.id]: { at: new Date().toISOString(), videos: vids.length, cost: Math.round(cost * 10000) / 10000, ...out } };
   saveNow();
   return db().coach[prof.id];
@@ -695,7 +690,7 @@ export async function coach(profileId) {
 // Spiel/Thema für ältere Videos nachträglich bestimmen (für die Ordnung): je Video Titel, Datei, Inhalt, Gesprochenes;
 // ohne jeden Text ein Standbild. Ein Aufruf je 20 Videos → items [{id, game}] (leer = unklar).
 export async function detectTopics(list, onProgress = () => {}) {
-  if (!cfg().apiKey) throw new Error('Für die Themen-Erkennung braucht es den Claude-Schlüssel (Einstellungen).');
+  if (!canAsk('themen')) throw new Error('Für die Themen-Erkennung braucht es den Claude-Schlüssel oder die lokale KI (Einstellungen).');
   const known = [...new Set(Object.values(db().videos).map((v) => v.orgTopic || v.ai?.game).filter(Boolean))].slice(0, 60);
   const out = {};
   let cost = 0;
@@ -721,18 +716,11 @@ export async function detectTopics(list, onProgress = () => {}) {
     const schemaT = { type: 'object', additionalProperties: false, required: ['items'], properties: { items: { type: 'array', items: {
       type: 'object', additionalProperties: false, required: ['id', 'game'], properties: { id: { type: 'string', enum: batch.map((v) => v.id) }, game: { type: 'string' } } } } } };
     let r;
-    try {
-      r = await api().beta.messages.create({ model: MODEL, max_tokens: 4000, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
-        output_config: { effort: 'low', format: { type: 'json_schema', schema: schemaT } }, messages: [{ role: 'user', content }] });
-    } catch (e) { throw new Error(friendly(e)); }
-    if (r.stop_reason !== 'refusal') {
-      const j = JSON.parse(r.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
-      for (const x of j.items || []) if (x.game?.trim()) { out[x.id] = x.game.trim().slice(0, 60); if (!known.includes(out[x.id])) known.push(out[x.id]); }
-    }
-    cost += (r.usage?.input_tokens || 0) * PRICE.input + (r.usage?.output_tokens || 0) * PRICE.output;
+    try { r = await ask('themen', content, schemaT, { effort: 'low', maxTokens: 4000 }); } catch (e) { if (e.message === 'abgelehnt') continue; throw e; }
+    for (const x of r.out.items || []) if (batch.some((v) => v.id === x.id) && x.game?.trim()) { out[x.id] = x.game.trim().slice(0, 60); if (!known.includes(out[x.id])) known.push(out[x.id]); }
+    cost += r.cost;
     onProgress(Math.min(list.length, i + 20), list.length);
   }
-  const a = cfg(); a.spent = Math.round(((a.spent || 0) + cost) * 10000) / 10000; a.count = (a.count || 0) + 1;
   saveNow();
   return { topics: out, cost };
 }
@@ -803,7 +791,7 @@ export async function reviseShort(raw, out, wish, segs, profile, { minLen = 15, 
       viralWhy: { type: 'string' },
       viralTip: { type: 'string' },
     } };
-  const o = await cutCall(content, schema);
+  const { out: o, vision: sawImages } = await ask('ueberarbeiten', content, schema);
   const bySent = bounds.fromSentences(sents, o.fromSentence, o.toSentence);
   const okSent = bySent && bySent.start >= from - 5 && bySent.end <= to + 5 && bySent.end - bySent.start <= maxLen + 20;
   let start = okSent ? bySent.start : Math.max(from, Math.min(to - minLen, Number(o.start)));
@@ -815,7 +803,7 @@ export async function reviseShort(raw, out, wish, segs, profile, { minLen = 15, 
     hook: o.hook ? { mode: o.hook.mode, at: Number(o.hook.at), len: Number(o.hook.len), text: String(o.hook.text || '').slice(0, 60) } : null,
     tempo: fx.TEMPO[o.tempo] !== undefined ? o.tempo : 'normal', music: !!o.music, changes: String(o.changes || '').slice(0, 500),
     viral: Math.max(1, Math.min(10, Math.round(Number(o.viral) || 0))) || undefined, viralWhy: String(o.viralWhy || '').slice(0, 300), viralTip: String(o.viralTip || '').slice(0, 300),
-    fx: Array.isArray(o.fx) ? o.fx.slice(0, 15) : [], fxLevel: fxLevelOf(profile, wish), layoutRaw: o.layout && typeof o.layout === 'object' ? o.layout : null, text: parseText(o.text) };
+    fx: Array.isArray(o.fx) ? o.fx.slice(0, 15) : [], fxLevel: fxLevelOf(profile, wish), layoutRaw: sawImages && o.layout && typeof o.layout === 'object' ? o.layout : null, text: parseText(o.text) };
 }
 
 // Effekt-Stufe des Kanals; „mehr/weniger Effekte“ im Überarbeitungswunsch verschiebt sie um eine Stufe
@@ -904,7 +892,7 @@ export async function reviseLong(raw, out, wish, segs, loud, profile) {
       title: { type: 'string', description: 'Titel (höchstens 100 Zeichen)' },
       changes: { type: 'string', description: 'Ein bis zwei Sätze auf Deutsch (Du-Form an den Creator): was du geändert hast und warum, mit neuer Länge' },
     } };
-  const o = await cutCall(content, schema);
+  const o = await cutCall(content, schema, { task: 'ueberarbeiten' });
   // Abschnitte prüfen: in der Aufnahme, sortiert, zusammengeführt, mind. 3 s
   const segsOut = [];
   for (const x of (o.segments || []).map((x) => { const b = bySentences && bounds.fromSentences(sents, x.fromSentence, x.toSentence); return b ? [b.start, b.end] : [Math.max(0, Number(x.start)), Math.min(dur, Number(x.end))]; })

@@ -101,7 +101,8 @@ export function hello(b = {}) {
     c.paused = b.paused;
   }
   save();
-  return { model: c.model, analyse: c.analyse !== false, ocrLang: 'de,en', ...releaseStatus(), gaming: { enabled: c.pauseGaming !== false, gpuLoad: c.gpuLoad || 25, games: c.games || [] } };
+  const L = db().llm || {};
+  return { model: c.model, analyse: c.analyse !== false, ocrLang: 'de,en', llm: { enabled: !!L.pc?.enabled, model: L.pc?.model || '' }, ...releaseStatus(), gaming: { enabled: c.pauseGaming !== false, gpuLoad: c.gpuLoad || 25, games: c.games || [] } };
 }
 
 // Auftrag an den Helfer geben → Promise mit dem Whisper-JSON. Bricht ab (reject), wenn der Helfer verschwindet.

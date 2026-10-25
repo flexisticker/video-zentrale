@@ -12,7 +12,7 @@ param([switch]$Install, [switch]$Uninstall, [string]$Release = '')
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # macht Downloads in Windows PowerShell deutlich schneller
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$Version = '1.8'
+$Version = '1.9'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ConfigFile = Join-Path $Here 'rechenhelfer.json'
 $Home2 = if ($env:VZ_HELPER_HOME) { $env:VZ_HELPER_HOME } else { Join-Path $env:LOCALAPPDATA 'VideoZentrale-Rechenhelfer' }
@@ -228,6 +228,64 @@ function Ensure-Python {
     return $false
   }
 }
+# ---------- Ollama (lokale KI) auf dem PC – nur wenn in der Zentrale eingeschaltet (Einstellungen → Lokale KI) ----------
+# Eigene Kopie im Ordner des Rechenhelfers (Port 11435, Modelle in ollama-modelle) – stört ein evtl. installiertes Ollama nicht.
+$OllamaDir = Join-Path $Home2 'ollama'
+$OllamaUrl = 'http://127.0.0.1:11435'
+$WantLlm = $false; $LlmModel = ''; $LlmReady = ''; $LastLlmTry = [DateTime]::MinValue; $OllamaProc = $null
+function Start-Ollama {
+  if ($script:OllamaProc -and -not $script:OllamaProc.HasExited) { return }
+  $exe = if ($env:VZ_OLLAMA_EXE) { $env:VZ_OLLAMA_EXE } else { Join-Path $OllamaDir 'ollama.exe' }
+  $env:OLLAMA_HOST = '127.0.0.1:11435'; $env:OLLAMA_MODELS = Join-Path $Home2 'ollama-modelle'; $env:OLLAMA_KEEP_ALIVE = '2m'
+  $sp = @{ FilePath = $exe; ArgumentList = @('serve'); PassThru = $true; RedirectStandardOutput = (Join-Path $Home2 'ollama.log'); RedirectStandardError = (Join-Path $Home2 'ollama-fehler.log') }
+  if (-not $IsLinux) { $sp.WindowStyle = 'Hidden' }
+  $script:OllamaProc = Start-Process @sp
+  for ($i = 0; $i -lt 40; $i++) { try { Invoke-RestMethod -Uri "$OllamaUrl/api/version" -TimeoutSec 3 | Out-Null; return } catch { Start-Sleep 1 } }
+  throw 'Ollama startet nicht (siehe ollama-fehler.log)'
+}
+# Beenden gibt den Grafikspeicher frei (beim Zocken)
+function Stop-Ollama {
+  if ($script:OllamaProc -and -not $script:OllamaProc.HasExited) { Stop-Process -Id $script:OllamaProc.Id -Force -ErrorAction SilentlyContinue }
+  Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($OllamaDir) } | Stop-Process -Force -ErrorAction SilentlyContinue
+  $script:OllamaProc = $null
+}
+function Ensure-Ollama {
+  $script:LastLlmTry = Get-Date
+  try {
+    $exe = Join-Path $OllamaDir 'ollama.exe'
+    if (-not $env:VZ_OLLAMA_EXE -and -not (Test-Path $exe)) {
+      Log 'Richte Ollama (lokale KI) ein – einmalig ca. 1,6 GB …'
+      Say-Hello 'lädt Ollama (einmalig)'
+      $zip = Join-Path $Home2 'ollama.zip'
+      Get-Download 'https://github.com/ollama/ollama/releases/latest/download/ollama-windows-amd64.zip' $zip 'Ollama'
+      Expand-Archive -Path $zip -DestinationPath $OllamaDir -Force; Remove-Item $zip -Force
+    }
+    Start-Ollama
+    $tags = Invoke-RestMethod -Uri "$OllamaUrl/api/tags" -TimeoutSec 15
+    $has = @($tags.models | ForEach-Object { $_.name }) | Where-Object { $_ -eq $LlmModel -or $_ -eq "$($LlmModel):latest" }
+    if (-not $has) {
+      Log "Lade KI-Modell $LlmModel (einmalig, mehrere GB) …"
+      Say-Hello "lädt KI-Modell $LlmModel (einmalig)"
+      $body = [Text.Encoding]::UTF8.GetBytes((@{ model = $LlmModel; stream = $false } | ConvertTo-Json -Compress))
+      Invoke-RestMethod -Uri "$OllamaUrl/api/pull" -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 21600 | Out-Null
+    }
+    $script:LlmReady = $LlmModel
+    Log "Lokale KI bereit (Ollama, Modell $LlmModel)."
+    Stop-Ollama
+    return $true
+  } catch {
+    Log "Lokale KI nicht eingerichtet: $($_.Exception.Message) – neuer Versuch in 30 Minuten."
+    Stop-Ollama
+    return $false
+  }
+}
+function Update-Caps {
+  $c = @('whisper')
+  if ($WantAnalyse -and ((Test-Path $PyMarker) -or $env:VZ_PYTHON)) { $c += @('analyse', 'faces') }
+  if ($WantLlm -and $LlmReady -and $LlmReady -eq $LlmModel) { $c += 'llm' }
+  $script:Caps = $c
+}
+
 function Say-Hello($status, $paused = $false) {
   $script:Status = $status
   try {
@@ -235,6 +293,7 @@ function Say-Hello($status, $paused = $false) {
       -Body ([Text.Encoding]::UTF8.GetBytes((@{ name = $Pc; gpu = $gpu; version = $Version; status = $status; paused = [bool]$paused; caps = $script:Caps } | ConvertTo-Json -Compress)))
     if ($r.gaming) { $script:Gaming = $r.gaming }
     if ($null -ne $r.analyse) { $script:WantAnalyse = [bool]$r.analyse }
+    if ($r.llm) { $script:WantLlm = [bool]$r.llm.enabled; if ($r.llm.model) { $script:LlmModel = [string]$r.llm.model } }
   } catch { Log "Zentrale nicht erreichbar: $($_.Exception.Message)" }
 }
 
@@ -276,7 +335,8 @@ try {
   $hi = Invoke-RestMethod -Uri "$Base/api/helper/hello" -Method Post -Headers $Headers -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes('{"status":"startet"}')) -TimeoutSec 30
   if ($hi.model) { Say-Hello "lädt Modell $($hi.model)"; [void](Get-Model $hi.model) }
 } catch { Log "Modell vorab laden ging nicht: $($_.Exception.Message)" }
-if ($WantAnalyse -and (Ensure-Python)) { $Caps = @('whisper', 'analyse', 'faces') }
+if ($WantAnalyse) { [void](Ensure-Python) }
+Update-Caps
 Say-Hello 'bereit'
 Log "Verbunden mit $Base – warte auf Aufträge (Fenster offen lassen bzw. minimieren)."
 $Analyse = Join-Path $Here 'analyse.py'
@@ -292,6 +352,34 @@ function Wait-Proc($proc, $onTick) {
     if ($Gaming.enabled -and ($obs -or $game)) { Stop-Process -Id $proc.Id -Force; return $(if ($obs) { 'OBS gestartet' } else { "$game gestartet" }) }
   }
   return $null
+}
+
+# Lokale KI: Anfrage (Ollama-/api/chat-JSON) holen, mit curl an das eigene Ollama schicken (abbrechbar beim Zocken), Antwort zurück
+function Run-Llm($job) {
+  $dir = Join-Path (Join-Path $Home2 'tmp') $job.id
+  New-Item -ItemType Directory -Force -Path $dir | Out-Null
+  try {
+    $req = Join-Path $dir 'anfrage.json'; $res = Join-Path $dir 'antwort.json'
+    Invoke-WebRequest -Uri "$Base/api/helper/job/$($job.id)/file/request" -Headers $Headers -OutFile $req -UseBasicParsing
+    Say-Hello 'lokale KI denkt …'
+    Start-Ollama
+    $curl = if ($IsLinux) { 'curl' } else { "$env:SystemRoot\System32\curl.exe" }
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    $sp = @{ FilePath = $curl; ArgumentList = @('-s', '-S', '--max-time', '2700', '-X', 'POST', '-H', '"Content-Type: application/json"', '--data-binary', "`"@$req`"", '-o', "`"$res`"", "$OllamaUrl/api/chat"); PassThru = $true }
+    if (-not $IsLinux) { $sp.WindowStyle = 'Hidden' }
+    $proc = Start-Process @sp
+    $null = $proc.Handle
+    $stopped = Wait-Proc $proc $null
+    if ($stopped) { Stop-Ollama; throw "abgebrochen – $stopped (Grafikkarte freigegeben)" }
+    if ($proc.ExitCode -ne 0 -or -not (Test-Path $res)) { throw "Ollama-Anfrage gescheitert (curl Code $($proc.ExitCode))" }
+    $bytes = [IO.File]::ReadAllBytes($res)
+    $txt = [Text.Encoding]::UTF8.GetString($bytes)
+    if ($txt -match '^\s*\{\s*"error"') { throw "Ollama: $txt" }
+    Invoke-RestMethod -Uri "$Base/api/helper/job/$($job.id)/result" -Method Post -Headers $Headers -ContentType 'application/json; charset=utf-8' -Body $bytes -TimeoutSec 120 | Out-Null
+    Log ("Lokale KI fertig in {0:N0} s." -f $sw.Elapsed.TotalSeconds)
+  } finally {
+    Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
+  }
 }
 
 # PC-Analyse: Ton + Bilder holen, analyse.py rechnen lassen, Stimme hochladen, Ergebnis schicken
@@ -342,18 +430,29 @@ while ($true) {
   try {
     $why = Get-GamingReason
     if ($why) {
-      if ($Status -notlike 'pausiert*') { Log "Pause – $why. Die Zentrale rechnet solange selbst." }
+      if ($Status -notlike 'pausiert*') { Log "Pause – $why. Die Zentrale rechnet solange selbst."; Stop-Ollama }
       Say-Hello "pausiert ($why)" $true
       Start-Sleep 15
       continue
     }
     if ($Status -like 'pausiert*') { Log 'Weiter – Grafikkarte wieder frei.' }
     if ($WantAnalyse -and $Caps -notcontains 'analyse' -and ((Get-Date) - $LastPyTry).TotalMinutes -ge 30) {
-      if (Ensure-Python) { $Caps = @('whisper', 'analyse', 'faces') }
+      [void](Ensure-Python)
     }
+    if ($WantLlm -and $LlmModel -and $LlmReady -ne $LlmModel -and ((Get-Date) - $LastLlmTry).TotalMinutes -ge 30) { [void](Ensure-Ollama) }
+    Update-Caps
     Say-Hello 'bereit'
     $job = Invoke-RestMethod -Uri "$Base/api/helper/next?caps=$($Caps -join ',')" -Headers $Headers -TimeoutSec 40
     if (-not $job -or -not $job.id) { continue }
+    if ($job.kind -eq 'llm') {
+      Log "Auftrag $($job.id): lokale KI ($($job.params.model)) …"
+      try { Run-Llm $job }
+      catch {
+        Log "Fehler: $($_.Exception.Message)"
+        try { Send-Json "/api/helper/job/$($job.id)/error" @{ message = $_.Exception.Message } } catch { }
+      }
+      continue
+    }
     if ($job.kind -eq 'analyse') {
       Log "Auftrag $($job.id): PC-Analyse (Stimme trennen, Geräusche, Spieltexte) …"
       try { Run-Analyse $job }

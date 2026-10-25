@@ -133,7 +133,7 @@ async function plan(t, cands, profile) {
     title: { type: 'string' }, tagline: { type: 'string' }, outro: { type: 'string' },
     moments: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['moment', 'fromSentence', 'toSentence', 'start', 'end', 'text'], properties: {
       moment: { type: 'integer' }, fromSentence: { type: 'integer' }, toSentence: { type: 'integer' }, start: { type: 'number' }, end: { type: 'number' }, text: { type: 'string' } } } } } };
-  const o = await ai.cutCall(content, schema);
+  const o = await ai.cutCall(content, schema, { task: 'trailer' });
   const segs = [];
   let total = 0;
   for (const m of o.moments || []) {
@@ -354,7 +354,7 @@ export async function runJob(id) {
     if (!cands.length) throw new Error('Keine Shorts gefunden.');
     step('Claude stellt die Highlights zusammen');
     let p;
-    if (db().ai.apiKey) {
+    if (ai.canAsk('trailer')) {
       try { p = await plan(t, cands, profile); } catch (e) { t.warning = 'Claude: ' + e.message + ' – nach Punkten zusammengestellt.'; }
     }
     if (!p?.segs?.length) p = planSimple(t, cands);

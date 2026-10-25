@@ -53,7 +53,7 @@ export async function check(nv, filePath, info = {}) {
     const m = await machine(filePath, { duration: info.duration, freezes: info.freezes || 0 });
     res.issues.push(...m.issues); res.lufs = m.lufs;
   } catch (e) { res.issues.push('Prüfung: ' + e.message); }
-  if (db().ai.apiKey && db().ai.qc !== false) {
+  if (ai.canAsk('pruefung') && db().ai.qc !== false) {
     fs.mkdirSync(TMP, { recursive: true });
     const sheet = path.join(TMP, `${nv.id}-qc.jpg`);
     try {
@@ -61,9 +61,9 @@ export async function check(nv, filePath, info = {}) {
       const ok = await vision.contactSheet(filePath, 0, Math.max(1, (info.duration || nv.duration || 30) - 0.2), sheet, { cols: 4, rows: 3, vertical, tile: vertical ? 200 : 320 });
       if (ok) {
         const r = await ai.reviewClip(sheet, { ...info, machine: res.issues });
-        res.score = r.score; res.ok = r.ok; res.fixWish = r.fixWish; res.issues.push(...r.issues);
+        if (r) { res.score = r.score; res.ok = r.ok; res.fixWish = r.fixWish; res.issues.push(...r.issues); }
       }
-    } catch (e) { res.issues.push('Claude-Prüfung: ' + e.message); }
+    } catch (e) { res.issues.push('KI-Prüfung: ' + e.message); }
     finally { fs.rmSync(sheet, { force: true }); }
   }
   if (res.issues.length && res.ok && res.issues.some((x) => /schwarz|eingefroren|übersteuert|Länge/.test(x))) res.ok = false;

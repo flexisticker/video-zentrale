@@ -388,3 +388,10 @@ a.statrow:hover { outline: 1px solid var(--line, rgba(255,255,255,.15)); }
 .cambox .h.sw { left: -10px; bottom: -10px; cursor: nesw-resize; } .cambox .h.se { right: -10px; bottom: -10px; cursor: nwse-resize; }
 .focusline { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed #ffe14d; pointer-events: none; }
 @media (pointer: coarse) { .cambox .h { width: 26px; height: 26px; } .cambox .h.nw, .cambox .h.sw { left: -14px; } .cambox .h.ne, .cambox .h.se { right: -14px; } .cambox .h.nw, .cambox .h.ne { top: -14px; } .cambox .h.sw, .cambox .h.se { bottom: -14px; } }
+
+/* Lokale KI: Aufgaben-Tabelle */
+.llmtable { width: 100%; border-collapse: collapse; font-size: 13px; }
+.llmtable td { padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.llmtable select { min-width: 170px; }
+.table-wrap { overflow-x: auto; }
+.settings > .box { min-width: 0; }

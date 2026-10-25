@@ -390,6 +390,23 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
     Claude-Wahl + Emoji am Schlüsselwort, Stil nachträglich, Facecam aus Gesicht (±2 px an der Kante), Wechsel bei 95 s nahtlos, Editor + gemerkte Szene, 390 px,
     Schnitt ohne Analyse und Überarbeitung unverändert. **Nicht getestet:** echte Gesichter/Licht/Facecam-Rahmen beim Kunden, TikTok-Cover-Feld echt,
     Titelbild-Frame bei echten YouTube-Shorts (ob YouTube das erste Bild als Vorschau nimmt), Stile in echten Browsern (H.264-Vorschau), analyse.py mit echtem PyTorch.
+- 1.31.0 (25.10.2026): **Lokale KI (Ollama)** – Kunde: Claude-Kosten zu hoch. Ollama läuft beim Kunden als Docker auf Unraid (`http://192.168.1.10:11434`,
+  **nur Prozessor/Xeon**, Modell `qwen2.5:7b-instruct` = reines Textmodell; eingerichtet für die Protokoll-App `flexisticker/MLZ-Protokoll`, dort `server/assist.js`).
+  `server/llm.js`: Aufgaben `TASKS` (texte, pruefung, themen, coach, scout, schnitt, ueberarbeiten, trailer), Modus je Aufgabe `claude|auto|lokal`
+  (Standard: kleine Aufgaben auto, schnitt/ueberarbeiten/trailer claude; ohne Adresse/PC immer Claude), `db().llm {url, model, ctx, pc {enabled, model}, tasks, stats}`.
+  `chat()`: Anthropic-content → Ollama `/api/chat` (format = JSON-Schema, num_ctx, Bilder nur bei Bildverständnis – `/api/show` capabilities bzw. Name, max. 6),
+  `fit()` kürzt (Abschriften: markierte Zeilen behalten, Rest gleichmäßig ausdünnen), Pflichtfelder prüfen + 1 Wiederholung, Statistik je Aufgabe/Ort (gespart = Tokens × Claude-Preis).
+  **PC**: wenn `pc.enabled` und Helfer `canNow('llm')` → Auftrag `llm` über den Rechenhelfer (Anfrage als Datei `request`). ai.js: **`ask(task, content, schema, {effort, maxTokens})`**
+  ersetzt alle direkten Claude-Aufrufe (`cutCall` = Hülle), `canAsk(task)` statt `apiKey`-Prüfungen (autocut, qc, trailer, Vorschlag-Warteschlange). Ohne Bilder: `layoutRaw` wird
+  verworfen (Facecam aus Gesichtern/Standard), Bild-Prüfung (`reviewClip`) entfällt (`llm.visionAvailable`). `v.ai.engine`. Routen `GET/POST /api/llm`, `POST /api/llm/test`.
+  UI Einstellungen → „🏠 Lokale KI“ (`#s-lokal`, Tabelle je Aufgabe mit Kosten/Ersparnis). CSS: `.settings > .box { min-width: 0 }` (Tabelle schob sonst die Seite am Handy).
+  **Rechenhelfer 1.9**: `Ensure-Ollama` (Zip `ollama-windows-amd64.zip` von GitHub latest, 1,6 GB, nach `ollama/`; `OLLAMA_HOST=127.0.0.1:11435`, `OLLAMA_MODELS=ollama-modelle`,
+  `/api/pull` des PC-Modells), danach Ollama wieder beenden; `Update-Caps` (llm nur wenn Modell bereit); `Run-Llm` (Anfrage holen, `curl.exe` als Prozess → per `Wait-Proc` abbrechbar beim
+  Zocken, Antwort roh an `/result`); Pause beim Zocken → `Stop-Ollama` (Grafikspeicher frei). hello liefert `llm {enabled, model}`. Test-Schalter `VZ_OLLAMA_EXE`.
+  Test: `test/mock-ollama.js [port] [modelle…]` (füllt das Schema, `/api/log`). Getestet: Schnitt + Späher + Texte über Server-Ollama (Claude-Kosten unverändert), Rückfall auf Claude bei
+  Ollama-Ausfall, Kürzen bei 4k-Kontext (119 von 900 Zeilen, Lacher-Zeile drin), PC-Weg über pwsh-Helfer (6 Bilder), Überarbeiten lokal, 390 px. **Nicht getestet:** echtes Ollama/Qwen
+  (Qualität der Clip-Auswahl, Dauer auf dem Xeon – vermutlich Minuten je Aufruf), echtes Windows-Ollama-Zip/CUDA auf der RTX 3070, qwen2.5vl:7b mit 16k Kontext in 8 GB.
+  **Merke (wieder passiert):** nie `pkill -f` mit einem Muster, das in der eigenen Befehlszeile steht – beendet die eigene Shell. PIDs aus Dateien bzw. `ps` nehmen.
 - Ideen danach: „Best of der Woche“ automatisch (Zeitplan), Platz-Einblendungen „Platz 3/2/1“.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
   Sendeplätze je Kanal **stellt der Kunde selbst ein** (keine festen Startzeiten), „Einplanen“ auf nächsten freien Platz, Shorts
