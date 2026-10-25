@@ -1,5 +1,8 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.32.2', date: '25.10.2026', items: [
+    'Ausgabenlimit im Anthropic-Konto erreicht („You have reached your specified API usage limits“): Die Zentrale erkennt das jetzt, fragt Claude bis zum genannten Termin nicht mehr und lässt alles die lokale KI rechnen. Verständliche Meldung statt englischem Fehlertext.',
+  ] },
   { version: '1.32.1', date: '25.10.2026', items: [
     'KI-Vorschlag: leere bzw. kaputte Standbilder werden nicht mehr mitgeschickt; lehnt Claude ein Bild ab, versucht die Zentrale es einmal ohne Bilder. Die genaue Claude-Meldung steht jetzt im Protokoll des Containers.',
   ] },

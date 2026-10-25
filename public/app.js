@@ -2030,7 +2030,7 @@ async function renderSettings() {
   const aHints = h('textarea', { rows: 3, value: a.hints, placeholder: 'z. B. „Ich heiße Micha“, „keine Emojis im Titel“, „immer auf Deutsch“' });
   const claudeBox = h('div', { class: 'box' }, h('h3', {}, '✨ KI-Einstellungen & Claude-Zugang'),
     a.configured ? h('p', { class: 'ok-text' }, '✓ eingerichtet · bisher ' + a.count + ' Vorschläge, ca. ' + (a.spent || 0).toFixed(2).replace('.', ',') + ' $') : null,
-    a.blocked ? h('div', { class: 'alert-line' }, `⛔ Claude gesperrt seit ${fmtDate(a.blocked.at)}: ${a.blocked.reason} Alle KI-Aufgaben laufen solange lokal (Ollama). Nach 6 Stunden versucht es die Zentrale von selbst wieder.`,
+    a.blocked ? h('div', { class: 'alert-line' }, `⛔ Claude gesperrt seit ${fmtDate(a.blocked.at)}: ${a.blocked.reason} Alle KI-Aufgaben laufen solange lokal (Ollama). ${a.blocked.until ? `Ab ${fmtDate(a.blocked.until)} versucht es die Zentrale von selbst wieder.` : 'Nach 6 Stunden versucht es die Zentrale von selbst wieder.'}`,
       h('button', { class: 'btn small', style: { marginLeft: '8px' }, onclick: run(() => api('POST', '/api/ai/config', { unblock: true }), 'Claude wird wieder versucht.') }, 'Guthaben aufgeladen – wieder versuchen')) : null,
     h('ol', { class: 'steps' },
       h('li', {}, 'console.anthropic.com: Konto anlegen, unter Billing Guthaben aufladen (z. B. 5 $; eigene Abrechnung, nicht im Claude-Abo enthalten).'),

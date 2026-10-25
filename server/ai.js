@@ -62,8 +62,14 @@ export const cutEffort = () => (CUT_EFFORTS.includes(cfg().cutEffort) ? cfg().cu
 // Claude gesperrt (kein Guthaben, Schlüssel ungültig/ohne Rechte)? → 6 Stunden lang gar nicht erst fragen, alles lokal
 const BLOCK_MS = 6 * 3600_000;
 const isBlockErr = (e) => e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError
-  || (e instanceof Anthropic.BadRequestError && /credit|balance|billing/i.test(e.message));
-export function claudeBlocked() { const b = cfg().blocked; return b?.at && Date.now() - Date.parse(b.at) < BLOCK_MS ? b : null; }
+  || (e instanceof Anthropic.BadRequestError && /credit|balance|billing|usage limit|spend(ing)? limit/i.test(e.message));
+// „You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC.“ → bis dahin gesperrt
+const limitUntil = (msg) => { const m = /regain access on (\d{4}-\d{2}-\d{2})(?: at (\d{2}:\d{2}))?/i.exec(String(msg)); const t = m && Date.parse(`${m[1]}T${m[2] || '00:00'}:00Z`); return t ? new Date(t).toISOString() : null; };
+export function claudeBlocked() {
+  const b = cfg().blocked;
+  if (!b?.at) return null;
+  return (b.until ? Date.now() < Date.parse(b.until) : Date.now() - Date.parse(b.at) < BLOCK_MS) ? b : null;
+}
 export function unblockClaude() { delete cfg().blocked; saveNow(); }
 const claudeUsable = () => !!cfg().apiKey && !claudeBlocked();
 // Läuft diese Aufgabe gerade zuerst lokal?
@@ -106,7 +112,7 @@ export async function ask(task, content, schema, { effort, maxTokens = 64000 } =
     if (e instanceof Anthropic.BadRequestError) console.warn(`[ki] Claude 400 bei „${task}“:`, e.message);
     const msg = friendly(e);
     if (isBlockErr(e)) {
-      cfg().blocked = { at: new Date().toISOString(), reason: msg }; saveNow();
+      cfg().blocked = { at: new Date().toISOString(), reason: msg, ...(limitUntil(e.message) ? { until: limitUntil(e.message) } : {}) }; saveNow();
       if (llm.ready() && !localErr && mode !== 'nurclaude') { try { return await local('Claude gesperrt'); } catch (x) { throw new Error(msg + ' Lokale KI: ' + x.message); } }
     }
     return viaLocal(msg);
@@ -291,6 +297,12 @@ function friendly(e) {
   if (e instanceof Anthropic.PermissionDeniedError) return 'Der API-Schlüssel darf dieses Modell nicht nutzen.';
   if (e instanceof Anthropic.RateLimitError) return 'Claude ist gerade ausgelastet bzw. Limit erreicht – später erneut versuchen.';
   if (e instanceof Anthropic.BadRequestError && /credit|balance/i.test(e.message)) { credits.flag('claude', 'Claude: Guthaben im Anthropic-Konto aufgebraucht.'); return 'Kein Guthaben mehr im Anthropic-Konto (console.anthropic.com → Billing).'; }
+  if (e instanceof Anthropic.BadRequestError && /usage limit|spend(ing)? limit/i.test(e.message)) {
+    const u = limitUntil(e.message);
+    credits.flag('claude', 'Claude: Ausgabenlimit im Anthropic-Konto erreicht.');
+    return 'Claude: Dein Ausgabenlimit im Anthropic-Konto ist erreicht' + (u ? ` – wieder frei ab ${new Date(u).toLocaleString('de-DE', { timeZone: 'Europe/Berlin', dateStyle: 'short', timeStyle: 'short' })} Uhr` : '')
+      + ' (Limit änderbar unter console.anthropic.com → Settings → Limits).' + (llm.ready() ? ' Bis dahin rechnet die lokale KI.' : ' Richte die lokale KI ein (Einstellungen → Lokale KI), dann geht es solange ohne Claude weiter.');
+  }
   if (e instanceof Anthropic.BadRequestError) return 'Claude lehnt die Anfrage ab: ' + e.message;
   if (e instanceof Anthropic.APIConnectionError) return 'Keine Verbindung zu Claude (Internet/Firewall des Servers?).';
   if (e instanceof Anthropic.APIError) return `Claude-Fehler ${e.status}: ${e.message}`;
