@@ -12,7 +12,7 @@ param([switch]$Install, [switch]$Uninstall, [string]$Release = '')
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # macht Downloads in Windows PowerShell deutlich schneller
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$Version = '1.9'
+$Version = '1.10'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ConfigFile = Join-Path $Here 'rechenhelfer.json'
 $Home2 = if ($env:VZ_HELPER_HOME) { $env:VZ_HELPER_HOME } else { Join-Path $env:LOCALAPPDATA 'VideoZentrale-Rechenhelfer' }
@@ -249,6 +249,43 @@ function Stop-Ollama {
   Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($OllamaDir) } | Stop-Process -Force -ErrorAction SilentlyContinue
   $script:OllamaProc = $null
 }
+# Modell in Ollama laden – mit Fortschritt (Ollama schickt je Zeile {status, digest, total, completed}).
+# Alle 5 s Stand an die Zentrale (Aktivitätsleiste) und ins Fenster, alle 10 % ins Protokoll.
+function Pull-Model($model) {
+  $req = [Net.HttpWebRequest]::Create("$OllamaUrl/api/pull")
+  $req.Method = 'POST'; $req.ContentType = 'application/json'
+  $req.Timeout = 60000; $req.ReadWriteTimeout = 600000
+  $body = [Text.Encoding]::UTF8.GetBytes((@{ model = $model; stream = $true } | ConvertTo-Json -Compress))
+  $req.ContentLength = $body.Length
+  $rs = $req.GetRequestStream(); $rs.Write($body, 0, $body.Length); $rs.Close()
+  $res = $req.GetResponse()
+  try {
+    $rd = New-Object IO.StreamReader($res.GetResponseStream(), [Text.Encoding]::UTF8)
+    $parts = @{}; $lastShow = [datetime]::MinValue; $lastLog = -10; $t0 = Get-Date; $state = ''
+    while ($null -ne ($line = $rd.ReadLine())) {
+      if (-not $line.Trim()) { continue }
+      $j = $line | ConvertFrom-Json
+      if ($j.error) { throw "Ollama: $($j.error)" }
+      $state = [string]$j.status
+      if ($j.digest -and $j.total) { $parts[[string]$j.digest] = @([double]$j.total, [double]($(if ($j.completed) { $j.completed } else { 0 }))) }
+      if (((Get-Date) - $lastShow).TotalSeconds -lt 5) { continue }
+      $lastShow = Get-Date
+      $total = 0; $done = 0; foreach ($v in $parts.Values) { $total += $v[0]; $done += $v[1] }
+      if ($total -gt 0) {
+        $pct = [Math]::Floor($done * 100 / $total)
+        $sec = [Math]::Max(1, ((Get-Date) - $t0).TotalSeconds); $speed = $done / $sec
+        $rest = if ($speed -gt 0) { [Math]::Ceiling(($total - $done) / $speed / 60) } else { 0 }
+        $txt = "lädt KI-Modell {0}: {1} % ({2:N1} von {3:N1} GB, {4:N1} MB/s{5})" -f $model, $pct, ($done / 1GB), ($total / 1GB), ($speed / 1MB), $(if ($rest -gt 0) { ", noch ca. $rest Min." } else { '' })
+        if ($pct -ge $lastLog + 10) { $lastLog = $pct - ($pct % 10); Log $txt }
+      } else { $txt = "lädt KI-Modell ${model}: $state" }
+      Write-Host "`r$txt      " -NoNewline
+      Say-Hello $txt
+    }
+    Write-Host ''
+    if ($state -ne 'success') { throw "Modell $model unvollständig geladen ($state) – wird später fortgesetzt." }
+    Log "KI-Modell $model geladen."
+  } finally { $res.Close() }
+}
 function Ensure-Ollama {
   $script:LastLlmTry = Get-Date
   try {
@@ -266,8 +303,7 @@ function Ensure-Ollama {
     if (-not $has) {
       Log "Lade KI-Modell $LlmModel (einmalig, mehrere GB) …"
       Say-Hello "lädt KI-Modell $LlmModel (einmalig)"
-      $body = [Text.Encoding]::UTF8.GetBytes((@{ model = $LlmModel; stream = $false } | ConvertTo-Json -Compress))
-      Invoke-RestMethod -Uri "$OllamaUrl/api/pull" -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 21600 | Out-Null
+      Pull-Model $LlmModel
     }
     $script:LlmReady = $LlmModel
     Log "Lokale KI bereit (Ollama, Modell $LlmModel)."

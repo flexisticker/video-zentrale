@@ -1,6 +1,6 @@
 {
   "name": "video-zentrale",
-  "version": "1.32.5",
+  "version": "1.32.6",
   "private": true,
   "description": "Geschnittene Videos mit Titelbild ansehen und für YouTube/TikTok freigeben",
   "type": "module",

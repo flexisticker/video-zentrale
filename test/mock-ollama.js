@@ -41,7 +41,20 @@ http.createServer(async (req, res) => {
   if (req.url === '/api/version') return send(200, { version: '0.40.11-mock' });
   if (req.url === '/api/tags') return send(200, { models: models.map((name) => ({ name })) });
   if (req.url === '/api/show') return models.includes(j.model) ? send(200, { capabilities: /vl|vision/.test(j.model) ? ['completion', 'vision'] : ['completion'] }) : send(404, { error: `model '${j.model}' not found` });
-  if (req.url === '/api/pull') { if (!models.includes(j.model)) models.push(j.model); return send(200, { status: 'success' }); }
+  if (req.url === '/api/pull') {
+    if (j.stream === false) { if (!models.includes(j.model)) models.push(j.model); return send(200, { status: 'success' }); }
+    // wie Ollama: NDJSON-Zeilen mit Fortschritt je Schicht (MOCK_PULL_SECS = Dauer)
+    res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+    const total = 4.7e9, steps = 20, secs = Number(process.env.MOCK_PULL_SECS || 12);
+    res.write(JSON.stringify({ status: 'pulling manifest' }) + '\n');
+    for (let i = 0; i <= steps; i++) {
+      res.write(JSON.stringify({ status: 'pulling abc', digest: 'sha256:abc', total, completed: Math.round(total * i / steps) }) + '\n');
+      await new Promise((r) => setTimeout(r, secs * 1000 / steps));
+    }
+    if (!models.includes(j.model)) models.push(j.model);
+    res.end(JSON.stringify({ status: 'success' }) + '\n');
+    return;
+  }
   if (req.url === '/api/log') return send(200, log);
   if (req.url === '/api/chat') {
     if (!models.includes(j.model)) return send(404, { error: `model '${j.model}' not found` });

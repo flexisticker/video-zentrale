@@ -48,7 +48,7 @@ export const modeOf = (task) => { const m = cfg().tasks[task] || DEFAULT_MODES[t
 
 export function status() {
   const c = cfg();
-  return { url: c.url, model: c.model, ctx: c.ctx, pc: { ...c.pc, ready: pcReady(), helperCan: helper.can('llm') },
+  return { url: c.url, model: c.model, ctx: c.ctx, pc: { ...c.pc, ready: pcReady(), helperCan: helper.can('llm'), helperStatus: helper.status().status || '', helperVersion: helper.status().version || '' },
     tasks: Object.fromEntries(Object.keys(TASKS).map((k) => [k, modeOf(k)])), names: TASKS, presets: Object.fromEntries(Object.entries(PRESETS).map(([k, p]) => [k, p.name])), modeNames: MODE_NAMES, busy: { ...busy }, stats: c.stats, lastError: c.lastError || '', lastAt: c.lastAt || '' };
 }
 export function configure(b = {}) {
@@ -120,7 +120,7 @@ export async function visionAvailable() { return pcReady() ? visionByName(cfg().
 // Verbindung prüfen: Modelle auf dem Server, gewähltes Modell vorhanden?, Bildverständnis, PC-Stand
 export async function test() {
   const c = cfg();
-  const out = { server: null, pc: { enabled: !!c.pc.enabled, ready: pcReady(), helperCan: helper.can('llm'), model: c.pc.model, vision: visionByName(c.pc.model) } };
+  const out = { server: null, pc: { enabled: !!c.pc.enabled, ready: pcReady(), helperCan: helper.can('llm'), helperStatus: helper.status().status || '', helperVersion: helper.status().version || '', model: c.pc.model, vision: visionByName(c.pc.model) } };
   if (c.url) {
     try {
       const j = await ollama(c.url, '/api/tags', null, 8000);

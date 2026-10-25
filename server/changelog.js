@@ -1,5 +1,8 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.32.6', date: '25.10.2026', items: [
+    'Rechenhelfer 1.10: Beim Laden des KI-Modells auf dem PC siehst du jetzt den Fortschritt (Prozent, GB, Geschwindigkeit, Restzeit) – im Fenster des Rechenhelfers, oben in der Aktivitätsleiste und unter Einstellungen → Lokale KI. Rechenhelfer dafür neu herunterladen und einmal „Einrichten“ ausführen.',
+  ] },
   { version: '1.32.5', date: '25.10.2026', items: [
     'Handy: Die Video-Ansicht war auf schmalen Bildschirmen breiter als das Display (man musste seitlich schieben). Lange Knöpfe brechen jetzt um, nichts ragt mehr über den Rand. Das Häkchen „auch die anderen Videos dieser Aufnahme“ sitzt wieder direkt vor dem Text.',
   ] },

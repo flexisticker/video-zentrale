@@ -2082,7 +2082,8 @@ async function renderSettings() {
         h('div', {}, !s ? '– Server: keine Adresse eingetragen' : s.ok ? (s.has ? `✓ Server erreichbar, Modell „${lModel.value}“ vorhanden${s.vision ? ', versteht Bilder' : ' (reines Textmodell – sieht keine Bilder)'}`
           : `⚠ Server erreichbar, aber Modell „${lModel.value}“ fehlt. Vorhanden: ${(s.models || []).join(', ') || 'keine'}`) : '✗ Server: ' + s.error),
         h('div', {}, !t.pc.enabled ? '– PC: aus' : t.pc.ready ? `✓ PC bereit (Modell ${t.pc.model}${t.pc.vision ? ', versteht Bilder' : ''})`
-          : t.pc.helperCan ? '⏸ PC kann es, Grafikkarte gerade nicht freigegeben – dann rechnet der Server' : '⏳ PC: Rechenhelfer 1.9 nötig (neu herunterladen) – richtet Ollama dort beim nächsten Start ein'));
+          : t.pc.helperCan ? '⏸ PC kann es, Grafikkarte gerade nicht freigegeben – dann rechnet der Server' : /lädt|Ollama|KI-Modell/i.test(t.pc.helperStatus || '') ? '⏳ PC: ' + t.pc.helperStatus
+            : '⏳ PC: Rechenhelfer ab 1.9 nötig (neu herunterladen) – richtet Ollama dort beim nächsten Start ein' + (t.pc.helperVersion ? ` (läuft: ${t.pc.helperVersion})` : '')));
     } catch (x) { lTestOut.textContent = '✗ ' + x.message; }
   };
   const llmBox = h('div', { class: 'box' }, h('h3', {}, '🏠 Lokale KI (Ollama) – spart Claude-Kosten'),

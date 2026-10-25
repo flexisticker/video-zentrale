@@ -428,6 +428,10 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
 - 1.32.5: iPhone: Video-Ansicht breiter als der Bildschirm. Ursache: `.detail` am Handy `1fr` (= minmax(auto)) + `.btn` nowrap → längster Knopf bestimmt die Breite
   (nachgestellt bei 300 px: 19 px Überlauf). Jetzt `minmax(0, 1fr)`, `min-width: 0` für Kinder, ≤ 600 px Knöpfe mit Umbruch + `overflow-x: hidden` am Sheet;
   Spiegeln-Häkchen `label.check` (globale Regel `input { width: 100% }` schob es in die Mitte). **Regel: Grid-Spalten am Handy immer `minmax(0, 1fr)`.**
+- 1.32.6: Kunde sah keinen Fortschritt beim Laden des Ollama-Modells auf dem PC (Rechenhelfer 1.9 rief `/api/pull` mit `stream:false` = blockierend,
+  ohne hello → nach 90 s „offline“). Rechenhelfer 1.10: `Pull-Model` (HttpWebRequest, NDJSON je Schicht total/completed, alle 5 s Say-Hello + Fenster, Protokoll je 10 %).
+  `llm.test()`/`status()` liefern `pc.helperStatus/helperVersion` → Einstellungen zeigen den Ladestand. Mock-Ollama streamt `/api/pull` (`MOCK_PULL_SECS`). Getestet mit pwsh + Mock.
+  Rechenhelfer aktualisiert sich nicht selbst → Kunde muss ZIP neu laden.
 - Ideen danach: „Best of der Woche“ automatisch (Zeitplan), Platz-Einblendungen „Platz 3/2/1“.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
   Sendeplätze je Kanal **stellt der Kunde selbst ein** (keine festen Startzeiten), „Einplanen“ auf nächsten freien Platz, Shorts
