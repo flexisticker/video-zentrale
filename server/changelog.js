@@ -1,5 +1,8 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.32.4', date: '25.10.2026', items: [
+    'Ist gerade keine KI erreichbar, steht im Video jetzt genau warum (z. B. „Claude bis 01.11. gesperrt · lokale KI: keine Server-Adresse eingetragen · PC-Grafikkarte nicht freigegeben“) – mit Sprung zu Einstellungen → Lokale KI.',
+  ] },
   { version: '1.32.3', date: '25.10.2026', items: [
     'Überarbeiten bei Shorts: Unter dem Wunschfeld stand „null“ – weg.',
   ] },

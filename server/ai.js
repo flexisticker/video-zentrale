@@ -26,7 +26,7 @@ const cfg = () => db().ai;
 
 export function status() {
   const c = cfg();
-  return { configured: !!c.apiKey, usable: canAsk('texte'), auto: c.auto, autoTips: c.autoTips !== false, qc: c.qc !== false, scout: c.scout !== false, cutEffort: cutEffort(), hints: c.hints, keyHint: c.apiKey ? '…' + c.apiKey.slice(-4) : '',
+  return { configured: !!c.apiKey, usable: canAsk('texte'), whyNot: canAsk('texte') ? '' : whyNot(), auto: c.auto, autoTips: c.autoTips !== false, qc: c.qc !== false, scout: c.scout !== false, cutEffort: cutEffort(), hints: c.hints, keyHint: c.apiKey ? '…' + c.apiKey.slice(-4) : '',
     spent: c.spent || 0, count: c.count || 0, blocked: claudeBlocked() };
 }
 
@@ -74,6 +74,16 @@ export function unblockClaude() { delete cfg().blocked; saveNow(); }
 const claudeUsable = () => !!cfg().apiKey && !claudeBlocked();
 // Läuft diese Aufgabe gerade zuerst lokal?
 const goesLocal = (task) => { const m = llm.modeOf(task); return llm.ready() && (m === 'lokal' || m === 'auto' || (m === 'claude' && !claudeUsable())); };
+// Warum geht gerade keine KI? (für den Hinweis im Video)
+function whyNot() {
+  const out = [];
+  if (!cfg().apiKey) out.push('kein Claude-Schlüssel');
+  else if (claudeBlocked()) out.push(claudeBlocked().until ? `Claude bis ${new Date(claudeBlocked().until).toLocaleString('de-DE', { timeZone: 'Europe/Berlin', dateStyle: 'short', timeStyle: 'short' })} Uhr gesperrt` : 'Claude gesperrt');
+  const L = llm.status();
+  if (!L.url) out.push('lokale KI: keine Server-Adresse eingetragen (z. B. http://192.168.1.10:11434)');
+  if (L.pc?.enabled && !L.pc.ready) out.push(L.pc.helperCan ? 'PC-Grafikkarte gerade nicht freigegeben' : 'PC: Ollama im Rechenhelfer noch nicht bereit');
+  return out.join(' · ');
+}
 export function canAsk(task) {
   const m = llm.modeOf(task);
   if (m === 'lokal') return llm.ready();

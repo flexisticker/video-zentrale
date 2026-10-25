@@ -1040,7 +1040,7 @@ function renderAi(box, v) {
     catch (x) { toast(x.message, true); }
   } }, a.titles ? '✨ Neuen Vorschlag holen' : '✨ KI-Vorschlag holen');
   const kids = [h('h3', {}, '✨ KI-Vorschlag')];
-  if (!conf) kids.push(h('div', { class: 'hint' }, 'Keine KI eingerichtet – ', h('a', { href: '#einstellungen' }, 'Einstellungen → Claude bzw. Lokale KI'), '.'));
+  if (!conf) kids.push(h('div', { class: 'hint' }, 'Gerade ist keine KI erreichbar' + (S.settings?.ai?.whyNot ? ': ' + S.settings.ai.whyNot : '') + ' – ', h('a', { href: '#einstellungen', onclick: () => setTimeout(() => document.getElementById('s-lokal')?.scrollIntoView({ behavior: 'smooth' }), 400) }, 'Einstellungen → Lokale KI'), '.'));
   if (a.state === 'queued' || a.state === 'running') kids.push(h('div', { class: 'status' }, 'Die KI schaut sich das Video an und schreibt … (mit Claude ca. 20–60 s, lokal evtl. einige Minuten)'));
   if (a.state === 'error') kids.push(h('div', { class: 'status err' }, a.error || 'Fehler'));
   if (a.titles?.length) {
