@@ -1,5 +1,12 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.35.0', date: '28.10.2026', items: [
+    '🍎 Oberfläche nach Apples Gestaltungsregeln (HIG) überarbeitet: lila/pinke Knöpfe, „Alle Kanäle“, YouTube-Knopf und 🔥-Abzeichen mit kräftigeren Farben, damit weiße Schrift gut lesbar ist (vorher teils nur 3:1, jetzt über 4,5:1).',
+    'PC: Name und „Hochladen“ stehen oben in einer Zeile, darunter alle Bereiche – jeder Bereich hat jetzt ein eigenes Zeichen wie unten am Handy.',
+    'Handy/Tablet: größere Tippflächen (Knöpfe 44 px, kleine Knöpfe und Auswahl-Chips 36 px, größere Häkchen), Eingabefelder mit deutlicherem Rand.',
+    'Esc schließt jetzt jedes Fenster (immer das oberste), mit der Tastatur sieht man, wo man gerade ist; Bildschirmleser lesen „Schließen“ statt „×“.',
+    'Wer am Gerät „Bewegung reduzieren“, „Transparenz reduzieren“ oder „Kontrast erhöhen“ eingeschaltet hat, bekommt das jetzt auch in der Zentrale.',
+  ] },
   { version: '1.34.0', date: '25.10.2026', items: [
     '🤖 Die KI entscheidet selbst, welche KI rechnet: je Aufgabe die günstigste, die gut genug ist – lokal (kostenlos) für Einfaches, Gemini Flash über dein fal-Guthaben für Clips, Titel und Prüfung, Claude nur wenn nötig. Alle Aufgaben stehen jetzt auf „🤖 Automatisch“ (änderbar unter Einstellungen → Lokale KI).',
     '☁️ Neuer Kasten „KI-Anbieter“: fal.ai (Gemini Flash, ist schon an), Google Gemini direkt, DeepSeek, eigene Adresse (z. B. OmniRoute) – mit Preisen, Qualitätsstufe, Bildverständnis, Testknopf und Monatsbudget je Anbieter (auch für Claude).',

@@ -8,13 +8,13 @@ const TABS = [
   ['posten', '📱 Zum Posten'],
   ['coach', '💡 Coach'],
   ['zahlen', '📈 Zahlen'],
-  ['geschnitten', 'Zur Freigabe'],
-  ['eingang', 'Eingang (roh)'],
-  ['hochgeladen', 'Hochgeladen'],
-  ['rohvideos', 'Rohvideos'],
+  ['geschnitten', '✅ Zur Freigabe'],
+  ['eingang', '📥 Eingang (roh)'],
+  ['hochgeladen', '📦 Hochgeladen'],
+  ['rohvideos', '🎞 Rohvideos'],
   ['bibliothek', '📚 Bibliothek'],
   ['papierkorb', '🗑 Papierkorb'],
-  ['einstellungen', 'Einstellungen'],
+  ['einstellungen', '⚙ Einstellungen'],
 ];
 
 const INBOXES = ['eingang', 'eingang-profi'];
@@ -26,12 +26,31 @@ const S = { videos: [], busy: false, tab: 'geschnitten', search: '', channel: ''
 try { S.channel = localStorage.getItem('vz-channel') || ''; } catch { /* egal */ }
 const app = document.getElementById('app');
 
+// Fenster (.modal): Esc schließt das oberste, Tastaturfokus wandert hinein und danach zurück
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || document.querySelector('.modal input:focus, .modal textarea:focus, .modal select:focus')) return;
+  const top = [...document.querySelectorAll('.modal')].pop();
+  if (top && !top.dataset.ownEsc) top.querySelector(':scope > .sheet > .close')?.click();
+});
+const modalFocus = new WeakMap();
+new MutationObserver((list) => {
+  for (const m of list) {
+    for (const n of m.addedNodes) if (n.classList?.contains('modal')) { modalFocus.set(n, document.activeElement); n.querySelector(':scope > .sheet > .close')?.focus({ preventScroll: true }); }
+    for (const n of m.removedNodes) if (n.classList?.contains('modal')) { const back = modalFocus.get(n); if (back?.isConnected) back.focus({ preventScroll: true }); }
+  }
+}).observe(document.body, { childList: true });
+
 // ---------- Hilfen ----------
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v == null || v === false) continue;
-    if (k === 'class') el.className = v;
+    if (k === 'class') {
+      el.className = v;
+      // Bildschirmleser: Fenster als Dialog, „×“ als „Schließen“ vorlesen
+      if (/(^| )modal( |$)/.test(v)) { el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); }
+      if (v === 'close' && !attrs['aria-label']) el.setAttribute('aria-label', attrs.title || 'Schließen');
+    }
     else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
     else if (k === 'style') Object.assign(el.style, v);
     else if (k === 'value') el.value = v;
@@ -281,7 +300,7 @@ function render() {
       h('div', { class: 'brand' }, h('img', { src: 'icon.svg', alt: '' }), h('span', { class: 'bname' }, APP_NAME)),
       tabs, h('div', { class: 'spacer' }),
       versionChip(),
-      h('button', { class: 'btn upl-btn', onclick: () => fileInput.click(), title: 'Videos, Titelbilder oder .json hochladen' }, '⤒', h('span', { class: 'lbl' }, ' Hochladen')), fileInput),
+      h('button', { class: 'btn upl-btn', onclick: () => fileInput.click(), title: 'Videos, Titelbilder oder .json hochladen', 'aria-label': 'Hochladen' }, '⤒', h('span', { class: 'lbl' }, ' Hochladen')), fileInput),
     activityBar(), mainEl, bottom);
   updateCounts();
   renderMain();
@@ -729,7 +748,9 @@ function openDetail(id) {
       folderEl, workBox,
       h('div', { class: 'detail' }, left, right)));
   document.body.append(modal);
-  const onKey = (e) => { if (e.key === 'Escape' && !document.querySelector('.modal input:focus, .modal textarea:focus')) close(); };
+  // Esc schließt die Videoansicht nur, wenn kein anderes Fenster darüber liegt (das schließt der allgemeine Esc-Griff)
+  modal.dataset.ownEsc = '1';
+  const onKey = (e) => { if (e.key === 'Escape' && [...document.querySelectorAll('.modal')].pop() === modal && !document.querySelector('.modal input:focus, .modal textarea:focus')) close(); };
   document.addEventListener('keydown', onKey);
   const setField = (k, val) => { f[k].value = val; f[k].dispatchEvent(new Event('input')); };
   const setCoverFromFrame = async (n) => {

@@ -456,6 +456,12 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   - Routen `GET/POST /api/cloud`, `POST /api/cloud/test {id}`; UI Kasten „☁️ KI-Anbieter & automatische Wahl“ (`#s-cloud`). Info-Seite nennt fal/OpenRouter/Gemini.
   - Getestet (Skript + Playwright): texte/pruefung → fal mit Bild, themen → lokal, schnitt → fal; 402 → Sperre, lokal übernimmt; kein json_schema → json_object; Einstellungen 1300/390 px.
     **Nicht getestet:** echtes fal-OpenRouter (Modell-ID, `strict`-Schema mit Gemini, Kosten-Feld), Google/DeepSeek echt, Qualität von Gemini bei der Clip-Auswahl.
+- 1.35.0 (28.10.2026): **Design-Prüfung nach Apple HIG** (Skill `dickwu/apple-design-skill`, Kunde wollte „drüber gehen“). Bewusst **nur dunkel** (HIG dark-mode.md erlaubt
+  das für Medien-Apps). `--accent` #6e4cff / `--accent2` #d92f6a / `--yt` #e0302f / Viral-hot #d93a2b (weiße Schrift ≥ 4,5:1), `--field` Eingabe-Rand, `--focus`.
+  PC ≥ 901 px: `.tabs` mit `order` in eigener zweiter Zeile; alle TABS mit Zeichen. `(pointer: coarse)` 44/36 px Tippflächen. `prefers-reduced-motion`,
+  `prefers-reduced-transparency`, `prefers-contrast: more`, `:focus-visible`. `h()`: `.modal` → role=dialog/aria-modal, `.close` → aria-label. Globaler Esc schließt
+  das oberste Fenster (Videoansicht `data-own-esc`), MutationObserver setzt Fokus auf „×“ und zurück. Offen (nur vorgeschlagen): Reiter-Reihenfolge nach Arbeitsablauf,
+  Aktivitätsleiste im Leerlauf ausblenden.
 - Ideen danach: „Best of der Woche“ automatisch (Zeitplan), Platz-Einblendungen „Platz 3/2/1“.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
   Sendeplätze je Kanal **stellt der Kunde selbst ein** (keine festen Startzeiten), „Einplanen“ auf nächsten freien Platz, Shorts

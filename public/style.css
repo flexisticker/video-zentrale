@@ -1,7 +1,7 @@
 :root {
   --bg: #0e0f14; --panel: #171922; --panel2: #1f2230; --line: #2b2f40; --text: #e9ebf3; --muted: #9aa0b5;
-  --accent: #7c5cff; --accent2: #ff4f8b; --ok: #2fbf71; --warn: #f2b33d; --bad: #ff5d5d;
-  --yt: #ff3d3d; --tt: #25f4ee; --radius: 12px;
+  --accent: #6e4cff; --accent2: #d92f6a; --ok: #2fbf71; --warn: #f2b33d; --bad: #ff5d5d;
+  --yt: #e0302f; --field: #454b63; --focus: #b7a8ff; --tt: #25f4ee; --radius: 12px;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -21,7 +21,7 @@ button { cursor: pointer; }
 .tab:hover { background: var(--panel); color: var(--text); }
 .tab.on { background: var(--panel2); color: var(--text); }
 .count { background: var(--line); border-radius: 99px; padding: 0 7px; font-size: 12px; }
-.tab.on .count { background: var(--accent); }
+.tab.on .count { background: var(--accent); color: #fff; }
 .top .spacer { flex: 1; }
 
 .btn { border: 1px solid var(--line); background: var(--panel2); padding: 8px 14px; border-radius: 9px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
@@ -39,7 +39,7 @@ main { padding: 20px; max-width: 1500px; margin: 0 auto; }
 .bar input[type=search] { flex: 1; min-width: 180px; max-width: 360px; }
 .hint { color: var(--muted); font-size: 13px; }
 
-input, textarea, select { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%; }
+input, textarea, select { background: var(--bg); border: 1px solid var(--field); border-radius: 8px; padding: 8px 10px; width: 100%; }
 textarea { resize: vertical; min-height: 80px; }
 input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
 label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
@@ -215,7 +215,7 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .cutplan { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
 .cutplan textarea { width: 100%; }
 
-input[type=range] { width: 100%; accent-color: #7c5cff; }
+input[type=range] { width: 100%; accent-color: var(--accent); }
 
 /* Zum Posten (Handy) */
 .posting { max-width: 680px; margin: 0 auto; display: grid; gap: 14px; }
@@ -241,7 +241,7 @@ input[type=range] { width: 100%; accent-color: #7c5cff; }
 .disc { display: grid; gap: 6px; padding: 8px 0 0 26px; }
 
 /* Viral-Potenzial */
-.chip.viral.hot { background: #ff4f3b; border-color: #ff4f3b; color: #fff; }
+.chip.viral.hot { background: #d93a2b; border-color: #d93a2b; color: #fff; }
 .chip.viral.warm { background: #f2b33d; border-color: #f2b33d; color: #1a1a1a; }
 .chip.viral.cool { color: var(--muted); }
 .chip.viral.big { font-size: 15px; padding: 3px 10px; }
@@ -254,7 +254,14 @@ input[type=range] { width: 100%; accent-color: #7c5cff; }
 
 /* ---------- Handy & Tablet ---------- */
 .bottomnav { display: none; }
-@media (pointer: coarse) { .btn { min-height: 40px; } .btn.small { min-height: 34px; } input, select, textarea { font-size: 16px; } }
+@media (pointer: coarse) {
+  /* Tippflächen nach Apple HIG: Standard 44 × 44, mindestens 28 × 28 */
+  .btn, .close, .tab { min-height: 44px; } .btn.small, .chip-btn, .vchip, select.small { min-height: 36px; }
+  .close { min-width: 44px; } .chip-btn { padding: 6px 12px; font-size: 13px; }
+  input, select, textarea { font-size: 16px; } input:not([type=range]):not([type=checkbox]):not([type=radio]):not([type=color]) { min-height: 44px; }
+  input[type=checkbox], input[type=radio] { width: 22px; height: 22px; flex: none; }
+  .check { min-height: 44px; margin-top: 4px; }
+}
 @media (max-width: 900px) {
   .top .tabs { display: none; }
   .bottomnav { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--panel); border-top: 1px solid var(--line);
@@ -262,7 +269,7 @@ input[type=range] { width: 100%; accent-color: #7c5cff; }
   .bn { flex: 1; background: none; border: 0; color: var(--muted); display: grid; justify-items: center; gap: 1px; font-size: 11px; padding: 6px 2px; border-radius: 10px; }
   .bn .bi { font-size: 21px; position: relative; line-height: 1.1; }
   .bn.on { color: var(--text); background: var(--panel2); }
-  .bcount { position: absolute; top: -4px; right: -12px; background: var(--accent); color: #fff; font-size: 10px; border-radius: 999px; padding: 0 5px; min-width: 16px; text-align: center; }
+  .bcount { position: absolute; top: -4px; right: -12px; background: var(--accent); color: #fff; font-size: 11px; border-radius: 999px; padding: 0 5px; min-width: 16px; text-align: center; }
   .bcount:empty { display: none; }
   main { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
   .upl-btn .lbl { display: none; }
@@ -374,7 +381,7 @@ a.statrow:hover { outline: 1px solid var(--line, rgba(255,255,255,.15)); }
 .stylethumb { width: 100%; aspect-ratio: 9 / 16; border-radius: 8px; background: #111 center / cover no-repeat; overflow: hidden; }
 .stylethumb video { width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .2s; }
 .stylethumb video.on { opacity: 1; }
-.stylecard .hint { font-size: 11px; }
+.stylecard .hint { font-size: 12px; }
 .chip-btn.on { border-color: var(--accent, #7c5cff); background: color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent); }
 .mirrorbox { margin-top: 8px; }
 @media (max-width: 600px) { .stylegrid { grid-template-columns: repeat(2, 1fr); } }
@@ -415,3 +422,27 @@ a.statrow:hover { outline: 1px solid var(--line, rgba(255,255,255,.15)); }
 .cloudlist { display: grid; gap: 8px; margin: 10px 0; }
 .cloudrow { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; min-width: 0; }
 .cloudrow > summary { cursor: pointer; overflow-wrap: anywhere; }
+
+/* ---------- Feinschliff nach Apple HIG (1.35.0) ---------- */
+/* Tastatur: sichtbarer Fokus überall, wo man klicken kann */
+:where(button, a, summary, [tabindex]):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.card:focus-visible { outline-offset: 3px; }
+::placeholder { color: #8a90a5; opacity: 1; }
+/* PC: erste Zeile Name + Aktionen, zweite Zeile die Bereiche – nichts rutscht mehr unter die Reiter */
+@media (min-width: 901px) {
+  .top { row-gap: 6px; padding-bottom: 6px; }
+  .top .tabs { order: 10; flex: 1 1 100%; gap: 2px; margin: 0 -10px; }
+  .top .tab { padding: 8px 10px; }
+}
+/* Bewegung reduzieren: Pulsieren, Schweben und Überblendungen aus */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+  .card:hover { transform: none; }
+}
+/* Transparenz reduzieren: Kopfzeile deckend */
+@media (prefers-reduced-transparency: reduce) { .top { background: var(--bg); backdrop-filter: none; } .modal { background: rgba(0, 0, 0, .9); } }
+/* Kontrast erhöhen */
+@media (prefers-contrast: more) {
+  :root { --muted: #c9cede; --line: #5a6180; --field: #7a82a3; --text: #ffffff; }
+  .chip, .count { color: var(--text); }
+}
