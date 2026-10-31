@@ -462,6 +462,9 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   `prefers-reduced-transparency`, `prefers-contrast: more`, `:focus-visible`. `h()`: `.modal` → role=dialog/aria-modal, `.close` → aria-label. Globaler Esc schließt
   das oberste Fenster (Videoansicht `data-own-esc`), MutationObserver setzt Fokus auf „×“ und zurück. Offen (nur vorgeschlagen): Reiter-Reihenfolge nach Arbeitsablauf,
   Aktivitätsleiste im Leerlauf ausblenden.
+- **TikTok-Prüfung abgelehnt (31.10.2026):** App-Icon (lila/pink Verlauf + Play-Dreieck) „zu leicht mit bekannter Marke verwechselbar“ und
+  **„Apps für persönliche oder firmeninterne Nutzung werden nicht freigegeben“** → Production-Freigabe für die Zentrale praktisch ausgeschlossen
+  (nicht als öffentliches Produkt ausgeben!). Weiterbetrieb in der **Sandbox**: Inbox-Upload (Posteingang) für die Target Users funktioniert, `tiktok.directPost` aus lassen.
 - Ideen danach: „Best of der Woche“ automatisch (Zeitplan), Platz-Einblendungen „Platz 3/2/1“.
 - **Offen – Planungstool (angeboten, wartet auf „leg los“):** Reiter „Planung“ mit Wochen-/Monatskalender, Drag & Drop,
   Sendeplätze je Kanal **stellt der Kunde selbst ein** (keine festen Startzeiten), „Einplanen“ auf nächsten freien Platz, Shorts
