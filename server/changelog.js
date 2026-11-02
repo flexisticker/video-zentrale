@@ -1,5 +1,8 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.35.1', date: '02.11.2026', items: [
+    '🛠️ Fehler „Error reinitializing filters! Failed to inject frame into filter network“ beim Schnitt behoben: Ändert sich mitten im Video das Format (bei Twitch-Aufnahmen z. B. Auflösung oder Tonformat), bringt die Zentrale die Quelle jetzt einmal auf einheitliche Werte und schneidet damit weiter. Das dauert bei langen Aufnahmen etwas länger, klappt aber; beim nächsten Schnitt desselben Videos geht sie gleich diesen Weg.',
+  ] },
   { version: '1.35.0', date: '28.10.2026', items: [
     '🍎 Oberfläche nach Apples Gestaltungsregeln (HIG) überarbeitet: lila/pinke Knöpfe, „Alle Kanäle“, YouTube-Knopf und 🔥-Abzeichen mit kräftigeren Farben, damit weiße Schrift gut lesbar ist (vorher teils nur 3:1, jetzt über 4,5:1).',
     'PC: Name und „Hochladen“ stehen oben in einer Zeile, darunter alle Bereiche – jeder Bereich hat jetzt ein eigenes Zeichen wie unten am Handy.',

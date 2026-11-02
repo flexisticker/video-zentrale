@@ -223,8 +223,66 @@ function probeFps(file) {
   });
 }
 
+// ---------- Quelle mit wechselndem Format (z. B. Twitch-VOD: Auflösung/Tonformat ändert sich mitten im Stream) ----------
+// ffmpeg (Debian-Version im Container) kann einen verketteten Filter-Graphen dann nicht neu aufbauen:
+// „Error reinitializing filters! Failed to inject frame into filter network: Invalid argument“.
+// Ausweg: Quelle einmal auf feste Werte bringen (gleiche Größe, 48 kHz Stereo, alle Tonspuren) und den Schnitt damit wiederholen.
+const UNSTABLE = /reinitializing filters|inject frame into filter|frame properties on the fly|Input stream #\d+:\d+ frame changed/i;
+const stableBusy = new Map();
+
+function probeSize(file) {
+  return new Promise((resolve) => {
+    let out = '';
+    const p = spawn('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', file], { stdio: ['ignore', 'pipe', 'ignore'] });
+    p.stdout.on('data', (d) => { out += d; });
+    p.on('error', () => resolve(null));
+    p.on('close', () => { const [w, h] = out.trim().split(',').map(Number); resolve(w > 0 && h > 0 ? { w, h } : null); });
+  });
+}
+
+async function stableSource(v, file, onP) {
+  const out = path.join(TMP, `${v.id}-quelle.mkv`);
+  if (fs.existsSync(out) && fs.statSync(out).mtimeMs >= fs.statSync(file).mtimeMs) return out;
+  if (stableBusy.has(out)) return stableBusy.get(out);
+  const job = (async () => {
+    fs.mkdirSync(TMP, { recursive: true });
+    // alte Zwischendateien (> 12 Std.) wegräumen – die sind groß
+    for (const f of fs.readdirSync(TMP)) if (f.endsWith('-quelle.mkv')) { try { const st = fs.statSync(path.join(TMP, f)); if (Date.now() - st.mtimeMs > 12 * 3600e3) fs.rmSync(path.join(TMP, f), { force: true }); } catch { /* egal */ } }
+    const size = (v.width && v.height ? { w: v.width, h: v.height } : await probeSize(file)) || { w: 1920, h: 1080 };
+    const W = Math.round(size.w / 2) * 2, H = Math.round(size.h / 2) * 2;
+    const total = Number(v.duration) || 0;
+    const part = out + '.part.mkv';
+    const r = await gpu.encodeWithFallback((venc) => ffmpeg(['-i', file, '-map', '0:v:0', '-map', '0:a?',
+      '-vf', `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:-1:-1,setsar=1,format=yuv420p`,
+      '-af', 'aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo', '-c:a', 'flac', ...venc,
+      '-progress', 'pipe:1', '-y', part], progressFrom(total, (p) => onP && onP(p))), { hq: true });
+    if (r.code !== 0) { fs.rmSync(part, { force: true }); throw new Error('Quelle vereinheitlichen: ' + lastError(r)); }
+    fs.renameSync(part, out);
+    console.log(`[schnitt] ${v.id}: Quelle hatte wechselndes Format – vereinheitlicht (${W}×${H}, 48 kHz)`);
+    return out;
+  })();
+  stableBusy.set(out, job);
+  try { return await job; } finally { stableBusy.delete(out); }
+}
+
+// Rendern; scheitert ffmpeg am wechselnden Format, einmal mit der vereinheitlichten Quelle wiederholen (und es sich merken)
+async function withStableSource(v, file, onP, run) {
+  if (v.unstableSource && !file.endsWith('-quelle.mkv')) {
+    try { file = await stableSource(v, file, onP); } catch (e) { console.warn('[schnitt]', e.message); }
+  }
+  try { return await run(file); }
+  catch (e) {
+    if (!UNSTABLE.test(e.message) || file.endsWith('-quelle.mkv')) throw e;
+    v.unstableSource = true; save();
+    return run(await stableSource(v, file, onP));
+  }
+}
+const renderLong = (v, file, keep, hasAudio, out, onP, ...rest) => withStableSource(v, file, onP, (f) => renderLongRaw(v, f, keep, hasAudio, out, onP, ...rest));
+const renderShort = (v, file, s, hasAudio, out, onP, ...rest) => withStableSource(v, file, onP, (f) => renderShortRaw(v, f, s, hasAudio, out, onP, ...rest));
+const renderSummary = (v, file, reel, hasAudio, out, onP, ...rest) => withStableSource(v, file, onP, (f) => renderSummaryRaw(v, f, reel, hasAudio, out, onP, ...rest));
+
 // teaser = { at, len, text }: Höhepunkt vorweg (aus der Überarbeitung), danach die Langfassung
-async function renderLong(v, file, keep, hasAudio, out, onP, track, teaser = null) {
+async function renderLongRaw(v, file, keep, hasAudio, out, onP, track, teaser = null) {
   const main = keep.reduce((s, [a, b]) => s + b - a, 0);
   const total = main + (teaser ? teaser.len : 0);
   const mInput = track ? ['-stream_loop', '-1', '-i', track.file] : [];
@@ -359,7 +417,7 @@ function camSwitchExpr(parts, at) {
 
 // Short im Hochformat: Bildmitte oder Facecam oben + Spiel unten, animierte Untertitel, Grafikkarte wenn vorhanden.
 // s.parts = Abschnitte der Quelle (Hook-Vorschau, Zurückspulen, Tempo-Schnitte – siehe cutfx.js); ohne parts am Stück.
-async function renderShort(v, file, s, hasAudio, out, onP, words, track, pro = false) {
+async function renderShortRaw(v, file, s, hasAudio, out, onP, words, track, pro = false) {
   const c = cfg();
   const vertical = v.height > v.width;
   const parts = s.parts?.length ? s.parts : [{ a: s.start, b: s.end }];
@@ -518,7 +576,7 @@ export function setPlan(v, b = {}) {
 }
 
 // Kurzfassung: Stellen hintereinander, neu kodiert (Ton je Stelle kurz ein-/ausgeblendet gegen Knackser)
-async function renderSummary(v, file, reel, hasAudio, out, onP, track, teaserText = '', teaserLen = 0) {
+async function renderSummaryRaw(v, file, reel, hasAudio, out, onP, track, teaserText = '', teaserLen = 0) {
   const total = reel.reduce((x, r) => x + r.end - r.start, 0);
   fs.mkdirSync(TMP, { recursive: true });
   // Jeder Baustein als eigene Eingabe (-ss/-t): früher lief die ganze Aufnahme durch alle trim-Filter – lagen die Bausteine

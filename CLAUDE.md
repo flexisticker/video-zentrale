@@ -462,6 +462,11 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   `prefers-reduced-transparency`, `prefers-contrast: more`, `:focus-visible`. `h()`: `.modal` → role=dialog/aria-modal, `.close` → aria-label. Globaler Esc schließt
   das oberste Fenster (Videoansicht `data-own-esc`), MutationObserver setzt Fokus auf „×“ und zurück. Offen (nur vorgeschlagen): Reiter-Reihenfolge nach Arbeitsablauf,
   Aktivitätsleiste im Leerlauf ausblenden.
+- 1.35.1 (02.11.2026): Kunde: Langfassung „Error reinitializing filters! Failed to inject frame into filter network: Invalid argument“. Ursache: Quelle ändert
+  mitten drin Auflösung/Tonformat (Twitch-VOD), ffmpeg im Container (Debian bookworm = 5.1) baut den verketteten Filter-Graphen dann nicht neu auf (lokal mit 6.1
+  nicht nachstellbar). `renderLong/Short/Summary` = Hüllen um `…Raw` mit `withStableSource()`: bei diesem Fehler (`UNSTABLE`) einmal `stableSource()` →
+  `/data/tmp/<id>-quelle.mkv` (feste Größe + pad, yuv420p, alle Tonspuren 48 kHz Stereo FLAC, NVENC hq) und neu rendern; `v.unstableSource` → beim nächsten Mal sofort.
+  Zwischendatei wird nach dem Schnitt bzw. nach 12 Std. gelöscht. **Nicht getestet:** mit echtem 5.1 (Fehler selbst nicht nachgestellt), Laufzeit bei mehrstündigen VODs.
 - **TikTok-Prüfung abgelehnt (31.10.2026):** App-Icon (lila/pink Verlauf + Play-Dreieck) „zu leicht mit bekannter Marke verwechselbar“ und
   **„Apps für persönliche oder firmeninterne Nutzung werden nicht freigegeben“** → Production-Freigabe für die Zentrale praktisch ausgeschlossen
   (nicht als öffentliches Produkt ausgeben!). Weiterbetrieb in der **Sandbox**: Inbox-Upload (Posteingang) für die Target Users funktioniert, `tiktok.directPost` aus lassen.
