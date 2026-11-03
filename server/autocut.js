@@ -3,7 +3,7 @@
 // → schneiden (ffmpeg, niedrige Priorität). Alles läuft nacheinander, damit der Server nicht ausgelastet wird.
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { db, save, saveNow, DATA_DIR } from './store.js';
 import * as lib from './library.js';
 import * as whisper from './whisper.js';
@@ -94,20 +94,37 @@ export function configure(b) {
 // ---------- Hilfen ----------
 function ffmpeg(args, onLine) {
   return new Promise((resolve) => {
-    let err = '';
+    let err = '', log = '', head = '';
     const p = spawn('nice', ['-n', '15', 'ffmpeg', '-hide_banner', '-nostdin', ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
     const feed = (d) => { const s = d.toString(); err = (err + s).slice(-6000); if (onLine) for (const l of s.split(/\r?\n/)) onLine(l); };
-    p.stdout.on('data', feed); p.stderr.on('data', feed);
-    p.on('error', (e) => resolve({ code: -1, err: e.message }));
-    p.on('close', (code) => resolve({ code, err }));
+    // Fehlerausgabe getrennt sammeln (Anfang + Ende), damit die eigentliche Ursache nicht im Fortschritt untergeht
+    const feedErr = (d) => { feed(d); const s = d.toString(); if (head.length < 4000) head += s; log = (log + s).slice(-16000); };
+    p.stdout.on('data', feed); p.stderr.on('data', feedErr);
+    p.on('error', (e) => resolve({ code: -1, err: e.message, log: e.message, args }));
+    p.on('close', (code) => resolve({ code, err, log: head.length < 4000 || log.startsWith(head) ? log : head.slice(0, 4000) + '\n…\n' + log, args }));
   });
 }
 const lastError = (r) => {
-  const lines = r.err.trim().split('\n').filter((l) => !/^\s*(frame=|size=|out_time|progress=|speed=|bitrate=|total_size|dup_frames|drop_frames|stream_)/.test(l));
+  const lines = (r.log || r.err).trim().split('\n').filter((l) => !/^\s*(frame=|size=|out_time|progress=|speed=|bitrate=|total_size|dup_frames|drop_frames|stream_)/.test(l));
   // die eigentliche Ursache steht meist vor „Conversion failed“ / „Error while processing …“
   const cause = lines.filter((l) => !/Conversion failed|Error while processing the decoded data|Error while filtering|Terminating thread|Nothing was written/i.test(l)).slice(-2);
   return [...cause, ...lines.slice(-1)].filter((l, i, a) => a.indexOf(l) === i).join(' ').slice(0, 600);
 };
+
+// Fehlgeschlagenen ffmpeg-Aufruf vollständig festhalten: /data/logs/schnitt-fehler-<id>.txt + Container-Protokoll
+let ffVersion = '';
+function keepLog(v, what, r, graph = '') {
+  try {
+    if (!ffVersion) { try { ffVersion = String(execFileSync('ffmpeg', ['-version'])).split('\n')[0]; } catch { ffVersion = '?'; } }
+    const dir = path.join(DATA_DIR, 'logs');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `schnitt-fehler-${v.id}.txt`);
+    const text = [`${new Date().toISOString()} ${what} – ${v.file || v.id}`, ffVersion, 'ffmpeg ' + (r.args || []).join(' '), '', '--- Filter ---', graph, '', '--- Ausgabe ---', r.log || r.err || ''].join('\n');
+    fs.writeFileSync(file, text.slice(0, 200000));
+    const tail = (r.log || r.err || '').trim().split('\n').filter((l) => !/^\s*(frame=|size=|out_time|progress=|speed=|bitrate=|total_size|dup_frames|drop_frames|stream_)/.test(l)).slice(-40).join('\n');
+    console.error(`[schnitt] ${what} fehlgeschlagen (${ffVersion}) – ${v.id}, ganzes Protokoll: ${file}\n${tail}`);
+  } catch (e) { console.error('[schnitt] Protokoll:', e.message); }
+}
 
 function progressFrom(total, cb) {
   return (l) => { const m = /out_time_(?:ms|us)=(\d+)/.exec(l); if (m && total > 0) cb(Math.min(100, Number(m[1]) / 1e6 / total * 100)); };
@@ -256,7 +273,7 @@ async function stableSource(v, file, onP) {
       '-vf', `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:-1:-1,setsar=1,format=yuv420p`,
       '-af', 'aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo', '-c:a', 'flac', ...venc,
       '-progress', 'pipe:1', '-y', part], progressFrom(total, (p) => onP && onP(p))), { hq: true });
-    if (r.code !== 0) { fs.rmSync(part, { force: true }); throw new Error('Quelle vereinheitlichen: ' + lastError(r)); }
+    if (r.code !== 0) { fs.rmSync(part, { force: true }); keepLog(v, 'Quelle vereinheitlichen', r); throw new Error('Quelle vereinheitlichen: ' + lastError(r)); }
     fs.renameSync(part, out);
     console.log(`[schnitt] ${v.id}: Quelle hatte wechselndes Format – vereinheitlicht (${W}×${H}, 48 kHz)`);
     return out;
@@ -277,18 +294,18 @@ async function withStableSource(v, file, onP, run) {
     return run(await stableSource(v, file, onP));
   }
 }
-const renderLong = (v, file, keep, hasAudio, out, onP, ...rest) => withStableSource(v, file, onP, (f) => renderLongRaw(v, f, keep, hasAudio, out, onP, ...rest));
+const renderLong = (v, file, keep, hasAudio, out, onP, ...rest) => renderLongRaw(v, file, keep, hasAudio, out, onP, ...rest);
 const renderShort = (v, file, s, hasAudio, out, onP, ...rest) => withStableSource(v, file, onP, (f) => renderShortRaw(v, f, s, hasAudio, out, onP, ...rest));
 const renderSummary = (v, file, reel, hasAudio, out, onP, ...rest) => withStableSource(v, file, onP, (f) => renderSummaryRaw(v, f, reel, hasAudio, out, onP, ...rest));
 
 // teaser = { at, len, text }: Höhepunkt vorweg (aus der Überarbeitung), danach die Langfassung
-async function renderLongRaw(v, file, keep, hasAudio, out, onP, track, teaser = null) {
+async function renderLongRaw(v, file, keep, hasAudio, out, onP, track, teaser = null, forceCopy = false) {
   const main = keep.reduce((s, [a, b]) => s + b - a, 0);
   const total = main + (teaser ? teaser.len : 0);
   const mInput = track ? ['-stream_loop', '-1', '-i', track.file] : [];
   const whole = keep.length === 1 && keep[0][0] === 0;
   // Schnell ohne Neukodieren nur, wenn nichts geschnitten wird oder ausdrücklich gewünscht (setzt an Keyframes an → kann ruckeln)
-  if (!teaser && !v.mirror && (whole || cfg().longCopy)) {
+  if (!teaser && !v.mirror && (whole || cfg().longCopy || forceCopy)) {
     const audio = track ? ['-filter_complex', music.mixGraph({ hasVoice: hasAudio, dur: total, track }), '-map', '[aout]', '-c:a', 'aac', '-b:a', '192k', '-t', total.toFixed(2)]
       : hasAudio ? ['-map', '0:a:0', '-af', LOUDNORM, '-c:a', 'aac', '-b:a', '192k'] : [];
     let args;
@@ -300,8 +317,8 @@ async function renderLongRaw(v, file, keep, hasAudio, out, onP, track, teaser = 
     }
     const r = await ffmpeg([...args, '-movflags', '+faststart', '-progress', 'pipe:1', '-y', out], progressFrom(total, onP));
     fs.rmSync(path.join(TMP, v.id + '-schnitt.txt'), { force: true });
-    if (r.code !== 0) throw new Error('Langfassung: ' + lastError(r));
-    return;
+    if (r.code !== 0) { keepLog(v, 'Langfassung (einfach)', r); throw new Error('Langfassung: ' + lastError(r)); }
+    return forceCopy ? 'copy' : 'ok';
   }
   // Bildgenau und flüssig: gleichmäßige Bildrate, behaltene Abschnitte auswählen, Zeitstempel neu, Grafikkarte wenn möglich
   const fps = await probeFps(file);
@@ -332,7 +349,17 @@ async function renderLongRaw(v, file, keep, hasAudio, out, onP, track, teaser = 
     '-t', total.toFixed(2), '-movflags', '+faststart', '-progress', 'pipe:1', '-y', out], progressFrom(total, onP)));
   fs.rmSync(script, { force: true });
   fs.rmSync(path.join(TMP, v.id + '-teaser.ass'), { force: true });
-  if (r.code !== 0) throw new Error('Langfassung: ' + lastError(r));
+  if (r.code !== 0) {
+    keepLog(v, 'Langfassung', r, g);
+    // Ausweg: Abschnitte ohne Neukodieren des Bildes aneinanderhängen (wie bis 1.13) – klappt mit jeder ffmpeg-Version,
+    // setzt aber an Keyframes an (kann an Schnitten kurz ruckeln). Mit Teaser/Spiegeln geht das nicht.
+    if (!teaser && !v.mirror && !forceCopy) {
+      console.warn(`[schnitt] ${v.id}: Langfassung im einfachen Verfahren (ohne Neukodieren) wiederholen`);
+      return renderLongRaw(v, file, keep, hasAudio, out, onP, track, null, true);
+    }
+    throw new Error('Langfassung: ' + lastError(r));
+  }
+  return 'ok';
 }
 
 // Text-Vorlage eines Shorts: feste Kanal-Vorgabe › Claudes Wahl › Standard. LinkedIn bleibt ruhig.
@@ -545,6 +572,7 @@ async function renderShortRaw(v, file, s, hasAudio, out, onP, words, track, pro 
   const r = await gpu.encodeWithFallback((venc) => ffmpeg([...cg.inputs, ...mInput, ...extraIn,
     '-filter_complex_script', script, '-map', '[v]', ...audio, ...venc, '-t', total.toFixed(3),
     '-movflags', '+faststart', '-progress', 'pipe:1', '-y', out], progressFrom(total, onP)), { hq: true });
+  if (r.code !== 0) keepLog(v, 'Short', r, graph);
   for (const f of tmpFiles) fs.rmSync(f, { force: true });
   if (r.code !== 0) throw new Error('Short: ' + lastError(r));
   return total;
@@ -606,7 +634,7 @@ async function renderSummaryRaw(v, file, reel, hasAudio, out, onP, track, teaser
     '-t', total.toFixed(2), '-movflags', '+faststart', '-progress', 'pipe:1', '-y', out], progressFrom(total, onP)));
   fs.rmSync(assFile, { force: true });
   fs.rmSync(script, { force: true });
-  if (r.code !== 0) throw new Error('Kurzfassung: ' + lastError(r));
+  if (r.code !== 0) { keepLog(v, 'Kurzfassung', r, g); throw new Error('Kurzfassung: ' + lastError(r)); }
 }
 
 // Render-Prüfung (qc.js) – Ergebnis am Video (v.qc), fließt in die automatische Überarbeitung
@@ -788,12 +816,14 @@ async function runCut(v) {
     const tmp = path.join(TMP, v.id + '-lang.mp4');
     const total = keep.reduce((s, [a, b]) => s + b - a, 0);
     const track = await getTrack('long', total, {}, 'Langfassung schneiden');
-    try { await renderLong(v, file, keep, hasAudio, tmp, (p) => step('Langfassung schneiden', (done + p / 100) / jobs * 100), track); }
+    let how;
+    try { how = await renderLong(v, file, keep, hasAudio, tmp, (p) => step('Langfassung schneiden', (done + p / 100) / jobs * 100), track); }
     catch (e) {
       if (!track) throw e;
       v.cut.warning = 'Mischen mit Musik ging nicht – Langfassung ohne Musik.';
-      await renderLong(v, file, keep, hasAudio, tmp, (p) => step('Langfassung schneiden', (done + p / 100) / jobs * 100), null);
+      how = await renderLong(v, file, keep, hasAudio, tmp, (p) => step('Langfassung schneiden', (done + p / 100) / jobs * 100), null);
     }
+    if (how === 'copy') v.cut.warning = 'Langfassung im einfachen Verfahren geschnitten (ohne Neukodieren, kann an Schnittstellen kurz ruckeln) – genaue Meldung im Protokoll schnitt-fehler.';
     const removed = Math.round(cut.reduce((s, [a, b]) => s + b - a, 0));
     const nv = publish(tmp, `${base} – Langfassung.mp4`, {
       source: { rawId: v.id, rawFile: v.file, kind: 'long', removed, keep: keep.map(([a, b]) => [Math.round(a * 10) / 10, Math.round(b * 10) / 10]) },

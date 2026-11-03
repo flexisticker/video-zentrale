@@ -463,10 +463,16 @@ selbst in YouTube Studio), TikTok = **Entwurf** im Posteingang (Kunde postet in 
   das oberste Fenster (Videoansicht `data-own-esc`), MutationObserver setzt Fokus auf „×“ und zurück. Offen (nur vorgeschlagen): Reiter-Reihenfolge nach Arbeitsablauf,
   Aktivitätsleiste im Leerlauf ausblenden.
 - 1.35.1 (02.11.2026): Kunde: Langfassung „Error reinitializing filters! Failed to inject frame into filter network: Invalid argument“. Ursache: Quelle ändert
-  mitten drin Auflösung/Tonformat (Twitch-VOD), ffmpeg im Container (Debian bookworm = 5.1) baut den verketteten Filter-Graphen dann nicht neu auf (lokal mit 6.1
-  nicht nachstellbar). `renderLong/Short/Summary` = Hüllen um `…Raw` mit `withStableSource()`: bei diesem Fehler (`UNSTABLE`) einmal `stableSource()` →
+  mitten drin Auflösung/Tonformat (Twitch-VOD), ffmpeg im Container baut den verketteten Filter-Graphen dann nicht neu auf (Vermutung, lokal mit 6.1
+  nicht nachstellbar; siehe 1.35.2 – war es nicht). `renderLong/Short/Summary` = Hüllen um `…Raw` mit `withStableSource()`: bei diesem Fehler (`UNSTABLE`) einmal `stableSource()` →
   `/data/tmp/<id>-quelle.mkv` (feste Größe + pad, yuv420p, alle Tonspuren 48 kHz Stereo FLAC, NVENC hq) und neu rendern; `v.unstableSource` → beim nächsten Mal sofort.
   Zwischendatei wird nach dem Schnitt bzw. nach 12 Std. gelöscht. **Nicht getestet:** mit echtem 5.1 (Fehler selbst nicht nachgestellt), Laufzeit bei mehrstündigen VODs.
+- 1.35.2 (03.11.2026): 1.35.1 half nicht (Fehler auch mit vereinheitlichter Quelle → keine Formatänderung, sondern Graph-Konfiguration schlägt fehl;
+  in ffmpeg 5.1/6.x meldet auch die **erste** Konfiguration „Error reinitializing filters!“). Ursache noch unbekannt (Container-ffmpeg-Version ungeprüft – Docker-Hub
+  im Sandbox-Limit, ghcr-Blobs gesperrt). Jetzt: `ffmpeg()` sammelt stderr getrennt (`r.log`, Anfang + Ende, `r.args`), `keepLog()` schreibt
+  `/data/logs/schnitt-fehler-<id>.txt` (ffmpeg-Version, Aufruf, Filter, Ausgabe) + 40 Zeilen ins Container-Log (Langfassung, Short, Kurzfassung, Vereinheitlichen).
+  Langfassung: bei Fehler im select-Graphen Rückfall auf den Kopier-Weg (`forceCopy`, concat-Demuxer, wie `longCopy`) mit Warnung; nicht bei Teaser/Spiegeln.
+  `renderLong` nicht mehr über `withStableSource` (Short/Kurzfassung weiter). Getestet mit Fake-ffmpeg (scheitert bei `-lang.filter`). **Offen:** Protokoll vom Kunden → echte Ursache.
 - **TikTok-Prüfung abgelehnt (31.10.2026):** App-Icon (lila/pink Verlauf + Play-Dreieck) „zu leicht mit bekannter Marke verwechselbar“ und
   **„Apps für persönliche oder firmeninterne Nutzung werden nicht freigegeben“** → Production-Freigabe für die Zentrale praktisch ausgeschlossen
   (nicht als öffentliches Produkt ausgeben!). Weiterbetrieb in der **Sandbox**: Inbox-Upload (Posteingang) für die Target Users funktioniert, `tiktok.directPost` aus lassen.

@@ -1,5 +1,9 @@
 // Was ist neu – neueste Version oben. Bei jeder Auslieferung ergänzen (und package.json-Version erhöhen).
 export const CHANGELOG = [
+  { version: '1.35.2', date: '03.11.2026', items: [
+    '🛠️ Langfassung: Scheitert der genaue Schnitt mit „Error reinitializing filters …“, schneidet die Zentrale die Langfassung jetzt im einfachen Verfahren (Abschnitte ohne Neukodieren aneinandergehängt) – du bekommst sie also trotzdem, danach laufen Shorts und Kurzfassung weiter. An den Schnittstellen kann es kurz ruckeln; ein Hinweis steht beim Rohvideo.',
+    '📝 Schlägt ein Schnitt fehl, schreibt die Zentrale die komplette ffmpeg-Meldung nach /data/logs/schnitt-fehler-<Video>.txt (auf Unraid: appdata/video-zentrale/logs) und ins Container-Protokoll – damit lässt sich die eigentliche Ursache finden.',
+  ] },
   { version: '1.35.1', date: '02.11.2026', items: [
     '🛠️ Fehler „Error reinitializing filters! Failed to inject frame into filter network“ beim Schnitt behoben: Ändert sich mitten im Video das Format (bei Twitch-Aufnahmen z. B. Auflösung oder Tonformat), bringt die Zentrale die Quelle jetzt einmal auf einheitliche Werte und schneidet damit weiter. Das dauert bei langen Aufnahmen etwas länger, klappt aber; beim nächsten Schnitt desselben Videos geht sie gleich diesen Weg.',
   ] },
